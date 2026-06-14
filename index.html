@@ -824,59 +824,118 @@ body.dark .card{background:#1a2d22}
 
 <!-- DASHBOARD ADMIN -->
 <div id="pg-dash" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:90;overflow-y:auto;padding:16px 14px 90px">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
     <button onclick="hideDash()" style="background:var(--g3);border:none;color:var(--g1);width:34px;height:34px;border-radius:9px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">‹</button>
-    <div style="font-size:15px;font-weight:700">📈 Dashboard Admin</div>
-    <button onclick="relDiario()" style="margin-left:auto;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">📤 Relatório Diário</button>
+    <div style="font-size:15px;font-weight:700">📊 Dashboard Admin</div>
+    <button onclick="syncGeral()" style="margin-left:auto;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
   </div>
 
-  <!-- Totais do dia -->
-  <div class="card">
-    <div class="ct">📅 Hoje</div>
-    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
-      <div style="background:var(--g3);border-radius:8px;padding:10px">
-        <div id="dash-hoje" style="font-size:26px;font-weight:800;color:var(--g1)">0</div>
-        <div style="font-size:10px;color:var(--ink2)">Pesagens</div>
+  <!-- Tabs -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px">
+    <button id="tab-exp" onclick="dashTab('exp')" style="padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:var(--g1);color:#fff">📤 Expedição</button>
+    <button id="tab-geral" onclick="dashTab('geral')" style="padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--brd);background:var(--bg);color:var(--ink3)">🌐 Consolidado</button>
+  </div>
+
+  <!-- ABA EXPEDIÇÃO (igual ao v1) -->
+  <div id="dash-aba-exp">
+    <div class="card">
+      <div class="ct">📅 Expedição hoje</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center">
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="dash-hoje" style="font-size:26px;font-weight:800;color:var(--g1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Pesagens</div>
+        </div>
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="dash-ag" style="font-size:26px;font-weight:800;color:var(--a1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Aguardando</div>
+        </div>
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="dash-carga" style="font-size:22px;font-weight:800;color:var(--g1)">0t</div>
+          <div style="font-size:10px;color:var(--ink2)">Carga Total</div>
+        </div>
       </div>
-      <div style="background:var(--g3);border-radius:8px;padding:10px">
-        <div id="dash-ag" style="font-size:26px;font-weight:800;color:var(--a1)">0</div>
-        <div style="font-size:10px;color:var(--ink2)">Aguardando</div>
+    </div>
+    <div class="card">
+      <div class="ct">📊 Últimos 7 dias — expedição</div>
+      <canvas id="dash-chart" height="140" style="width:100%;display:block"></canvas>
+    </div>
+    <div class="card">
+      <div class="ct">📄 Exportar por Contrato</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <select id="dash-sel-ct" style="flex:1;padding:10px;border:1.5px solid var(--brd);border-radius:9px;background:var(--card);color:var(--ink);font-size:13px;font-family:'Inter',sans-serif">
+          <option value="">Selecione um contrato...</option>
+        </select>
+        <button onclick="pdfContrato()" style="background:var(--g1);border:none;color:#fff;padding:10px 14px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">📄 PDF</button>
       </div>
-      <div style="background:var(--g3);border-radius:8px;padding:10px">
-        <div id="dash-carga" style="font-size:22px;font-weight:800;color:var(--g1)">0t</div>
-        <div style="font-size:10px;color:var(--ink2)">Carga Total</div>
-      </div>
+      <div id="dash-ct-info" style="margin-top:8px;font-size:11px;color:var(--ink3)"></div>
+    </div>
+    <div class="card">
+      <div class="ct">📋 Contratos — Saldo</div>
+      <div id="dash-contratos" style="font-size:12px"></div>
+    </div>
+    <div class="card">
+      <div class="ct">⚖️ Por Balança</div>
+      <div id="dash-balancas" style="font-size:12px"></div>
+    </div>
+    <div style="text-align:center;margin-top:4px">
+      <button onclick="relDiario()" style="background:var(--g1);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">📤 Relatório Diário</button>
     </div>
   </div>
 
-  <!-- Gráfico de barras — pesagens por dia (últimos 7 dias) -->
-  <div class="card">
-    <div class="ct">📊 Últimos 7 dias</div>
-    <canvas id="dash-chart" height="140" style="width:100%;display:block"></canvas>
-  </div>
+  <!-- ABA CONSOLIDADO -->
+  <div id="dash-aba-geral" style="display:none">
 
-  <!-- Exportar PDF por contrato -->
-  <div class="card">
-    <div class="ct">📄 Exportar por Contrato</div>
-    <div style="display:flex;gap:8px;align-items:center">
-      <select id="dash-sel-ct" style="flex:1;padding:10px;border:1.5px solid var(--brd);border-radius:9px;background:var(--card);color:var(--ink);font-size:13px;font-family:'Inter',sans-serif">
-        <option value="">Selecione um contrato...</option>
-      </select>
-      <button onclick="pdfContrato()" style="background:var(--g1);border:none;color:#fff;padding:10px 14px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap">📄 PDF</button>
+    <!-- Resumo geral -->
+    <div class="card">
+      <div class="ct">📅 Hoje — consolidado</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;text-align:center;margin-bottom:8px">
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="gc-rec-hoje" style="font-size:22px;font-weight:800;color:var(--g1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Recepções</div>
+        </div>
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="gc-exp-hoje" style="font-size:22px;font-weight:800;color:var(--g1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Expedições</div>
+        </div>
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="gc-sacas-rec" style="font-size:20px;font-weight:800;color:var(--g1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Sacas recebidas</div>
+        </div>
+        <div style="background:var(--g3);border-radius:8px;padding:10px">
+          <div id="gc-sacas-exp" style="font-size:20px;font-weight:800;color:var(--g1)">0</div>
+          <div style="font-size:10px;color:var(--ink2)">Sacas expedidas</div>
+        </div>
+      </div>
     </div>
-    <div id="dash-ct-info" style="margin-top:8px;font-size:11px;color:var(--ink3)"></div>
-  </div>
 
-  <!-- % por contrato -->
-  <div class="card">
-    <div class="ct">📋 Contratos — Saldo</div>
-    <div id="dash-contratos" style="font-size:12px"></div>
-  </div>
+    <!-- Estoque por cultura -->
+    <div class="card">
+      <div class="ct">📦 Estoque atual por cultura</div>
+      <div id="gc-estoque" style="font-size:12px">
+        <div style="color:var(--ink3);font-size:12px">Carregando...</div>
+      </div>
+    </div>
 
-  <!-- Resumo por balança -->
-  <div class="card">
-    <div class="ct">⚖️ Por Balança</div>
-    <div id="dash-balancas" style="font-size:12px"></div>
+    <!-- Produção por talhão -->
+    <div class="card">
+      <div class="ct">🌱 Produção por talhão — safra atual</div>
+      <div id="gc-producao" style="font-size:12px">
+        <div style="color:var(--ink3);font-size:12px">Carregando...</div>
+      </div>
+    </div>
+
+    <!-- Recepção por cultura (últimos 7 dias) -->
+    <div class="card">
+      <div class="ct">📊 Recepção — últimos 7 dias</div>
+      <canvas id="dash-chart-rec" height="140" style="width:100%;display:block"></canvas>
+    </div>
+
+    <!-- Balanças consolidado -->
+    <div class="card">
+      <div class="ct">⚖️ Por balança — expedição</div>
+      <div id="gc-balancas" style="font-size:12px"></div>
+    </div>
+
   </div>
 </div>
 
@@ -1345,11 +1404,117 @@ function irHist(){
 }
 
 /* ══ DASHBOARD ADMIN ══════════════════════════════════════════ */
+/* ══ DASHBOARD TABS ════════════════════════════════════════════ */
+let _dashTab='exp';
+function dashTab(tab){
+  _dashTab=tab;
+  document.getElementById('dash-aba-exp').style.display   = tab==='exp'   ? 'block':'none';
+  document.getElementById('dash-aba-geral').style.display = tab==='geral' ? 'block':'none';
+  const te=document.getElementById('tab-exp'), tg=document.getElementById('tab-geral');
+  te.style.background=tab==='exp'?'var(--g1)':'var(--bg)';te.style.color=tab==='exp'?'#fff':'var(--ink3)';te.style.border=tab==='exp'?'none':'1px solid var(--brd)';
+  tg.style.background=tab==='geral'?'var(--g1)':'var(--bg)';tg.style.color=tab==='geral'?'#fff':'var(--ink3)';tg.style.border=tab==='geral'?'none':'1px solid var(--brd)';
+  if(tab==='exp') renderDash();
+  if(tab==='geral') renderDashGeral();
+}
+
+async function syncGeral(){
+  toast('🔄 Sincronizando...');
+  await Promise.all([syncP(),syncRec(),carregarDaPlanilha(),loadContratosDaPlanilha(),carregarRecepcoes(),carregarEstoque()]);
+  if(_dashTab==='exp') renderDash(); else renderDashGeral();
+  toast('✅ Sincronizado!');
+}
+
+function renderDashGeral(){
+  const hoje=new Date().toLocaleDateString('pt-BR');
+  const recHoje=cloudRec.filter(r=>r.data===hoje);
+  const sacasRecHoje=recHoje.reduce((s,r)=>s+(r.sacas||0),0);
+  document.getElementById('gc-rec-hoje').textContent=recHoje.length;
+  document.getElementById('gc-sacas-rec').textContent=Math.round(sacasRecHoje).toLocaleString('pt-BR');
+  const expHoje=cloud.filter(o=>o.dataEntrada===hoje&&(o.status||'').includes('Finalizado'));
+  const sacasExpHoje=expHoje.reduce((s,o)=>s+(parseFloat(o.cargaLiquida||0)*1000/60),0);
+  document.getElementById('gc-exp-hoje').textContent=expHoje.length;
+  document.getElementById('gc-sacas-exp').textContent=Math.round(sacasExpHoje).toLocaleString('pt-BR');
+  renderGcEstoque(); renderGcProducao(); renderGraficoRec7dias();
+  renderDashBalancas(cloud);
+  const elBal=document.getElementById('gc-balancas');const elDash=document.getElementById('dash-balancas');
+  if(elBal&&elDash) elBal.innerHTML=elDash.innerHTML;
+}
+
+function renderGcEstoque(){
+  const el=document.getElementById('gc-estoque');if(!el)return;
+  const est=estoqueCloud?.estoque||[];const comp=estoqueCloud?.comprometido||{};
+  if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado. Registre recepções primeiro.</div>';return;}
+  el.innerHTML=est.map(e=>{
+    const chave=e.safra+'|'+e.cultura;
+    const comprometido=comp[chave]?.comprometido_sc||0;
+    const disponivel=Math.max(0,e.saldo_sc-comprometido);
+    const pct=e.saldo_sc>0?Math.round(comprometido/e.saldo_sc*100):0;
+    return `<div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+        <span style="font-weight:700">${e.cultura} <span style="font-weight:400;color:var(--ink3)">· ${e.safra}</span></span>
+        <span style="font-weight:800;color:var(--g1)">${Math.round(e.saldo_sc).toLocaleString('pt-BR')} sc</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;font-size:10px;text-align:center;margin-bottom:5px">
+        <div style="background:var(--g3);border-radius:6px;padding:5px"><div style="font-weight:700;color:var(--g1)">${Math.round(e.saldo_sc).toLocaleString('pt-BR')}</div><div style="color:var(--ink3)">Em estoque</div></div>
+        <div style="background:#fff8e1;border-radius:6px;padding:5px"><div style="font-weight:700;color:#854F0B">${Math.round(comprometido).toLocaleString('pt-BR')}</div><div style="color:#854F0B">Comprometido</div></div>
+        <div style="background:var(--g3);border:1px solid var(--g1);border-radius:6px;padding:5px"><div style="font-weight:700;color:var(--g1)">${Math.round(disponivel).toLocaleString('pt-BR')}</div><div style="color:var(--g2)">Disponível</div></div>
+      </div>
+      <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--a1);border-radius:4px"></div></div>
+      <div style="font-size:10px;color:var(--ink3);margin-top:2px">Entradas: ${Math.round(e.entradas_sc||0).toLocaleString('pt-BR')} sc · Saídas: ${Math.round(e.saidas_sc||0).toLocaleString('pt-BR')} sc</div>
+    </div>`;
+  }).join('');
+}
+
+function renderGcProducao(){
+  const el=document.getElementById('gc-producao');if(!el)return;
+  const grupos={};
+  cloudRec.filter(r=>r.status==='Finalizado').forEach(r=>{
+    const k=(r.talhaoCod||'?')+'|'+(r.variedade||'?');
+    if(!grupos[k])grupos[k]={cod:r.talhaoCod,nome:r.talhaoNome,cultura:r.cultura,variedade:r.variedade,sacas:0,cargas:0,umTotal:0,area:0};
+    grupos[k].sacas+=r.sacas||0;grupos[k].cargas++;grupos[k].umTotal+=r.umidade||0;
+    const t=talhoes.find(x=>x.cod===r.talhaoCod&&x.variedade===r.variedade);
+    if(t)grupos[k].area=t.areaVariedade;
+  });
+  const lista=Object.values(grupos).sort((a,b)=>b.sacas-a.sacas);
+  if(!lista.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado. Registre recepções com talhão.</div>';return;}
+  el.innerHTML=lista.map(g=>{
+    const scHa=g.area>0?(g.sacas/g.area).toFixed(1):'—';
+    const umMed=g.cargas>0?(g.umTotal/g.cargas).toFixed(1):'—';
+    return `<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:.5px solid var(--brd)">
+      <div style="width:32px;height:32px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🌿</div>
+      <div style="flex:1"><div style="font-size:12px;font-weight:700">${g.cod} · ${g.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${g.area||'?'} ha · U: ${umMed}% · ${Math.round(g.sacas)} sc · ${g.cargas} cargas</div></div>
+      <div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:800;color:var(--g1)">${scHa}</div><div style="font-size:9px;color:var(--ink3)">sc/ha</div></div>
+    </div>`;
+  }).join('');
+}
+
+function renderGraficoRec7dias(){
+  const canvas=document.getElementById('dash-chart-rec');if(!canvas)return;
+  const ctx=canvas.getContext('2d');const dias=[],vals=[];
+  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toLocaleDateString('pt-BR');dias.push(ds.slice(0,5));vals.push(cloudRec.filter(r=>r.data===ds).length);}
+  const W=canvas.parentElement?.offsetWidth||window.innerWidth-40;canvas.width=W;canvas.height=140;ctx.clearRect(0,0,W,140);
+  const max=Math.max(...vals,1);const bw=Math.floor((W-20)/7)-4;const isDark=document.body.classList.contains('dark');const barC=isDark?'#2dd4a0':'#1a5c45';const txtC=isDark?'#888':'#666';
+  vals.forEach((v,i)=>{
+    const x=10+i*(bw+4);const h=Math.max(2,Math.round((v/max)*100));
+    ctx.fillStyle=v>0?barC:'var(--g3,#e8f5e9)';ctx.beginPath();
+    if(ctx.roundRect)ctx.roundRect(x,120-h,bw,h,3);else ctx.rect(x,120-h,bw,h);ctx.fill();
+    ctx.fillStyle=txtC;ctx.font='9px Inter,sans-serif';ctx.textAlign='center';ctx.fillText(dias[i],x+bw/2,136);
+    if(v>0){ctx.fillStyle=barC;ctx.font='bold 10px Inter,sans-serif';ctx.fillText(v,x+bw/2,115-h);}
+  });
+}
+
 function irDash(){
   document.querySelectorAll('.bi').forEach(b=>b.classList.remove('on'));
   document.getElementById('bi-dash').classList.add('on');
   document.getElementById('pg-dash').style.display='block';
-  renderDash();
+  // Sempre abre na aba expedição (comportamento v1 preservado)
+  dashTab('exp');
+  // Carregar dados de recepção e estoque em paralelo (para aba consolidado)
+  if(navigator.onLine){
+    Promise.all([carregarRecepcoes(), carregarEstoque()]).then(()=>{
+      if(_dashTab==='geral') renderDashGeral();
+    });
+  }
 }
 function hideDash(){
   document.getElementById('pg-dash').style.display='none';
