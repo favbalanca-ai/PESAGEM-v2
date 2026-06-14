@@ -898,6 +898,7 @@ body.dark .card{background:#1a2d22}
   <div class="card">
     <div class="ct">⏳ Fila offline (<span id="diag-pend-count">0</span>)</div>
     <div id="diag-pend-list" style="font-size:12px"></div>
+    <button onclick="limparFilaInvalidos()" style="margin-top:8px;background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar itens inválidos da fila</button>
   </div>
 
   <!-- Log de eventos -->
@@ -1226,6 +1227,13 @@ function saveCloud(){
 function loadDB(){
   DB.ordens=[];
   pend=JSON.parse(localStorage.getItem('ppd-v2')||'[]');
+  // Limpar itens inválidos da fila (sem acao ou sem ordem.id)
+  const antes = pend.length;
+  pend = pend.filter(p => p.acao && p.ordem && p.ordem.id);
+  if(pend.length !== antes){
+    saveDB();
+    addLog(`🧹 Fila limpa — ${antes - pend.length} item(ns) inválido(s) removido(s)`,'info');
+  }
   // Restaurar cloud do cache local para ter dados imediatos
   try{
     const cached=localStorage.getItem('pcloud-v2');
@@ -2904,6 +2912,14 @@ function addLog(msg,tipo){
 }
 function limparLog(){
   syncLog=[];localStorage.removeItem('syncLog');
+  renderDiag();
+}
+function limparFilaInvalidos(){
+  const antes = pend.length;
+  pend = pend.filter(p => p.acao && p.ordem && p.ordem.id);
+  saveDB();
+  const removidos = antes - pend.length;
+  toast(`🧹 ${removidos} item(ns) inválido(s) removido(s) da fila`);
   renderDiag();
 }
 
