@@ -1198,6 +1198,7 @@ function openApp(u){
   // Carregar planilha assim que abrir
   setTimeout(async()=>{
     await syncP();
+    await syncRec();
     await Promise.all([carregarDaPlanilha(), loadContratosDaPlanilha()]);
     updHome();
   },1000);
@@ -3895,8 +3896,8 @@ function registrarRecepcao() {
   };
   cloudRec.unshift(rec);
   localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
-  // Enviar para GAS
-  addP({acao:'salvarRecepcao', rec});
+  // Enviar para GAS — usar enviarRec separado do enviar de expedição
+  enviarRec(rec);
   fecharNovaRec();
   toast('✅ Recepção registrada!');
   atualizarRecHome();
@@ -3995,6 +3996,64 @@ function irTalhoes() {
   document.body.appendChild(div);
 }
 
+/* ── Envio dedicado para recepção ── */
+async function enviarRec(rec) {
+  if (!SHEETS_URL) { addLog('SHEETS_URL não configurado','erro'); return; }
+  if (!navigator.onLine) {
+    // Salvar na fila de pendentes de recepção
+    const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+    pendRec.push({id: rec.id, rec, ts: Date.now()});
+    localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
+    toast('📥 Salvo offline — será enviado quando conectar');
+    return;
+  }
+  try {
+    const r = await fetch(SHEETS_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({acao: 'salvarRecepcao', rec, token: TOKEN})
+    });
+    const j = JSON.parse(await r.text());
+    if (j.ok) {
+      addLog(`✅ Recepção enviada — ${rec.placa}`,'ok');
+    } else {
+      addLog(`❌ Recepção recusada — ${j.erro||'erro'}`,'erro');
+      const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+      pendRec.push({id: rec.id, rec, ts: Date.now()});
+      localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
+    }
+  } catch(e) {
+    addLog(`❌ Falha de rede recepção — ${e.message}`,'erro');
+    const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+    pendRec.push({id: rec.id, rec, ts: Date.now()});
+    localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
+  }
+}
+
+/* ── Sincronizar pendentes de recepção ── */
+async function syncRec() {
+  if (!SHEETS_URL || !navigator.onLine) return;
+  const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+  if (!pendRec.length) return;
+  const enviados = [];
+  for (const p of pendRec) {
+    try {
+      const r = await fetch(SHEETS_URL, {
+        method: 'POST',
+        headers: {'Content-Type': 'text/plain'},
+        body: JSON.stringify({acao: 'salvarRecepcao', rec: p.rec, token: TOKEN})
+      });
+      const j = JSON.parse(await r.text());
+      if (j.ok) enviados.push(p.id);
+    } catch(_) {}
+  }
+  if (enviados.length) {
+    const restante = pendRec.filter(p => !enviados.includes(p.id));
+    localStorage.setItem('pend-rec-v2', JSON.stringify(restante));
+    toast(`☁️ ${enviados.length} recepção(ões) sincronizada(s)!`);
+  }
+}
+
 function novoTalhaoForm() {
   // Formulário simples via prompt para MVP
   const cod  = prompt('Código do talhão (ex: TL05)');
@@ -4008,8 +4067,19 @@ function novoTalhaoForm() {
   const talhao = {cod, nome, safra, cultura, variedade, areaTotal:areaT, areaVariedade:areaV, ativo:'Sim'};
   talhoes.push(talhao);
   localStorage.setItem('talhoes-v2', JSON.stringify(talhoes));
-  addP({acao:'salvarTalhao', talhao});
-  toast('✅ Talhão cadastrado!');
+  // Enviar para GAS
+  if (SHEETS_URL && navigator.onLine) {
+    fetch(SHEETS_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain'},
+      body: JSON.stringify({acao: 'salvarTalhao', talhao, token: TOKEN})
+    }).then(r => r.json()).then(j => {
+      if (j.ok) toast('✅ Talhão cadastrado e salvo!');
+      else toast('⚠️ Talhão salvo localmente — erro ao enviar');
+    }).catch(() => toast('⚠️ Talhão salvo localmente — sem conexão'));
+  } else {
+    toast('✅ Talhão cadastrado localmente');
+  }
   irTalhoes();
 }
 
