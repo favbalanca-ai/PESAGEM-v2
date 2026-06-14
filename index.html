@@ -989,7 +989,7 @@ body.dark .card{background:#1a2d22}
 
 <script>
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxvNJutHp0bVC0lZWzmYN_fm5EajV7xBZDu2MJAK_gxVvuAmGUxWx0QAx_M1PIxCRqq-Q/exec";
 const TOKEN      = "pesagem@fav2024";
 const SYNC_TAG   = "fav-sync-pendentes";
 
@@ -3590,6 +3590,12 @@ function confirmarModo() {
   } else if (modoAtual === 'exp') {
     document.getElementById('pg-rec-home').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
+    // Garantir que contratos aparecem para admin
+    if (usr?.nivel === 'admin') {
+      const btnAdmin = document.getElementById('btn-admin');
+      if (btnAdmin) btnAdmin.style.display = 'block';
+    }
+    toggleAdminUI();
     home();
   } else if (modoAtual === 'dash') {
     document.getElementById('pg-rec-home').style.display = 'none';
@@ -3605,10 +3611,17 @@ function trocarModo() {
 /* ── Sobrescrever openApp para mostrar tela de modo ── */
 const _openAppOriginal = openApp;
 function openApp(u) {
-  // Chamar o openApp original mas redirecionar para tela de modo
   document.getElementById('login').classList.add('h');
   loadDB(); loadCfg(); initSig(); initDark();
-  // Badge de balança
+
+  // Admin UI — contratos e dashboard
+  if (u.nivel === 'admin') {
+    const btnAdmin = document.getElementById('btn-admin');
+    if (btnAdmin) btnAdmin.style.display = 'block';
+  }
+  toggleAdminUI();
+
+  // Badge de balança na expedição
   const badge = document.getElementById('badge-bal');
   if (badge) {
     if (u.bal > 0) {
@@ -3618,7 +3631,15 @@ function openApp(u) {
       badge.style.display = 'none';
     }
   }
-  // Recuperar modo anterior
+
+  // Hero title/sub
+  const bal = u.bal || 0;
+  const heroTitle = document.getElementById('hero-title');
+  const heroSub   = document.getElementById('hero-sub');
+  if (heroTitle) heroTitle.textContent = bal===1?'Balança Água Viva':bal===2?'Balança Espora':'Pesagem';
+  if (heroSub)   heroSub.textContent   = bal===0?'Água Viva · Espora · Consolidado':nomeBal(bal);
+
+  // Recuperar modo anterior ou mostrar tela de escolha
   const modoSalvo = localStorage.getItem('modo-v2');
   if (modoSalvo) {
     modoAtual = modoSalvo;
