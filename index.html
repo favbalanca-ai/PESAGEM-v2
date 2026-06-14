@@ -3772,11 +3772,9 @@ function confirmarModo() {
   } else if (modoAtual === 'exp') {
     document.getElementById('pg-rec-home').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    // Garantir que contratos aparecem para admin
-    if (usr?.nivel === 'admin') {
-      const btnAdmin = document.getElementById('btn-admin');
-      if (btnAdmin) btnAdmin.style.display = 'block';
-    }
+    // Contratos SOMENTE para admin
+    const btnAdmin = document.getElementById('btn-admin');
+    if (btnAdmin) btnAdmin.style.display = usr?.nivel === 'admin' ? 'block' : 'none';
     toggleAdminUI();
     home();
   } else if (modoAtual === 'dash') {
@@ -3796,11 +3794,9 @@ function openApp(u) {
   document.getElementById('login').classList.add('h');
   loadDB(); loadCfg(); initSig(); initDark();
 
-  // Admin UI — contratos e dashboard
-  if (u.nivel === 'admin') {
-    const btnAdmin = document.getElementById('btn-admin');
-    if (btnAdmin) btnAdmin.style.display = 'block';
-  }
+  // Admin UI — contratos e dashboard SOMENTE para admin
+  const btnAdmin = document.getElementById('btn-admin');
+  if (btnAdmin) btnAdmin.style.display = u.nivel === 'admin' ? 'block' : 'none';
   toggleAdminUI();
 
   // Badge de balança na expedição
