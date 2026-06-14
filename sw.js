@@ -2,7 +2,7 @@
 // Cache separado do v1 (fav-v2-v1) para não conflitar
 const CACHE    = 'fav-v2-v1';
 const SYNC_TAG = 'fav-v2-sync';
-const SHEETS_URL = ""; // ← preencher após deploy do GAS
+const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec"; // ← preencher após deploy do GAS
 const TOKEN      = "fav2026v2";
 
 const SHELL = [
