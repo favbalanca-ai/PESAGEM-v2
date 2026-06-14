@@ -301,7 +301,8 @@ body.dark .card{background:#1a2d22}
   <div class="top"><div class="top-in">
     <h1 class="top-title">FAV Recepção</h1>
     <div id="badge-bal-rec" style="background:rgba(255,255,255,.18);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:700;color:#fff"></div>
-    <button onclick="trocarModo()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 9px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">Trocar</button>
+    <button onclick="trocarModo()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">⇄ Modo</button>
+    <button onclick="logout()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 8px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">Sair</button>
   </div></div>
   <div style="padding:12px 12px 0">
     <div class="hero">
@@ -332,6 +333,7 @@ body.dark .card{background:#1a2d22}
       <button class="bk" id="btn-bk" onclick="goBack()" style="display:none">‹</button>
       <h1 id="pgtit">⚖️ Pesagem</h1>
       <div id="badge-bal" style="display:none;background:rgba(255,255,255,.18);border-radius:6px;padding:3px 8px;font-size:10px;font-weight:700;color:#fff;white-space:nowrap"></div>
+      <button onclick="trocarModo()" title="Trocar modo" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif" id="btn-modo">⇄ Modo</button>
       <button onclick="toggleDark()" style="background:rgba(255,255,255,.12);border:none;color:#fff;width:34px;height:34px;border-radius:8px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center" id="btn-dark" title="Modo escuro">🌙</button>
       <button onclick="logout()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:5px 9px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif" id="btn-logout">Sair</button>
     </div>
@@ -1260,6 +1262,8 @@ function showPg(id,tit,dots,da){
   document.getElementById('pgtit').textContent=tit||'⚖️ Pesagem';
   document.getElementById('btn-bk').style.display=id!=='pg-home'?'flex':'none';
   document.getElementById('btn-logout').style.display=id==='pg-home'?'block':'none';
+  const btnModo = document.getElementById('btn-modo');
+  if(btnModo) btnModo.style.display='block'; // sempre visível na expedição
   const ds=document.getElementById('dots');
   if(dots){ds.style.display='flex';for(let i=1;i<=5;i++){const d=document.getElementById('d'+i);d.className='dot'+(i<da?' d':i===da?' a':'');}}
   else ds.style.display='none';
