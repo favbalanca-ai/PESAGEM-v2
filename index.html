@@ -1446,8 +1446,7 @@ async function wizLerDoc(input){
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -1472,8 +1471,7 @@ async function wizLerCNH(input){
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -4586,6 +4584,37 @@ function fileToBase64(file){
   });
 }
 
+/* ── Compressão p/ envio à IA (OCR) — evita "imagem muito grande" ──
+   Fotos de celular (8-12MB) estouram o limite do backend antes de
+   chegar na IA. Redimensiona mantendo texto legível e reduz para JPEG. */
+function fileToBase64IA(file, maxDim, qualidade){
+  maxDim = maxDim || 1600;
+  qualidade = qualidade || 0.85;
+  return new Promise((res, rej) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let w = img.width, h = img.height;
+        if (w > maxDim || h > maxDim) {
+          if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+          else { w = Math.round(w * maxDim / h); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, w, h);
+        const dataUrl = canvas.toDataURL('image/jpeg', qualidade);
+        res({ base64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+      };
+      img.onerror = () => rej(new Error('Erro ao processar imagem'));
+      img.src = reader.result;
+    };
+    reader.onerror = () => rej(new Error('Erro ao ler arquivo'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function iaStatus(id,tipo,msg){
   const el=document.getElementById(id);if(!el)return;
   el.className='ia-status '+tipo;el.textContent=msg;
@@ -4604,8 +4633,7 @@ async function iaLerDisplay(campo,input){
   const m = mapa[campo] || mapa['bruto'];
   iaStatus(m.status,'load','🤖 IA lendo o display...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],contexto:m.ctx})});
     const j=await r.json();
@@ -4628,8 +4656,7 @@ async function iaLerDisplayRec(campo,input){
   const statusId='ia-status-rec-'+campo;
   iaStatus(statusId,'load','🤖 IA lendo o display...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
         contexto:campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita'})});
@@ -4661,8 +4688,7 @@ async function iaLerPlaca(input,campoId,statusId){
   const sid=statusId||('ia-status-placa-'+(campoId?.includes('rec')?'rec':'exp'));
   iaStatus(sid,'load','🤖 IA lendo a placa...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerPlaca',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -4687,8 +4713,7 @@ async function iaLerCNH(input) {
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -4712,8 +4737,7 @@ async function iaLerDocExp(input) {
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -4782,8 +4806,7 @@ async function iaLerDocumentoRec(input){
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-doc-rec','load','🤖 IA lendo o documento...');
   try{
-    const base64=await fileToBase64(input.files[0]);
-    const mime=input.files[0].type||'image/jpeg';
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
