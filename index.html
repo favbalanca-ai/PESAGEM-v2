@@ -797,73 +797,10 @@ body.dark .card{background:#1a2d22}
 
   <!-- CONTRATOS ADMIN -->
   <div class="pg" id="pg-oc">
-
-    <!-- Seletor Pesagem / NFA -->
-    <div class="card" style="padding:6px">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-        <button type="button" id="oc-tab-pesagem" onclick="ocSelTipo('pesagem')" class="btn btnp" style="padding:11px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Contratos Pesagem</button>
-        <button type="button" id="oc-tab-nfa" onclick="ocSelTipo('nfa')" class="btn btns" style="padding:11px;font-size:13px;margin:0;border-radius:var(--r2px)">📄 Contratos NFA</button>
-      </div>
-    </div>
-
-    <!-- ===== BLOCO PESAGEM ===== -->
-    <div id="oc-bloco-pesagem">
     <div class="card">
-      <div class="ct">➕ Cadastrar Contrato</div>
-      <div class="r2">
-        <div class="f">
-          <label>Nº do Contrato *</label>
-          <input type="text" id="oc-n" placeholder="CS-2026" autocomplete="off" list="dl-oc-n">
-          <datalist id="dl-oc-n"></datalist>
-        </div>
-        <div class="f"><label>Data</label><input type="date" id="oc-d"></div>
-      </div>
-      <div class="r2">
-        <div class="f">
-          <label>Produto</label>
-          <div style="display:flex;gap:6px">
-            <input type="text" id="oc-p" placeholder="Soja, Milho..." style="flex:1">
-            <button type="button" onclick="showProdutos()" style="padding:0 12px;border:1.5px solid var(--brd);border-radius:var(--r2px);background:#fff;font-size:14px;cursor:pointer;flex-shrink:0">▾</button>
-          </div>
-          <!-- dropdown produtos -->
-          <div id="prod-drop" style="display:none;background:#fff;border:1.5px solid var(--brd);border-radius:var(--r2px);margin-top:3px;box-shadow:var(--sh);z-index:100;position:relative">
-            <div onclick="selecionarProduto('Soja')"    style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🌾 Soja</div>
-            <div onclick="selecionarProduto('Milho')"   style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🌽 Milho</div>
-            <div onclick="selecionarProduto('Trigo')"   style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🌾 Trigo</div>
-            <div onclick="selecionarProduto('Sorgo')"   style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🌾 Sorgo</div>
-            <div onclick="selecionarProduto('Algodão')" style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🌿 Algodão</div>
-            <div onclick="selecionarProduto('Feijão')"  style="padding:9px 13px;cursor:pointer;font-size:14px;border-bottom:.5px solid var(--brd)">🫘 Feijão</div>
-            <div onclick="selecionarProduto('Girassol')" style="padding:9px 13px;cursor:pointer;font-size:14px">🌻 Girassol</div>
-          </div>
-        </div>
-        <div class="f"><label>Volume Total (kg) *</label><input type="number" id="oc-vol" placeholder="0" min="0" step="1000"></div>
-      </div>
-      <div class="f"><label>Obs / Comprador</label><input type="text" id="oc-o" placeholder="Ex: Bunge, Cargill..."></div>
+      <div class="ct">📄 Cadastrar Contrato</div>
+      <div style="font-size:11px;color:var(--ink3);margin:-4px 0 10px">Um contrato reúne o controle de carregamento e os dados para emissão da NFA.</div>
 
-      <!-- Balança vinculada ao contrato -->
-      <div class="f">
-        <label>⚖️ Balança *</label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-          <button type="button" id="oc-bal-btn-1" onclick="selBalancaContrato(1)" class="btn btnp" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 1<br><span style="font-size:10px;font-weight:400;opacity:.8">Água Viva</span></button>
-          <button type="button" id="oc-bal-btn-2" onclick="selBalancaContrato(2)" class="btn btns" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 2<br><span style="font-size:10px;font-weight:400;opacity:.8">Espora</span></button>
-        </div>
-        <input type="hidden" id="oc-bal" value="1">
-      </div>
-      <button class="btn btnp" onclick="addOC()" style="margin-top:3px">➕ Cadastrar Contrato</button>
-    </div>
-    <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="ct" style="margin:0">📋 Contratos Cadastrados</div>
-        <button onclick="loadContratosDaPlanilha().then(()=>rOC())" style="padding:5px 10px;border-radius:7px;border:1.5px solid var(--brd);background:#fff;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif">☁️ Atualizar</button>
-      </div>
-      <div id="lst-oc"></div>
-    </div>
-    </div><!-- fim oc-bloco-pesagem -->
-
-    <!-- ===== BLOCO NFA ===== -->
-    <div id="oc-bloco-nfa" style="display:none">
-    <div class="card">
-      <div class="ct">📄 Cadastrar Contrato NFA</div>
       <div class="r2">
         <div class="f">
           <label>Emitente *</label>
@@ -908,10 +845,18 @@ body.dark .card{background:#1a2d22}
       </div>
       <div class="r2">
         <div class="f"><label>Valor Unitário (R$) *</label><input type="number" id="nc-valor" placeholder="2.0500" min="0" step="0.0001"></div>
-        <div class="f"><label>Volume Total *</label><input type="number" id="nc-vol" placeholder="0" min="0" step="1"></div>
+        <div class="f"><label>Volume Total do Contrato *</label><input type="number" id="nc-vol" placeholder="0" min="0" step="1"></div>
       </div>
 
-      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">COMPLEMENTO</div>
+      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">CARREGAMENTO / COMPLEMENTO</div>
+      <div class="f">
+        <label>⚖️ Balança *</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+          <button type="button" id="nc-bal-btn-1" onclick="selBalancaNFA(1)" class="btn btnp" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 1<br><span style="font-size:10px;font-weight:400;opacity:.8">Água Viva</span></button>
+          <button type="button" id="nc-bal-btn-2" onclick="selBalancaNFA(2)" class="btn btns" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 2<br><span style="font-size:10px;font-weight:400;opacity:.8">Espora</span></button>
+        </div>
+        <input type="hidden" id="nc-bal" value="1">
+      </div>
       <div class="r2">
         <div class="f"><label>Safra</label><input type="text" id="nc-safra" placeholder="2025/2026"></div>
         <div class="f"><label>Origem Mercadoria</label><input type="text" id="nc-origem" placeholder="Município / UF"></div>
@@ -925,16 +870,16 @@ body.dark .card{background:#1a2d22}
       </div>
       <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
 
-      <button class="btn btnp" onclick="addContratoNFA()" style="margin-top:3px">📄 Cadastrar Contrato NFA</button>
+      <button class="btn btnp" onclick="addContratoNFA()" style="margin-top:3px">📄 Cadastrar Contrato</button>
     </div>
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div class="ct" style="margin:0">📋 Contratos NFA Cadastrados</div>
+        <div class="ct" style="margin:0">📋 Contratos Cadastrados</div>
         <button onclick="loadContratosNFADaPlanilha()" style="padding:5px 10px;border-radius:7px;border:1.5px solid var(--brd);background:#fff;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif">☁️ Atualizar</button>
       </div>
       <div id="lst-nc"></div>
     </div>
-    </div><!-- fim oc-bloco-nfa -->
+  </div>
 
   </div>
 
@@ -1905,7 +1850,7 @@ function popContratosHist(){
   }
   sel.innerHTML=opts;
 }
-function irOrdens(){rOC();showPg('pg-oc','📝 Contratos');loadContratosDaPlanilha().then(()=>rOC());}
+function irOrdens(){showPg('pg-oc','📄 Contratos NFA');loadContratosNFADaPlanilha();}
 
 /* ══ EIXOS ════════════════════════════════════════════════════ */
 function adj(id,d){
@@ -2295,21 +2240,12 @@ function carregarContratosLocal(){
 /* ══ CONTRATOS NFA — seletor + cadastro + listagem ═══════════════ */
 var contratosNFA=[];
 
-function ocSelTipo(tipo){
-  var bp=document.getElementById('oc-bloco-pesagem');
-  var bn=document.getElementById('oc-bloco-nfa');
-  var tp=document.getElementById('oc-tab-pesagem');
-  var tn=document.getElementById('oc-tab-nfa');
-  if(tipo==='nfa'){
-    bp.style.display='none'; bn.style.display='block';
-    tn.className='btn btnp'; tp.className='btn btns';
-    tn.style.borderRadius=tp.style.borderRadius='var(--r2px)';
-    loadContratosNFADaPlanilha();
-  }else{
-    bp.style.display='block'; bn.style.display='none';
-    tp.className='btn btnp'; tn.className='btn btns';
-    tn.style.borderRadius=tp.style.borderRadius='var(--r2px)';
-  }
+function selBalancaNFA(nb){
+  document.getElementById('nc-bal').value=nb;
+  var b1=document.getElementById('nc-bal-btn-1'), b2=document.getElementById('nc-bal-btn-2');
+  if(nb===1){b1.className='btn btnp';b2.className='btn btns';}
+  else{b1.className='btn btns';b2.className='btn btnp';}
+  b1.style.borderRadius=b2.style.borderRadius='var(--r2px)';
 }
 
 function addContratoNFA(){
@@ -2340,6 +2276,7 @@ function addContratoNFA(){
     origem_mercadoria: document.getElementById('nc-origem').value.trim(),
     responsavel_frete: document.getElementById('nc-frete').value,
     info_complementar: document.getElementById('nc-info').value.trim(),
+    balanca: parseInt(document.getElementById('nc-bal').value)||1,
     obs: document.getElementById('nc-obs').value.trim()
   };
 
@@ -5044,37 +4981,44 @@ function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'';}
 
 async function abrirModalNFA(){
   if(!_nfaTicketAtual)return;
-  document.getElementById('nfa-tk-lbl').textContent=_nfaTicketAtual;
-  document.getElementById('modal-sel-contrato').style.display='flex';
-  document.getElementById('nfa-resumo-sel').style.display='none';
-  const sel=document.getElementById('nfa-contrato-sel');
-  sel.innerHTML='<option value="">Carregando...</option>';
+  toast('⏳ Montando NFA a partir do contrato do ticket...');
   try{
-    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'listarContratosNFA',filtros:{status:'Ativo'},token:TOKEN})});
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,token:TOKEN})});
     const d=await r.json();
-    _nfaContratos=d.contratos||[];
-    sel.innerHTML='<option value="">Selecione o contrato...</option>'+
-      _nfaContratos.map(c=>`<option value="${c.id}">${c.id} | ${c.emitente} → ${c.destinatario_nome} | Saldo: ${Number(c.saldo||0).toLocaleString('pt-BR')} sc</option>`).join('');
-  }catch(e){sel.innerHTML='<option value="">Erro ao carregar</option>';}
-  const extId=getNFAExtId();
-  document.getElementById('nfa-aviso-ext').style.display=(extId&&typeof chrome!=='undefined'&&chrome.runtime)?'none':'block';
+    if(!d.ok||d.erro)throw new Error(d.erro||'Falha ao montar NFA');
+    _nfaDados=d.nfa;
+    renderPreviaNFA(d.nfa);
+    const extId=getNFAExtId();
+    var aviso=document.getElementById('nfa-aviso-ext');
+    if(aviso) aviso.style.display=(extId&&typeof chrome!=='undefined'&&chrome.runtime)?'none':'block';
+    document.getElementById('modal-previa-nfa').style.display='flex';
+  }catch(e){
+    toast('❌ '+e.message);
+    if(/sem contrato/i.test(e.message)) alert('Este ticket não tem contrato vinculado. Vincule um contrato na pesagem antes de emitir a NFA.');
+  }
 }
 
 function onNFAContratoChange(){
   const sel=document.getElementById('nfa-contrato-sel');
+  if(!sel)return;
   const c=_nfaContratos.find(x=>x.id===sel.value);
   const div=document.getElementById('nfa-resumo-sel');
+  if(!div)return;
   if(!c){div.style.display='none';return;}
   div.style.display='block';
   div.innerHTML=`<div><b>Emitente:</b> ${c.emitente}</div><div><b>Destinatário:</b> ${c.destinatario_nome}</div><div><b>Produto:</b> ${c.produto||'—'}</div><div><b>Valor:</b> R$ ${Number(c.valor_unitario||0).toFixed(4)}/${c.unidade||'kg'}</div><div><b>Saldo:</b> ${Number(c.saldo||0).toLocaleString('pt-BR')} sc</div>`;
 }
 
 async function abrirPreviaNFA(){
-  const contratoId=document.getElementById('nfa-contrato-sel').value;
-  if(!contratoId){alert('Selecione um contrato.');return;}
+  // mantido para compat; fluxo principal agora passa direto por abrirModalNFA
+  const sel=document.getElementById('nfa-contrato-sel');
+  const contratoId=sel?sel.value:'';
   document.getElementById('modal-sel-contrato').style.display='none';
   try{
-    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,contrato_id:contratoId,token:TOKEN})});
+    const body=contratoId
+      ? {acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,contrato_id:contratoId,token:TOKEN}
+      : {acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,token:TOKEN};
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)});
     const d=await r.json();
     if(d.erro)throw new Error(d.erro);
     _nfaDados=d.nfa;
