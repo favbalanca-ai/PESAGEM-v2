@@ -488,6 +488,12 @@ body.dark .card{background:#1a2d22}
           <div class="f"><label>Nome Completo *</label><input type="text" id="f-mt" placeholder="Nome do motorista"></div>
           <div class="f"><label>CPF</label><input type="text" id="f-cpf" placeholder="000.000.000-00" maxlength="14" oninput="mcpf(this)"></div>
         </div>
+
+        <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--brd)">
+          <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:8px">🚚 Transportadora (para emissão da NFA)</div>
+          <div class="f"><label>CNPJ da Transportadora</label><input type="text" id="f-transp-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
+          <div class="f"><label>Nome da Transportadora</label><input type="text" id="f-transp-nome" placeholder="Razão social (opcional)"></div>
+        </div>
       </div>
       <button class="btn btnp" onclick="wizAvancar(3)">Próximo → Eixos e Tara</button>
       <button class="btn btns" onclick="wizVoltar(3)">‹ Voltar</button>
@@ -1418,7 +1424,7 @@ function showCfg(){document.getElementById('pg-cfg').style.display='block';}
 function hideCfg(){document.getElementById('pg-cfg').style.display='none';}
 function irNova(){
   fotos={}; atual=null; utTara='kg'; utBruto='kg';
-  ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf','f-transp-cnpj','f-transp-nome'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   // preencher funcionário com o nome do login
   const fnEl=document.getElementById('f-fn');
   if(fnEl) fnEl.value=usr?usr.nome:'—';;
@@ -2595,6 +2601,7 @@ function fotoPlaca(inp) {
   reader.readAsDataURL(file);
 }
 function mcpf(el){let v=el.value.replace(/\D/g,'');if(v.length>3)v=v.slice(0,3)+'.'+v.slice(3);if(v.length>7)v=v.slice(0,7)+'.'+v.slice(7);if(v.length>11)v=v.slice(0,11)+'-'+v.slice(11,13);el.value=v.slice(0,14);}
+function mcnpj(el){let v=el.value.replace(/\D/g,'');if(v.length>2)v=v.slice(0,2)+'.'+v.slice(2);if(v.length>6)v=v.slice(0,6)+'.'+v.slice(6);if(v.length>10)v=v.slice(0,10)+'/'+v.slice(10);if(v.length>15)v=v.slice(0,15)+'-'+v.slice(15,17);el.value=v.slice(0,18);}
 function geraID(){const n=new Date();return 'OS'+n.getFullYear()+String(n.getMonth()+1).padStart(2,'0')+String(n.getDate()).padStart(2,'0')+String(n.getHours()).padStart(2,'0')+String(n.getMinutes()).padStart(2,'0')+String(n.getSeconds()).padStart(2,'0');}
 
 function salvar(){
@@ -2624,6 +2631,8 @@ function salvar(){
     horaEntrada:now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
     numOrdem:oc, funcionario:fn, placa:pl, motorista:mt,
     cpf:document.getElementById('f-cpf').value,
+    transpCnpj:(document.getElementById('f-transp-cnpj')?.value||'').trim(),
+    transpNome:(document.getElementById('f-transp-nome')?.value||'').trim(),
     municipio:document.getElementById('f-mun').value.trim(),
     estado:document.getElementById('f-uf').value.trim().toUpperCase(),
     eixosDianteiro:d, eixosSimples:es, eixosDuplos:dd, eixosTriplos:t,
@@ -4977,7 +4986,7 @@ async function iaLerDocumentoRec(input){
 // ═══════════════════════════════════════════════════════════
 let _nfaDados=null,_nfaTicketAtual=null,_nfaContratos=[],_nfaPolling=null;
 
-function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'';}
+function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'ddnaadghnmimdndmlpcebiioedaafgne';}
 
 async function abrirModalNFA(){
   if(!_nfaTicketAtual)return;
