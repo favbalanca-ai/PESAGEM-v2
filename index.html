@@ -254,6 +254,14 @@ body.dark .card{background:#1a2d22}
 .wiz-dot.active{background:var(--g1)}
 .wiz-dot.done{background:var(--g4)}
 .wiz-pg{display:flex;flex-direction:column;gap:10px}
+/* NFA */
+.nfa-ln{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed #e0e0e0;font-size:14px;gap:12px}
+.nfa-ln span:first-child{color:#777;min-width:100px}
+.nfa-ln span:last-child,.nfa-ln a{text-align:right;font-weight:500}
+.nfa-sec{font-size:10px;font-weight:700;color:#1a3a6c;letter-spacing:.08em;text-transform:uppercase;background:#f0f4f8;margin:0 -18px;padding:6px 18px}
+.nfa-prod-item{padding:8px 0;border-bottom:1px dashed #e0e0e0}
+.nfa-prod-item .pn{font-size:13px;color:#333}
+.nfa-prod-item .pv{display:flex;justify-content:space-between;font-size:12px;color:#777;margin-top:3px}
 </style>
 </head>
 <body>
@@ -756,6 +764,12 @@ body.dark .card{background:#1a2d22}
     <button class="btn btnp" onclick="home();updHome()" style="margin-top:4px">🏠 Nova Pesagem</button>
     <!-- Botão editar (só admin) -->
     <button class="btn btns" id="btn-edit-tk" onclick="abrirEditar()" style="margin-top:4px;display:none">✏️ Editar Ticket</button>
+    <!-- Botão Emitir NFA (só admin) -->
+    <button id="btn-emitir-nfa" onclick="abrirModalNFA()"
+      style="margin-top:4px;display:none;background:#1a3a6c;color:white;border:none;
+             width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+      📄 Emitir NFA
+    </button>
   </div>
 
   <!-- HISTÓRICO -->
@@ -2941,6 +2955,9 @@ function rTicket(o){
   }
   const btnEdit=document.getElementById('btn-edit-tk');
   if(btnEdit) btnEdit.style.display=(usr&&usr.nivel==='admin')?'block':'none';
+  // Botão Emitir NFA (só admin)
+  const btnNFA=document.getElementById('btn-emitir-nfa');
+  if(btnNFA){btnNFA.style.display=(usr&&usr.nivel==='admin')?'block':'none';_nfaTicketAtual=o.id;}
   // Botões de envio para classificador/comprador do contrato
   renderBotoesContatos(o);
 }
@@ -4825,6 +4842,208 @@ async function iaLerDocumentoRec(input){
   }catch(e){iaStatus('ia-status-doc-rec','err','❌ Erro de conexão');}
 }
 
+// ═══════════════════════════════════════════════════════════
+// FAV NFA — Módulo integrado ao Pesagem v2
+// ═══════════════════════════════════════════════════════════
+let _nfaDados=null,_nfaTicketAtual=null,_nfaContratos=[],_nfaPolling=null;
+
+function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'';}
+
+async function abrirModalNFA(){
+  if(!_nfaTicketAtual)return;
+  document.getElementById('nfa-tk-lbl').textContent=_nfaTicketAtual;
+  document.getElementById('modal-sel-contrato').style.display='flex';
+  document.getElementById('nfa-resumo-sel').style.display='none';
+  const sel=document.getElementById('nfa-contrato-sel');
+  sel.innerHTML='<option value="">Carregando...</option>';
+  try{
+    const r=await fetch(`${GAS_URL}?action=listarContratos&filtros=${encodeURIComponent(JSON.stringify({status:'Ativo'}))}`);
+    const d=await r.json();
+    _nfaContratos=d.contratos||[];
+    sel.innerHTML='<option value="">Selecione o contrato...</option>'+
+      _nfaContratos.map(c=>`<option value="${c.id}">${c.id} | ${c.emitente} → ${c.destinatario_nome} | Saldo: ${Number(c.saldo||0).toLocaleString('pt-BR')} sc</option>`).join('');
+  }catch(e){sel.innerHTML='<option value="">Erro ao carregar</option>';}
+  const extId=getNFAExtId();
+  document.getElementById('nfa-aviso-ext').style.display=(extId&&typeof chrome!=='undefined'&&chrome.runtime)?'none':'block';
+}
+
+function onNFAContratoChange(){
+  const sel=document.getElementById('nfa-contrato-sel');
+  const c=_nfaContratos.find(x=>x.id===sel.value);
+  const div=document.getElementById('nfa-resumo-sel');
+  if(!c){div.style.display='none';return;}
+  div.style.display='block';
+  div.innerHTML=`<div><b>Emitente:</b> ${c.emitente}</div><div><b>Destinatário:</b> ${c.destinatario_nome}</div><div><b>Produto:</b> ${c.produto||'—'}</div><div><b>Valor:</b> R$ ${Number(c.valor_unitario||0).toFixed(4)}/${c.unidade||'kg'}</div><div><b>Saldo:</b> ${Number(c.saldo||0).toLocaleString('pt-BR')} sc</div>`;
+}
+
+async function abrirPreviaNFA(){
+  const contratoId=document.getElementById('nfa-contrato-sel').value;
+  if(!contratoId){alert('Selecione um contrato.');return;}
+  document.getElementById('modal-sel-contrato').style.display='none';
+  try{
+    const r=await fetch(`${GAS_URL}?action=montarDadosNFA&ticket_id=${encodeURIComponent(_nfaTicketAtual)}&contrato_id=${encodeURIComponent(contratoId)}`);
+    const d=await r.json();
+    if(d.erro)throw new Error(d.erro);
+    _nfaDados=d.nfa;
+    renderPreviaNFA(d.nfa);
+    document.getElementById('modal-previa-nfa').style.display='flex';
+  }catch(e){toast('❌ Erro ao montar NFA: '+e.message);}
+}
+
+function renderPreviaNFA(n){
+  document.getElementById('nfa-prev-tk').textContent=n.ticket_id||'';
+  document.getElementById('nfa-prev-sub').textContent=(n.contrato_id||'')+' · '+new Date().toLocaleDateString('pt-BR');
+  document.getElementById('nfa-prev-emit').textContent=n.emitente_nome||'—';
+  document.getElementById('nfa-prev-dest').textContent=n.destinatario_nome||'—';
+  document.getElementById('nfa-prev-doc').textContent=n.destinatario_cnpj||n.destinatario_ie||'—';
+  document.getElementById('nfa-prev-placa').textContent=n.placa||'—';
+  document.getElementById('nfa-prev-data').textContent=n.data_transporte||'—';
+  document.getElementById('nfa-prev-bruto').textContent=n.peso_bruto_kg?Number(n.peso_bruto_kg).toLocaleString('pt-BR')+' kg':'—';
+  document.getElementById('nfa-prev-liq').textContent=n.peso_liquido_kg?Number(n.peso_liquido_kg).toLocaleString('pt-BR')+' kg':'—';
+  document.getElementById('nfa-prev-frete').textContent=n.responsavel_frete||'—';
+  document.getElementById('nfa-prev-email').textContent=n.destinatario_email||'—';
+  document.getElementById('nfa-prev-zap').textContent=n.destinatario_whatsapp||'—';
+  let total=0;
+  document.getElementById('nfa-prev-prods').innerHTML=(n.produtos||[]).map(p=>{
+    const t=Number(p.quantidade||0)*Number(p.valor_unitario||0);total+=t;
+    return `<div class="nfa-prod-item"><div class="pn">${p.produto}</div><div class="pv"><span>${Number(p.quantidade||0).toLocaleString('pt-BR')} kg × R$ ${Number(p.valor_unitario||0).toFixed(4)}</span><span style="font-weight:700;color:#1a3a6c">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div></div>`;
+  }).join('');
+  document.getElementById('nfa-prev-total').textContent='R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2});
+}
+
+function fecharPreviaNFA(){document.getElementById('modal-previa-nfa').style.display='none';_nfaDados=null;}
+
+async function confirmarEmissaoNFA(){
+  if(!_nfaDados)return;
+  const extId=getNFAExtId();
+  fecharPreviaNFA();
+  if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
+    chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:_nfaDados},(resp)=>{
+      if(resp&&resp.ok){toast('🚀 SEFAZ-GO aberto! Preenchendo automaticamente...');iniciarPollingNFA();}
+      else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(_nfaDados));window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');toast('⚠️ Extensão não respondeu. SEFAZ aberta manualmente.');}
+    });
+  }else{
+    localStorage.setItem('fav_nfa_pendente',JSON.stringify(_nfaDados));
+    window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');
+    toast('🚀 SEFAZ-GO aberto. Instale a extensão para automação completa.');
+  }
+}
+
+function iniciarPollingNFA(){
+  if(_nfaPolling)clearInterval(_nfaPolling);
+  const extId=getNFAExtId();if(!extId)return;
+  _nfaPolling=setInterval(()=>{
+    try{chrome.runtime.sendMessage(extId,{action:'GET_NFA_CONCLUIDA'},(data)=>{
+      if(!data)return;
+      clearInterval(_nfaPolling);_nfaPolling=null;
+      chrome.runtime.sendMessage(extId,{action:'LIMPAR_NFA'});
+      exibirNFAConcluida(data);
+    });}catch(e){clearInterval(_nfaPolling);}
+  },3000);
+}
+
+function exibirNFAConcluida(data){
+  document.getElementById('nfa-ok-num').textContent=data.numero_nfa?'NFA Nº '+data.numero_nfa:'';
+  const dl=document.getElementById('nfa-ok-drive');
+  dl.href=data.drive_url||'#';dl.textContent=data.drive_url?'📂 Ver no Drive':'—';
+  document.getElementById('nfa-ok-email').textContent=_nfaDados?.destinatario_email?'✅ '+_nfaDados.destinatario_email:'—';
+  const btns=document.getElementById('nfa-ok-zap-btns');btns.innerHTML='';
+  (data.links_whatsapp||[]).forEach((link,i)=>{
+    const a=document.createElement('a');
+    a.href=link;a.target='_blank';
+    a.style.cssText='display:block;padding:13px;background:#25d366;color:white;border-radius:10px;text-align:center;text-decoration:none;font-size:14px;font-weight:700;margin-bottom:6px';
+    a.textContent=i===0?'📱 WhatsApp — Destinatário':'📱 WhatsApp — Escritório FAV';
+    btns.appendChild(a);
+  });
+  document.getElementById('modal-nfa-ok').style.display='flex';
+  if(typeof rHist==='function')rHist();
+}
+
+// Configurar ID da extensão: configurarExtNFA('ID_AQUI')
+function configurarExtNFA(id){localStorage.setItem('fav_ext_id',id);toast('✅ Extensão NFA configurada!');}
+
 </script>
+
+<!-- ── MODAIS NFA ───────────────────────────────────────────── -->
+
+<!-- Modal: Selecionar Contrato -->
+<div id="modal-sel-contrato" style="display:none;position:fixed;inset:0;z-index:9000;background:rgba(0,0,0,.5);align-items:flex-end;justify-content:center">
+  <div style="background:white;border-radius:18px 18px 0 0;padding:20px;width:100%;max-width:520px;max-height:85vh;overflow-y:auto;padding-bottom:calc(20px + env(safe-area-inset-bottom))">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <h3 style="font-size:16px;font-weight:700;color:#0f1a14">📄 Emitir NFA</h3>
+      <button onclick="document.getElementById('modal-sel-contrato').style.display='none'" style="background:#eef4f0;border:none;border-radius:8px;width:32px;height:32px;font-size:16px;cursor:pointer">✕</button>
+    </div>
+    <p style="font-size:13px;color:#3a5244;margin-bottom:12px">Ticket: <strong id="nfa-tk-lbl"></strong></p>
+    <div style="margin-bottom:12px">
+      <label style="font-size:12px;font-weight:600;color:#1a5c45;display:block;margin-bottom:6px">Selecione o Contrato</label>
+      <select id="nfa-contrato-sel" onchange="onNFAContratoChange()" style="width:100%;padding:11px;border:1.5px solid #c8dfd3;border-radius:10px;font-size:13px;background:white;color:#0f1a14">
+        <option value="">Carregando contratos...</option>
+      </select>
+    </div>
+    <div id="nfa-resumo-sel" style="display:none;background:#f0f7f0;border:1px solid #1a6c3c;border-radius:10px;padding:12px;margin-bottom:14px;font-size:13px;line-height:2"></div>
+    <div id="nfa-aviso-ext" style="display:none;background:#fff3cd;border:1px solid #e67e22;border-radius:10px;padding:12px;margin-bottom:14px;font-size:12px">⚠️ <strong>Extensão FAV não detectada.</strong><br>Instale a extensão Chrome "FAV - Emissor NFA" para preenchimento automático.</div>
+    <div style="display:flex;gap:10px">
+      <button onclick="document.getElementById('modal-sel-contrato').style.display='none'" style="flex:1;padding:12px;background:#eef4f0;border:none;border-radius:10px;font-size:14px;cursor:pointer;font-weight:600">Cancelar</button>
+      <button onclick="abrirPreviaNFA()" style="flex:2;padding:12px;background:#1a3a6c;color:white;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">Ver Prévia →</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Prévia da NFA -->
+<div id="modal-previa-nfa" style="display:none;position:fixed;inset:0;z-index:9001;background:rgba(0,0,0,.5);align-items:flex-start;justify-content:center;overflow-y:auto;padding:20px 12px">
+  <div style="background:white;border-radius:18px;width:100%;max-width:480px;overflow:hidden;margin:auto">
+    <div style="background:#1a3a6c;padding:20px;text-align:center">
+      <div style="font-size:24px;margin-bottom:4px">📄</div>
+      <div id="nfa-prev-tk" style="color:white;font-size:18px;font-weight:800;letter-spacing:2px"></div>
+      <div id="nfa-prev-sub" style="color:rgba(255,255,255,.7);font-size:11px;margin-top:2px"></div>
+    </div>
+    <div style="padding:0 18px">
+      <div class="nfa-sec">EMITENTE</div>
+      <div class="nfa-ln"><span>Nome</span><span id="nfa-prev-emit"></span></div>
+      <div class="nfa-sec">DESTINATÁRIO</div>
+      <div class="nfa-ln"><span>Nome</span><span id="nfa-prev-dest"></span></div>
+      <div class="nfa-ln"><span>CNPJ/IE</span><span id="nfa-prev-doc"></span></div>
+      <div class="nfa-sec">TRANSPORTE</div>
+      <div class="nfa-ln"><span>Placa</span><span id="nfa-prev-placa"></span></div>
+      <div class="nfa-ln"><span>Data</span><span id="nfa-prev-data"></span></div>
+      <div class="nfa-ln"><span>Peso Bruto</span><span id="nfa-prev-bruto"></span></div>
+      <div class="nfa-ln"><span>Carga Líquida</span><span id="nfa-prev-liq" style="color:#1a6c3c;font-weight:700"></span></div>
+      <div class="nfa-ln"><span>Frete</span><span id="nfa-prev-frete"></span></div>
+      <div class="nfa-sec">PRODUTO</div>
+      <div id="nfa-prev-prods"></div>
+      <div class="nfa-ln" style="border-top:2px solid #1a3a6c;margin-top:6px;padding-top:12px">
+        <span style="font-weight:700">VALOR TOTAL</span>
+        <span id="nfa-prev-total" style="font-size:17px;font-weight:800;color:#1a3a6c"></span>
+      </div>
+      <div class="nfa-sec">ENVIO APÓS EMISSÃO</div>
+      <div class="nfa-ln"><span>E-mail</span><span id="nfa-prev-email" style="font-size:12px;color:#555"></span></div>
+      <div class="nfa-ln" style="border:none;margin-bottom:16px"><span>WhatsApp</span><span id="nfa-prev-zap" style="font-size:12px;color:#555"></span></div>
+    </div>
+    <div style="padding:14px 18px;background:#f8f8f8;border-top:1px solid #eee;display:flex;gap:10px">
+      <button onclick="fecharPreviaNFA()" style="flex:1;padding:13px;background:white;border:1px solid #ddd;border-radius:10px;font-size:13px;cursor:pointer;font-weight:600">✕ Voltar</button>
+      <button onclick="confirmarEmissaoNFA()" style="flex:2;padding:13px;background:#1a3a6c;color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🚀 Confirmar e Emitir</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: NFA Concluída -->
+<div id="modal-nfa-ok" style="display:none;position:fixed;inset:0;z-index:9002;background:rgba(0,0,0,.5);align-items:center;justify-content:center;padding:20px">
+  <div style="background:white;border-radius:18px;width:100%;max-width:400px;overflow:hidden">
+    <div style="background:#1a6c3c;padding:24px;text-align:center">
+      <div style="font-size:40px">✅</div>
+      <div style="color:white;font-size:17px;font-weight:700;margin-top:8px">NFA Emitida!</div>
+      <div id="nfa-ok-num" style="color:rgba(255,255,255,.8);font-size:12px;margin-top:4px"></div>
+    </div>
+    <div style="padding:18px">
+      <div class="nfa-ln"><span>Drive</span><a id="nfa-ok-drive" href="#" target="_blank" style="color:#1a3a6c;font-size:12px;text-decoration:underline">📂 Ver arquivo</a></div>
+      <div class="nfa-ln"><span>E-mail</span><span id="nfa-ok-email" style="color:#1a6c3c;font-size:12px"></span></div>
+      <div id="nfa-ok-zap-btns" style="margin-top:14px"></div>
+    </div>
+    <div style="padding:14px 18px;background:#f8f8f8;border-top:1px solid #eee">
+      <button onclick="document.getElementById('modal-nfa-ok').style.display='none'" style="width:100%;padding:13px;background:#1a3a6c;color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">Fechar</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
