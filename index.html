@@ -5052,15 +5052,16 @@ function fecharPreviaNFA(){document.getElementById('modal-previa-nfa').style.dis
 
 async function confirmarEmissaoNFA(){
   if(!_nfaDados)return;
+  const dadosNFA=_nfaDados;            // guarda ANTES de fechar (fecharPreviaNFA zera _nfaDados)
   const extId=getNFAExtId();
   fecharPreviaNFA();
   if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
-    chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:_nfaDados},(resp)=>{
+    chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:dadosNFA},(resp)=>{
       if(resp&&resp.ok){toast('🚀 SEFAZ-GO aberto! Preenchendo automaticamente...');iniciarPollingNFA();}
-      else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(_nfaDados));window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');toast('⚠️ Extensão não respondeu. SEFAZ aberta manualmente.');}
+      else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');toast('⚠️ Extensão não respondeu. SEFAZ aberta manualmente.');}
     });
   }else{
-    localStorage.setItem('fav_nfa_pendente',JSON.stringify(_nfaDados));
+    localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));
     window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');
     toast('🚀 SEFAZ-GO aberto. Instale a extensão para automação completa.');
   }
