@@ -797,6 +797,17 @@ body.dark .card{background:#1a2d22}
 
   <!-- CONTRATOS ADMIN -->
   <div class="pg" id="pg-oc">
+
+    <!-- Seletor Pesagem / NFA -->
+    <div class="card" style="padding:6px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+        <button type="button" id="oc-tab-pesagem" onclick="ocSelTipo('pesagem')" class="btn btnp" style="padding:11px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Contratos Pesagem</button>
+        <button type="button" id="oc-tab-nfa" onclick="ocSelTipo('nfa')" class="btn btns" style="padding:11px;font-size:13px;margin:0;border-radius:var(--r2px)">📄 Contratos NFA</button>
+      </div>
+    </div>
+
+    <!-- ===== BLOCO PESAGEM ===== -->
+    <div id="oc-bloco-pesagem">
     <div class="card">
       <div class="ct">➕ Cadastrar Contrato</div>
       <div class="r2">
@@ -847,6 +858,84 @@ body.dark .card{background:#1a2d22}
       </div>
       <div id="lst-oc"></div>
     </div>
+    </div><!-- fim oc-bloco-pesagem -->
+
+    <!-- ===== BLOCO NFA ===== -->
+    <div id="oc-bloco-nfa" style="display:none">
+    <div class="card">
+      <div class="ct">📄 Cadastrar Contrato NFA</div>
+      <div class="r2">
+        <div class="f">
+          <label>Emitente *</label>
+          <select id="nc-emit">
+            <option value="JOVANE">Jovane Gatto Cossul</option>
+            <option value="JOAQUIM">Joaquim Gatto Cossul</option>
+            <option value="TAIS">Taís Gatto Cossul</option>
+            <option value="JOAO">João Germano Cossul</option>
+          </select>
+        </div>
+        <div class="f">
+          <label>Tipo de Nota *</label>
+          <select id="nc-tipo">
+            <option value="NORMAL">Normal (grãos/produtos)</option>
+            <option value="GADO">Gado (cabeças)</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">DESTINATÁRIO</div>
+      <div class="r2">
+        <div class="f"><label>Nome / Razão Social *</label><input type="text" id="nc-dest-nome" placeholder="FRIGORÍFICO X LTDA"></div>
+        <div class="f"><label>CNPJ</label><input type="text" id="nc-dest-cnpj" placeholder="00.000.000/0001-00"></div>
+      </div>
+      <div class="r2">
+        <div class="f"><label>Inscrição Estadual</label><input type="text" id="nc-dest-ie" placeholder="IE do destinatário"></div>
+        <div class="f"><label>E-mail</label><input type="email" id="nc-dest-email" placeholder="email@empresa.com"></div>
+      </div>
+      <div class="f"><label>WhatsApp</label><input type="text" id="nc-dest-wa" placeholder="5561999990000"></div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">PRODUTO / OPERAÇÃO</div>
+      <div class="r2">
+        <div class="f"><label>Grupo</label><input type="text" id="nc-grupo" placeholder="GRAOS, GADO..."></div>
+        <div class="f"><label>Tipo de Operação</label><input type="text" id="nc-tipoop" placeholder="VENDA, REMESSA..."></div>
+      </div>
+      <div class="r2">
+        <div class="f"><label>Produto *</label><input type="text" id="nc-produto" placeholder="SOJA EM GRAOS"></div>
+        <div class="f">
+          <label>Unidade</label>
+          <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
+        </div>
+      </div>
+      <div class="r2">
+        <div class="f"><label>Valor Unitário (R$) *</label><input type="number" id="nc-valor" placeholder="2.0500" min="0" step="0.0001"></div>
+        <div class="f"><label>Volume Total *</label><input type="number" id="nc-vol" placeholder="0" min="0" step="1"></div>
+      </div>
+
+      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">COMPLEMENTO</div>
+      <div class="r2">
+        <div class="f"><label>Safra</label><input type="text" id="nc-safra" placeholder="2025/2026"></div>
+        <div class="f"><label>Origem Mercadoria</label><input type="text" id="nc-origem" placeholder="Município / UF"></div>
+      </div>
+      <div class="r2">
+        <div class="f">
+          <label>Responsável Frete</label>
+          <select id="nc-frete"><option value="Destinatário">Destinatário</option><option value="Remetente">Remetente</option><option value="Sem Frete">Sem Frete</option></select>
+        </div>
+        <div class="f"><label>Obs</label><input type="text" id="nc-obs" placeholder="Observações"></div>
+      </div>
+      <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
+
+      <button class="btn btnp" onclick="addContratoNFA()" style="margin-top:3px">📄 Cadastrar Contrato NFA</button>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div class="ct" style="margin:0">📋 Contratos NFA Cadastrados</div>
+        <button onclick="loadContratosNFADaPlanilha()" style="padding:5px 10px;border-radius:7px;border:1.5px solid var(--brd);background:#fff;font-size:12px;cursor:pointer;font-family:'Inter',sans-serif">☁️ Atualizar</button>
+      </div>
+      <div id="lst-nc"></div>
+    </div>
+    </div><!-- fim oc-bloco-nfa -->
+
   </div>
 
   <!-- BOTTOMBAR -->
@@ -2201,6 +2290,110 @@ function salvarContratosLocal(){
 }
 function carregarContratosLocal(){
   contratosCloud=JSON.parse(localStorage.getItem('poc')||'[]');
+}
+
+/* ══ CONTRATOS NFA — seletor + cadastro + listagem ═══════════════ */
+var contratosNFA=[];
+
+function ocSelTipo(tipo){
+  var bp=document.getElementById('oc-bloco-pesagem');
+  var bn=document.getElementById('oc-bloco-nfa');
+  var tp=document.getElementById('oc-tab-pesagem');
+  var tn=document.getElementById('oc-tab-nfa');
+  if(tipo==='nfa'){
+    bp.style.display='none'; bn.style.display='block';
+    tn.className='btn btnp'; tp.className='btn btns';
+    tn.style.borderRadius=tp.style.borderRadius='var(--r2px)';
+    loadContratosNFADaPlanilha();
+  }else{
+    bp.style.display='block'; bn.style.display='none';
+    tp.className='btn btnp'; tn.className='btn btns';
+    tn.style.borderRadius=tp.style.borderRadius='var(--r2px)';
+  }
+}
+
+function addContratoNFA(){
+  var nome=document.getElementById('nc-dest-nome').value.trim();
+  var produto=document.getElementById('nc-produto').value.trim();
+  var valor=parseFloat(document.getElementById('nc-valor').value)||0;
+  var vol=parseFloat(document.getElementById('nc-vol').value)||0;
+  if(!nome){toast('⚠️ Informe o destinatário!');return;}
+  if(!produto){toast('⚠️ Informe o produto!');return;}
+  if(valor<=0){toast('⚠️ Informe o valor unitário!');return;}
+  if(vol<=0){toast('⚠️ Informe o volume total!');return;}
+
+  var dados={
+    emitente: document.getElementById('nc-emit').value,
+    tipo_nota: document.getElementById('nc-tipo').value,
+    destinatario_nome: nome,
+    destinatario_cnpj: document.getElementById('nc-dest-cnpj').value.trim(),
+    destinatario_ie: document.getElementById('nc-dest-ie').value.trim(),
+    destinatario_email: document.getElementById('nc-dest-email').value.trim(),
+    destinatario_whatsapp: document.getElementById('nc-dest-wa').value.replace(/\D/g,''),
+    grupo_produto: document.getElementById('nc-grupo').value.trim(),
+    tipo_operacao: document.getElementById('nc-tipoop').value.trim(),
+    produto: produto,
+    unidade: document.getElementById('nc-unidade').value,
+    valor_unitario: valor,
+    volume_total: vol,
+    safra: document.getElementById('nc-safra').value.trim(),
+    origem_mercadoria: document.getElementById('nc-origem').value.trim(),
+    responsavel_frete: document.getElementById('nc-frete').value,
+    info_complementar: document.getElementById('nc-info').value.trim(),
+    obs: document.getElementById('nc-obs').value.trim()
+  };
+
+  if(!SHEETS_URL||!navigator.onLine){toast('📵 Sem conexão — contrato NFA exige conexão');return;}
+  toast('⏳ Enviando contrato NFA...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'salvarContratoNFA',dados:dados,token:TOKEN})})
+    .then(function(r){return r.text();})
+    .then(function(t){
+      try{
+        var j=JSON.parse(t);
+        if(j.ok){
+          toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
+          ['nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
+          loadContratosNFADaPlanilha();
+        }else{
+          toast('❌ Erro: '+(j.erro||'desconhecido'));
+        }
+      }catch(e){toast('❌ Erro ao processar resposta');}
+    })
+    .catch(function(){toast('❌ Sem conexão ao salvar');});
+}
+
+function loadContratosNFADaPlanilha(){
+  var el=document.getElementById('lst-nc');
+  if(el) el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:14px">Carregando...</div>';
+  if(!SHEETS_URL||!navigator.onLine){if(el)el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:14px">Sem conexão.</div>';return;}
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'listarContratosNFA',token:TOKEN})})
+    .then(function(r){return r.text();})
+    .then(function(t){
+      try{
+        var j=JSON.parse(t);
+        contratosNFA=(j.ok&&j.contratos)?j.contratos:[];
+        rContratosNFA();
+      }catch(e){if(el)el.innerHTML='<div style="text-align:center;color:#c0392b;padding:14px">Erro ao carregar.</div>';}
+    })
+    .catch(function(){if(el)el.innerHTML='<div style="text-align:center;color:#c0392b;padding:14px">Sem conexão.</div>';});
+}
+
+function rContratosNFA(){
+  var el=document.getElementById('lst-nc'); if(!el) return;
+  if(!contratosNFA.length){el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:14px">Nenhum contrato NFA.<br>Cadastre acima ou toque ☁️ para carregar.</div>';return;}
+  el.innerHTML=contratosNFA.map(function(c){
+    var cor=c.status==='Ativo'?'var(--g1)':'var(--ink3)';
+    return '<div style="border:1.5px solid var(--brd);border-radius:var(--r2px);padding:11px 13px;margin-bottom:8px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center">'+
+      '<div style="font-weight:700;font-size:14px">'+c.id+'</div>'+
+      '<span style="font-size:11px;font-weight:700;color:'+cor+'">'+(c.status||'')+'</span></div>'+
+      '<div style="font-size:12px;color:var(--ink2);margin-top:3px">'+c.emitente+' → '+c.destinatario_nome+'</div>'+
+      '<div style="font-size:11px;color:var(--ink3);margin-top:2px">'+(c.produto||'')+' · R$ '+Number(c.valor_unitario||0).toFixed(4)+'/'+(c.unidade||'KG')+
+      ' · Saldo: '+Number(c.saldo||0).toLocaleString('pt-BR')+'</div>'+
+      '</div>';
+  }).join('');
 }
 
 /* ══ SCANNER CNH / DOCUMENTO ═══════════════════════════════════ */
