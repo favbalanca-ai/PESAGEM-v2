@@ -4857,7 +4857,7 @@ async function abrirModalNFA(){
   const sel=document.getElementById('nfa-contrato-sel');
   sel.innerHTML='<option value="">Carregando...</option>';
   try{
-    const r=await fetch(`${GAS_URL}?action=listarContratos&filtros=${encodeURIComponent(JSON.stringify({status:'Ativo'}))}`);
+    const r=await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'listarContratosNFA',filtros:{status:'Ativo'},token:TOKEN})});
     const d=await r.json();
     _nfaContratos=d.contratos||[];
     sel.innerHTML='<option value="">Selecione o contrato...</option>'+
@@ -4881,7 +4881,7 @@ async function abrirPreviaNFA(){
   if(!contratoId){alert('Selecione um contrato.');return;}
   document.getElementById('modal-sel-contrato').style.display='none';
   try{
-    const r=await fetch(`${GAS_URL}?action=montarDadosNFA&ticket_id=${encodeURIComponent(_nfaTicketAtual)}&contrato_id=${encodeURIComponent(contratoId)}`);
+    const r=await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,contrato_id:contratoId,token:TOKEN})});
     const d=await r.json();
     if(d.erro)throw new Error(d.erro);
     _nfaDados=d.nfa;
