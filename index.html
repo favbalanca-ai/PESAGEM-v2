@@ -849,7 +849,7 @@ body.dark .card{background:#1a2d22}
           </select>
         </div>
         <div class="f"><label>Tipo de Operação *</label>
-          <select id="nc-tipoop"><option value="">-- escolha o grupo primeiro --</option></select>
+          <select id="nc-tipoop" onchange="favPreencherDispLegal()"><option value="">-- escolha o grupo primeiro --</option></select>
         </div>
       </div>
       <div class="r2">
@@ -859,6 +859,11 @@ body.dark .card{background:#1a2d22}
         <div class="f">
           <label>Unidade</label>
           <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
+        </div>
+      </div>
+      <div class="r2" id="nc-displegal-wrap" style="display:none">
+        <div class="f"><label>Dispositivo Legal <span style="font-weight:400;color:var(--g2,#888)">(só p/ remessa/transferência com benefício)</span></label>
+          <select id="nc-displegal"><option value="">-- não aplicável --</option></select>
         </div>
       </div>
       <div class="r2">
@@ -2285,6 +2290,39 @@ function favPreencherTipoOp(){
   var p0=document.createElement('option'); p0.value=''; p0.textContent='-- selecione --'; selProd.appendChild(p0);
   FAV_SEFAZ[grupo].produto.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=p;selProd.appendChild(o);});
 }
+// ── Dispositivo Legal por código de Tipo de Operação (SOJA mapeado do SEFAZ) ──
+// Chave = código da operação (últimos 4 díg). Vendas (5101 etc) NÃO entram aqui = campo desabilitado.
+var FAV_DISPLEGAL = {
+  '5501':['DESTINE AO EXTERIOR MERCADORIA, INCLUSIVE PRODUTOS PRIMARIO,INDUSTRIALIZADO E SEMI-ELABORADO','CONTRIBUICAO PARA O FUNDEINFRA'],
+  '5905':['DESTINE MERCADORIA A DEPOSITO FECHADO DO PROPRIO CONTRIBUINTE,LOCALIZADO NO ESTADO,E O SEU RETORNO','DESTINE MERCAD A ARMAZEM GERAL NESTE ESTADO,P/DEPOSITO EM NOME REMETENTE E RETORNO ESTAB DEPOSITANTE'],
+  '5906':['DESTINE MERCADORIA A DEPOSITO FECHADO DO PROPRIO CONTRIBUINTE,LOCALIZADO NO ESTADO,E O SEU RETORNO','DESTINE MERCAD A ARMAZEM GERAL NESTE ESTADO,P/DEPOSITO EM NOME REMETENTE E RETORNO ESTAB DEPOSITANTE'],
+  '5907':['DESTINE MERCADORIA A DEPOSITO FECHADO DO PROPRIO CONTRIBUINTE,LOCALIZADO NO ESTADO,E O SEU RETORNO','DESTINE MERCAD A ARMAZEM GERAL NESTE ESTADO,P/DEPOSITO EM NOME REMETENTE E RETORNO ESTAB DEPOSITANTE'],
+  '5923':['DESTINE MERCAD A ARMAZEM GERAL NESTE ESTADO,P/DEPOSITO EM NOME REMETENTE E RETORNO ESTAB DEPOSITANTE','VENDA A ORDEM, ENTREGA GLOBAL OU PARCIAL DA MERCADORIA A TERCEIRO'],
+  '5924':['FATURAMENTO DE VENDA A ORDEM OU PARA ENTREGA FUTURA'],
+  '5910':['OPERACAO INTERNA CORRESPONDENTE DOACAO MERCAD OU BEM A ORGANIZACAO DAS VOLUNTARIAS EST GOIAS - OVG'],
+  '1906':['DESTINE MERCADORIA A DEPOSITO FECHADO DO PROPRIO CONTRIBUINTE,LOCALIZADO NO ESTADO,E O SEU RETORNO'],
+  '5456':['PARECER GEOT 208-24 SAIDA REMUNERACAO DO PRODUTOR PARCERIA RURAL'],
+  '5922':['FATURAMENTO DE VENDA A ORDEM OU PARA ENTREGA FUTURA'],
+  '5151':['SAIDA INTERNA DE PRODUCAO PROPRIA DO ESTAB. PARA OUTRO PERTENCENTE A MESMA PESSOA NATURAL OU JURIDIC'],
+  '5152':['SAIDA INTERNA DE PRODUCAO PROPRIA DO ESTAB. PARA OUTRO PERTENCENTE A MESMA PESSOA NATURAL OU JURIDIC']
+};
+function favPreencherDispLegal(){
+  var tipoop=document.getElementById('nc-tipoop').value;
+  var wrap=document.getElementById('nc-displegal-wrap');
+  var sel=document.getElementById('nc-displegal');
+  var cod=(tipoop.match(/(\d{4})\s*$/)||[])[1]||'';
+  var opcoes=FAV_DISPLEGAL[cod];
+  sel.innerHTML='';
+  if(!opcoes){
+    // operação sem dispositivo legal (ex: vendas) -> esconde
+    sel.innerHTML='<option value="">-- não aplicável --</option>';
+    wrap.style.display='none';
+    return;
+  }
+  wrap.style.display='';
+  var o0=document.createElement('option'); o0.value=''; o0.textContent='-- nenhum (sem benefício) --'; sel.appendChild(o0);
+  opcoes.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);});
+}
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
   var produto=document.getElementById('nc-produto').value.trim();
@@ -2305,6 +2343,7 @@ function addContratoNFA(){
     destinatario_whatsapp: document.getElementById('nc-dest-wa').value.replace(/\D/g,''),
     grupo_produto: document.getElementById('nc-grupo').value.trim(),
     tipo_operacao: document.getElementById('nc-tipoop').value.trim(),
+    dispositivo_legal: (document.getElementById('nc-displegal')?document.getElementById('nc-displegal').value.trim():''),
     produto: produto,
     unidade: document.getElementById('nc-unidade').value,
     valor_unitario: valor,
@@ -2328,6 +2367,7 @@ function addContratoNFA(){
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
           ['nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
+          if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
           loadContratosNFADaPlanilha();
         }else{
