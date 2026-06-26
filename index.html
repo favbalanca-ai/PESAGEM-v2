@@ -837,13 +837,25 @@ body.dark .card{background:#1a2d22}
       </div>
       <div class="f"><label>WhatsApp</label><input type="text" id="nc-dest-wa" placeholder="5561999990000"></div>
 
-      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">PRODUTO / OPERAÇÃO</div>
+      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">PRODUTO / OPERAÇÃO (opções oficiais SEFAZ-GO)</div>
       <div class="r2">
-        <div class="f"><label>Grupo</label><input type="text" id="nc-grupo" placeholder="GRAOS, GADO..."></div>
-        <div class="f"><label>Tipo de Operação</label><input type="text" id="nc-tipoop" placeholder="VENDA, REMESSA..."></div>
+        <div class="f"><label>Grupo *</label>
+          <select id="nc-grupo" onchange="favPreencherTipoOp()">
+            <option value="">-- selecione o grupo --</option>
+            <option value="SOJA">SOJA</option>
+            <option value="MILHO">MILHO</option>
+            <option value="SORGO">SORGO</option>
+            <option value="FEIJAO">FEIJAO</option>
+          </select>
+        </div>
+        <div class="f"><label>Tipo de Operação *</label>
+          <select id="nc-tipoop"><option value="">-- escolha o grupo primeiro --</option></select>
+        </div>
       </div>
       <div class="r2">
-        <div class="f"><label>Produto *</label><input type="text" id="nc-produto" placeholder="SOJA EM GRAOS"></div>
+        <div class="f"><label>Produto *</label>
+          <select id="nc-produto"><option value="">-- escolha o grupo primeiro --</option></select>
+        </div>
         <div class="f">
           <label>Unidade</label>
           <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
@@ -2254,6 +2266,25 @@ function selBalancaNFA(nb){
   b1.style.borderRadius=b2.style.borderRadius='var(--r2px)';
 }
 
+var FAV_SEFAZ = {
+  SOJA:{tipoop:['VENDA INTERNA SOJA PRODUCAO PROPRIA - 5101','VENDA INTERNA SOJA ADQUIRIDO DE TERCEIROS - 5102','VENDA INTERN. SOJA PROD. PROP. ENTREGUE AO DEST. - 5118','VENDA INTERN. SOJA PROD.PROP. SEM TRANS. EST.ADQ. - 5122','VENDA INTERNA SOJA ADQ TERCEIROS ENTREGA FUTURA - 5117','VENDA INTERNA SOJA PROD PROPRIA ENTREGA FUTURA - 5116','REMESSA DE PROD DO ESTABELECIMENTO, P FINS EXPORT - 5501','TRANSFERENCIA INTERNA SOJA PROD PROPRIA - 5151','TRANSFERENCIA INTERNA SOJA ADQUIRIDO TERC - 5152','REMESSA PROD ESTAB PREV AJUSTE ATO COOPERATIV - 5131'],produto:['SOJA TRANSGENICA EM GRAO SC 60 KG UN PRODUTOR/EXTRATOR','SOJA TRANSGENICA EM GRAO KG PRODUTOR/EXTRATOR','SOJA TRANSGENICA EM GRAO T PRODUTOR/EXTRATOR','SOJA CONVENCIONAL(SEM TRANSGENIA) EM GRAO SC 60 KG UN PRODUTOR/EXTRATOR','SOJA CONVENCIONAL(SEM TRANSGENIA) EM GRAO KG PRODUTOR/EXTRATOR','SOJA CONVENCIONAL(SEM TRANSGENIA) EM GRAO T PRODUTOR/EXTRATOR','SOJA EM GRAO ORIUNDO DE CAMPO DE SEMENTES KG PRODUTOR/EXTRATOR','SOJA SEMENTE TODOS OS TIPOS KG PRODUTOR/EXTRATOR','SOJA RESIDUO KG INDUSTRIA']},
+  MILHO:{tipoop:['VENDA INTERNA MILHO PRODUCAO PROPRIA - 5101','VENDA INTERNA MILHO ADQUIRIDO DE TERCEIROS - 5102','VENDA INTERNA MILHO PROD PROP ENTREGUE AO DEST - 5118','VENDA INTERNA MILHO PROD PROP SEM TRANS ESTAB ADQ - 5122','VENDA INTERNA MILHO ADQ TERCEIROS ENTREGA FUTURA - 5117','REMESSA INTERNA MILHO PROD PROPRIA ENTREGA FUTURA - 5116','REMESSA INTERNA FIM ESP. DE EXPORT. PROD. PROP. - 5501','REMESSA INTERNA FIM ESP. DE EXPORT. ADQ. TERC. - 5502','TRANSFERENCIA INTERNA MILHO PROD PROPRIA - 5151','TRANSFERENCIA INTERNA MILHO ADQUIRIDO TERC - 5152'],produto:['MILHO DEBULHADO SC 60 KG UN PRODUTOR/EXTRATOR','MILHO DEBULHADO KG PRODUTOR/EXTRATOR','MILHO EM GRAO ORIUNDO DE CAMPO DE SEMENTES KG PRODUTOR/EXTRATOR','MILHO DE PIPOCA KG PRODUTOR/EXTRATOR','MILHO SEMENTE DE MILHO 60KG SC ATACADO','MILHO SEMENTE DE MILHO KG ATACADO','MILHO RESIDUO KG INDUSTRIA']},
+  SORGO:{tipoop:['VENDA INTERNA SORGO PRODUCAO PROPRIA - 5101','VENDA INTERNA SORGO ADQUIRIDO DE TERCEIROS - 5102','VENDA INTERNA ORIGINADA ENCOMENDA P ENTREGA FUTURA - 5116','REMESSA SORGO INTERNA, FIM ESPECIFICO EXPORTACAO - 5501','TRANSFERENCIA INTERNA SORGO PROD PROPRIA - 5151','TRANSFERENCIA INTERNA SORGO ADQUIRIDO TERC - 5152'],produto:['SORGO EM GRAO A GRANEL SC 60 KG UN PRODUTOR/EXTRATOR','SORGO EM GRAO A GRANEL KG PRODUTOR/EXTRATOR','SORGO EM GRAO ORIUNDO DE CAMPO DE SEMENTES KG PRODUTOR/EXTRATOR','SORGO RESIDUO KG INDUSTRIA']},
+  FEIJAO:{tipoop:['VENDA INTERNA FEIJAO PRODUCAO PROPRIA - 5101','VENDA INTERNA FEIJAO ADQUIRIDO TERCEIROS - 5102'],produto:['FEIJAO CARIOQUINHA DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO AMARELO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO BRANCO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR']}
+};
+function favPreencherTipoOp(){
+  var grupo=document.getElementById('nc-grupo').value;
+  var selOp=document.getElementById('nc-tipoop'); var selProd=document.getElementById('nc-produto');
+  selOp.innerHTML=''; selProd.innerHTML='';
+  if(!grupo||!FAV_SEFAZ[grupo]){
+    selOp.innerHTML='<option value="">-- escolha o grupo primeiro --</option>';
+    selProd.innerHTML='<option value="">-- escolha o grupo primeiro --</option>'; return;
+  }
+  var o0=document.createElement('option'); o0.value=''; o0.textContent='-- selecione --'; selOp.appendChild(o0);
+  FAV_SEFAZ[grupo].tipoop.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t;selOp.appendChild(o);});
+  var p0=document.createElement('option'); p0.value=''; p0.textContent='-- selecione --'; selProd.appendChild(p0);
+  FAV_SEFAZ[grupo].produto.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=p;selProd.appendChild(o);});
+}
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
   var produto=document.getElementById('nc-produto').value.trim();
@@ -2297,6 +2328,7 @@ function addContratoNFA(){
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
           ['nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
+          favPreencherTipoOp();
           loadContratosNFADaPlanilha();
         }else{
           toast('❌ Erro: '+(j.erro||'desconhecido'));
