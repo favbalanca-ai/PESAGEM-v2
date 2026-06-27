@@ -804,6 +804,8 @@ body.dark .card{background:#1a2d22}
       <button class="fil on" onclick="setF(this,'all')">Todos</button>
       <button class="fil" onclick="setF(this,'hj')">Hoje</button>
       <button class="fil" onclick="setF(this,'ag')">Aguardando</button>
+      <button class="fil" onclick="setF(this,'nfa-ag')">⏳ Aguardando NFA</button>
+      <button class="fil" onclick="setF(this,'nfa-ok')">✅ Liberados</button>
       <button class="fil" onclick="setF(this,'ok')">Conformes</button>
       <button class="fil" onclick="setF(this,'er')">Excedidos</button>
     </div>
@@ -819,6 +821,10 @@ body.dark .card{background:#1a2d22}
       <!-- EMITENTE -->
       <div class="fsec">
         <div class="fsh"><span class="fsi">👤</span> Emitente da Nota</div>
+        <div class="f">
+          <label>Número do Contrato <span style="font-weight:400;color:var(--ink3)">(deixe em branco para gerar automático)</span></label>
+          <input type="text" id="nc-id" placeholder="Ex: CTR-2026-0001" style="text-transform:uppercase">
+        </div>
         <div class="r2">
           <div class="f">
             <label>Emitente *</label>
@@ -844,7 +850,7 @@ body.dark .card{background:#1a2d22}
         <div class="fsh"><span class="fsi">🏢</span> Destinatário</div>
         <div class="r2">
           <div class="f"><label>Nome / Razão Social *</label><input type="text" id="nc-dest-nome" placeholder="FRIGORÍFICO X LTDA"></div>
-          <div class="f"><label>CNPJ</label><input type="text" id="nc-dest-cnpj" placeholder="00.000.000/0001-00"></div>
+          <div class="f"><label>CNPJ</label><input type="text" id="nc-dest-cnpj" placeholder="00.000.000/0001-00" inputmode="numeric" maxlength="18" oninput="favMascaraCNPJ(this)"></div>
         </div>
         <div class="r2">
           <div class="f"><label>Inscrição Estadual</label><input type="text" id="nc-dest-ie" placeholder="IE do destinatário"></div>
@@ -2347,6 +2353,14 @@ function favPreencherDispLegal(){
   var o0=document.createElement('option'); o0.value=''; o0.textContent='-- nenhum (sem benefício) --'; sel.appendChild(o0);
   opcoes.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);});
 }
+function favMascaraCNPJ(el){
+  var v=el.value.replace(/\D/g,'').slice(0,14);
+  if(v.length>12) v=v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{0,2}).*/,'$1.$2.$3/$4-$5');
+  else if(v.length>8) v=v.replace(/^(\d{2})(\d{3})(\d{3})(\d{0,4})/,'$1.$2.$3/$4');
+  else if(v.length>5) v=v.replace(/^(\d{2})(\d{3})(\d{0,3})/,'$1.$2.$3');
+  else if(v.length>2) v=v.replace(/^(\d{2})(\d{0,3})/,'$1.$2');
+  el.value=v;
+}
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
   var produto=document.getElementById('nc-produto').value.trim();
@@ -2358,6 +2372,7 @@ function addContratoNFA(){
   if(vol<=0){toast('⚠️ Informe o volume total!');return;}
 
   var dados={
+    id: (document.getElementById('nc-id')?document.getElementById('nc-id').value.trim().toUpperCase():''),
     emitente: document.getElementById('nc-emit').value,
     tipo_nota: document.getElementById('nc-tipo').value,
     destinatario_nome: nome,
@@ -2390,7 +2405,7 @@ function addContratoNFA(){
         var j=JSON.parse(t);
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
-          ['nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
+          ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
           if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
           loadContratosNFADaPlanilha();
@@ -3372,6 +3387,8 @@ function rHist(){
   // filtro de status
   if(filAtivo==='hj') ls=ls.filter(o=>o.dataEntrada===hj);
   else if(filAtivo==='ag') ls=ls.filter(o=>(o.status||'').toLowerCase().includes('aguardando'));
+  else if(filAtivo==='nfa-ag') ls=ls.filter(o=>(o.status||'').includes('Finalizado')&&!o.nfa_emitida);
+  else if(filAtivo==='nfa-ok') ls=ls.filter(o=>o.nfa_emitida);
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
   // filtro de contrato
@@ -3395,7 +3412,12 @@ function rHist(){
       <div class="oi">👤 ${o.motorista} · <span style="color:var(--g1);font-weight:700">${o.numOrdem||'—'}</span></div>
       ${o.formulaEixos?`<div class="oi" style="font-family:'JetBrains Mono',monospace;font-size:11px">${o.formulaEixos}</div>`:''}
       ${o.pesoBruto?`<div class="oi">⚖️ ${parseFloat(o.pesoBruto).toFixed(3)}t → Carga: ${parseFloat(o.cargaLiquida||0).toFixed(3)}t (${Math.round(parseFloat(o.cargaLiquida||0)*1000)}kg)</div>`:''}
-      <span class="obg ${bg}">${st}</span>
+      <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+        <span class="obg ${bg}">${st}</span>
+        ${(o.status||'').includes('Finalizado') ? (o.nfa_emitida
+          ? `<span class="obg" style="background:#d4edda;color:#155724">✅ NFA ${o.nfa_numero||'emitida'}</span>`
+          : `<span class="obg" style="background:#fff3cd;color:#856404">⏳ Aguardando NFA</span>`) : ''}
+      </div>
     </div>`;
   }).join('');
 }
