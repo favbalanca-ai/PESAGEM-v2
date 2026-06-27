@@ -57,6 +57,15 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .f input:focus,.f textarea:focus{outline:none;border-color:var(--g1)}
 .placa{font-family:'JetBrains Mono',monospace!important;font-size:22px!important;font-weight:700!important;text-align:center!important;letter-spacing:4px!important;text-transform:uppercase!important}
 .r2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+/* selects com o mesmo visual dos inputs + setinha */
+.f select{width:100%;padding:10px 36px 10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:15px;font-family:'Inter',sans-serif;background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none;transition:border .12s;cursor:pointer;background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%231a5c45' d='M6 8 0 0h12z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center}
+.f select:focus{outline:none;border-color:var(--g1)}
+/* seções agrupadas do formulário de contrato */
+.fsec{border:1px solid var(--brd);border-radius:var(--r2px);padding:12px 12px 4px;margin-bottom:12px;background:linear-gradient(180deg,#fbfdfc,#fff)}
+.fsec>.fsh{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:800;color:var(--g1);text-transform:uppercase;letter-spacing:.06em;margin:-2px 0 11px}
+.fsec>.fsh .fsi{width:22px;height:22px;border-radius:6px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:12px}
+.fsec>.fsh small{font-weight:500;text-transform:none;letter-spacing:0;color:var(--ink3);font-size:10px;margin-left:auto}
+.fhelp{font-size:10px;color:var(--ink3);margin:-2px 0 9px;line-height:1.4}
 
 /* FOTO */
 .fb{position:relative;border:1.5px dashed var(--brd);border-radius:var(--r2px);background:#f8fbf9;padding:10px 5px;text-align:center;cursor:pointer;overflow:hidden;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:68px}
@@ -807,91 +816,106 @@ body.dark .card{background:#1a2d22}
       <div class="ct">📄 Cadastrar Contrato</div>
       <div style="font-size:11px;color:var(--ink3);margin:-4px 0 10px">Um contrato reúne o controle de carregamento e os dados para emissão da NFA.</div>
 
-      <div class="r2">
-        <div class="f">
-          <label>Emitente *</label>
-          <select id="nc-emit">
-            <option value="JOVANE">Jovane Gatto Cossul</option>
-            <option value="JOAQUIM">Joaquim Gatto Cossul</option>
-            <option value="TAIS">Taís Gatto Cossul</option>
-            <option value="JOAO">João Germano Cossul</option>
-          </select>
-        </div>
-        <div class="f">
-          <label>Tipo de Nota *</label>
-          <select id="nc-tipo">
-            <option value="NORMAL">Normal (grãos/produtos)</option>
-            <option value="GADO">Gado (cabeças)</option>
-          </select>
+      <!-- EMITENTE -->
+      <div class="fsec">
+        <div class="fsh"><span class="fsi">👤</span> Emitente da Nota</div>
+        <div class="r2">
+          <div class="f">
+            <label>Emitente *</label>
+            <select id="nc-emit">
+              <option value="JOVANE">Jovane Gatto Cossul</option>
+              <option value="JOAQUIM">Joaquim Gatto Cossul</option>
+              <option value="TAIS">Taís Gatto Cossul</option>
+              <option value="JOAO">João Germano Cossul</option>
+            </select>
+          </div>
+          <div class="f">
+            <label>Tipo de Nota *</label>
+            <select id="nc-tipo">
+              <option value="NORMAL">Normal (grãos/produtos)</option>
+              <option value="GADO">Gado (cabeças)</option>
+            </select>
+          </div>
         </div>
       </div>
 
-      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">DESTINATÁRIO</div>
-      <div class="r2">
-        <div class="f"><label>Nome / Razão Social *</label><input type="text" id="nc-dest-nome" placeholder="FRIGORÍFICO X LTDA"></div>
-        <div class="f"><label>CNPJ</label><input type="text" id="nc-dest-cnpj" placeholder="00.000.000/0001-00"></div>
+      <!-- DESTINATÁRIO -->
+      <div class="fsec">
+        <div class="fsh"><span class="fsi">🏢</span> Destinatário</div>
+        <div class="r2">
+          <div class="f"><label>Nome / Razão Social *</label><input type="text" id="nc-dest-nome" placeholder="FRIGORÍFICO X LTDA"></div>
+          <div class="f"><label>CNPJ</label><input type="text" id="nc-dest-cnpj" placeholder="00.000.000/0001-00"></div>
+        </div>
+        <div class="r2">
+          <div class="f"><label>Inscrição Estadual</label><input type="text" id="nc-dest-ie" placeholder="IE do destinatário"></div>
+          <div class="f"><label>E-mail</label><input type="email" id="nc-dest-email" placeholder="email@empresa.com"></div>
+        </div>
+        <div class="f"><label>WhatsApp</label><input type="text" id="nc-dest-wa" placeholder="5561999990000"></div>
       </div>
-      <div class="r2">
-        <div class="f"><label>Inscrição Estadual</label><input type="text" id="nc-dest-ie" placeholder="IE do destinatário"></div>
-        <div class="f"><label>E-mail</label><input type="email" id="nc-dest-email" placeholder="email@empresa.com"></div>
-      </div>
-      <div class="f"><label>WhatsApp</label><input type="text" id="nc-dest-wa" placeholder="5561999990000"></div>
 
-      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">PRODUTO / OPERAÇÃO (opções oficiais SEFAZ-GO)</div>
-      <div class="r2">
-        <div class="f"><label>Grupo *</label>
-          <select id="nc-grupo" onchange="favPreencherTipoOp()">
-            <option value="">-- selecione o grupo --</option>
-            <option value="SOJA">SOJA</option>
-            <option value="MILHO">MILHO</option>
-            <option value="SORGO">SORGO</option>
-            <option value="FEIJAO">FEIJAO</option>
-          </select>
+      <!-- PRODUTO / OPERAÇÃO -->
+      <div class="fsec">
+        <div class="fsh"><span class="fsi">🌾</span> Produto / Operação <small>opções oficiais SEFAZ-GO</small></div>
+        <div class="r2">
+          <div class="f"><label>Grupo *</label>
+            <select id="nc-grupo" onchange="favPreencherTipoOp()">
+              <option value="">-- selecione o grupo --</option>
+              <option value="SOJA">SOJA</option>
+              <option value="MILHO">MILHO</option>
+              <option value="SORGO">SORGO</option>
+              <option value="FEIJAO">FEIJAO</option>
+            </select>
+          </div>
+          <div class="f">
+            <label>Unidade</label>
+            <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
+          </div>
         </div>
         <div class="f"><label>Tipo de Operação *</label>
           <select id="nc-tipoop" onchange="favPreencherDispLegal()"><option value="">-- escolha o grupo primeiro --</option></select>
         </div>
-      </div>
-      <div class="r2">
         <div class="f"><label>Produto *</label>
           <select id="nc-produto"><option value="">-- escolha o grupo primeiro --</option></select>
         </div>
-        <div class="f">
-          <label>Unidade</label>
-          <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
-        </div>
-      </div>
-      <div class="r2" id="nc-displegal-wrap" style="display:none">
-        <div class="f"><label>Dispositivo Legal <span style="font-weight:400;color:var(--g2,#888)">(só p/ remessa/transferência com benefício)</span></label>
+        <div class="f" id="nc-displegal-wrap" style="display:none">
+          <label>Dispositivo Legal <span style="font-weight:400;color:var(--ink3)">(benefício fiscal)</span></label>
           <select id="nc-displegal"><option value="">-- não aplicável --</option></select>
         </div>
       </div>
-      <div class="r2">
-        <div class="f"><label>Valor Unitário (R$) *</label><input type="number" id="nc-valor" placeholder="2.0500" min="0" step="0.0001"></div>
-        <div class="f"><label>Volume Total do Contrato *</label><input type="number" id="nc-vol" placeholder="0" min="0" step="1"></div>
+
+      <!-- VALORES -->
+      <div class="fsec">
+        <div class="fsh"><span class="fsi">💰</span> Valores do Contrato</div>
+        <div class="r2">
+          <div class="f"><label>Valor Unitário (R$) *</label><input type="number" id="nc-valor" placeholder="2.0500" min="0" step="0.0001"></div>
+          <div class="f"><label>Volume Total *</label><input type="number" id="nc-vol" placeholder="0" min="0" step="1"></div>
+        </div>
       </div>
 
-      <div style="font-size:12px;font-weight:700;color:var(--g1);margin:10px 0 4px">CARREGAMENTO / COMPLEMENTO</div>
-      <div class="f">
-        <label>⚖️ Balança *</label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
-          <button type="button" id="nc-bal-btn-1" onclick="selBalancaNFA(1)" class="btn btnp" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 1<br><span style="font-size:10px;font-weight:400;opacity:.8">Água Viva</span></button>
-          <button type="button" id="nc-bal-btn-2" onclick="selBalancaNFA(2)" class="btn btns" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 2<br><span style="font-size:10px;font-weight:400;opacity:.8">Espora</span></button>
-        </div>
-        <input type="hidden" id="nc-bal" value="1">
-      </div>
-      <div class="r2">
-        <div class="f"><label>Safra</label><input type="text" id="nc-safra" placeholder="2025/2026"></div>
-        <div class="f"><label>Origem Mercadoria</label><input type="text" id="nc-origem" placeholder="Município / UF"></div>
-      </div>
-      <div class="r2">
+      <!-- CARREGAMENTO / COMPLEMENTO -->
+      <div class="fsec">
+        <div class="fsh"><span class="fsi">⚖️</span> Carregamento / Complemento</div>
         <div class="f">
-          <label>Responsável Frete</label>
-          <select id="nc-frete"><option value="Destinatário">Destinatário</option><option value="Remetente">Remetente</option><option value="Sem Frete">Sem Frete</option></select>
+          <label>Balança *</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:7px">
+            <button type="button" id="nc-bal-btn-1" onclick="selBalancaNFA(1)" class="btn btnp" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 1<br><span style="font-size:10px;font-weight:400;opacity:.8">Água Viva</span></button>
+            <button type="button" id="nc-bal-btn-2" onclick="selBalancaNFA(2)" class="btn btns" style="padding:10px;font-size:13px;margin:0;border-radius:var(--r2px)">⚖️ Balança 2<br><span style="font-size:10px;font-weight:400;opacity:.8">Espora</span></button>
+          </div>
+          <input type="hidden" id="nc-bal" value="1">
         </div>
-        <div class="f"><label>Obs</label><input type="text" id="nc-obs" placeholder="Observações"></div>
+        <div class="r2">
+          <div class="f"><label>Safra</label><input type="text" id="nc-safra" placeholder="2025/2026"></div>
+          <div class="f"><label>Origem Mercadoria</label><input type="text" id="nc-origem" placeholder="Município / UF"></div>
+        </div>
+        <div class="r2">
+          <div class="f">
+            <label>Responsável Frete</label>
+            <select id="nc-frete"><option value="Destinatário">Destinatário</option><option value="Remetente">Remetente</option><option value="Sem Frete">Sem Frete</option></select>
+          </div>
+          <div class="f"><label>Obs</label><input type="text" id="nc-obs" placeholder="Observações"></div>
+        </div>
+        <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
       </div>
-      <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
 
       <button class="btn btnp" onclick="addContratoNFA()" style="margin-top:3px">📄 Cadastrar Contrato</button>
     </div>
