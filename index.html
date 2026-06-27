@@ -1609,6 +1609,7 @@ function irHist(){
     loadCl().then(function(){
       popContratosHist();
       rHist();
+      favEmitirPorURL(); // Opção A: se veio ?emitir=ID da planilha, abre a emissão
     });
   }
 }
@@ -5105,6 +5106,34 @@ async function iaLerDocumentoRec(input){
 let _nfaDados=null,_nfaTicketAtual=null,_nfaContratos=[],_nfaPolling=null;
 
 function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'ddnaadghnmimdndmlpcebiioedaafgne';}
+
+// ── Opção A: emitir NFA a partir de link da planilha (?emitir=TICKET_ID) ──
+async function favEmitirPorURL(){
+  try{
+    var params = new URLSearchParams(window.location.search);
+    var ticketId = params.get('emitir');
+    if(!ticketId) return;
+    // precisa estar logado como admin
+    if(!usr || usr.nivel !== 'admin'){
+      toast('🔒 Faça login como administrador para emitir NFA');
+      return;
+    }
+    // garante que as cargas estão carregadas
+    if(!cloud || !cloud.length){ await loadCl(); }
+    // acha a carga pelo id ou pelo número da ordem
+    var carga = (cloud||[]).find(function(o){ return o.id===ticketId || o.numOrdem===ticketId; });
+    if(!carga){
+      toast('⚠️ Carga '+ticketId+' não encontrada');
+      return;
+    }
+    // define o ticket atual e abre o fluxo de emissão (mesmo do botão Emitir NFA)
+    _nfaTicketAtual = carga.id;
+    toast('📄 Abrindo emissão da carga '+ (carga.numOrdem||carga.id) +'...');
+    // limpa o parâmetro da URL para não reabrir ao atualizar
+    try{ history.replaceState(null,'',window.location.pathname); }catch(e){}
+    await abrirModalNFA();
+  }catch(e){ console.log('favEmitirPorURL erro:', e); }
+}
 
 async function abrirModalNFA(){
   if(!_nfaTicketAtual)return;
