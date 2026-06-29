@@ -866,7 +866,7 @@ body.dark .card{background:#1a2d22}
         <div class="r2">
           <div class="f">
             <label>Emitente *</label>
-            <select id="nc-emit">
+            <select id="nc-emit" onchange="preencherOrigemEmitente()">
               <option value="JOVANE">Jovane Gatto Cossul</option>
               <option value="JOAQUIM">Joaquim Gatto Cossul</option>
               <option value="TAIS">Taís Gatto Cossul</option>
@@ -2003,7 +2003,11 @@ function popContratosHist(){
   }
   sel.innerHTML=opts;
 }
-function irOrdens(){showPg('pg-oc','📄 Contratos NFA');loadContratosNFADaPlanilha();}
+function irOrdens(){showPg('pg-oc','📄 Contratos NFA');loadContratosNFADaPlanilha();
+  // Pré-preenche a origem conforme o emitente, se ainda estiver vazia
+  var oMun=document.getElementById('nc-origem-mun');
+  if(oMun && !oMun.value.trim()) preencherOrigemEmitente();
+}
 
 /* ══ EIXOS ════════════════════════════════════════════════════ */
 function adj(id,d){
@@ -2461,6 +2465,16 @@ function favMascaraCNPJ(el){
   else if(v.length>2) v=v.replace(/^(\d{2})(\d{0,3})/,'$1.$2');
   el.value=v;
 }
+// Origem da mercadoria conforme o emitente (sede de cada produtor)
+function preencherOrigemEmitente(){
+  var em=document.getElementById('nc-emit').value;
+  var mun = em==='JOVANE' ? 'Alvorada do Norte' : "Sítio d'Abadia";
+  var selUf=document.getElementById('nc-origem-uf');
+  if(selUf){ selUf.value='GO'; carregarMunicipios('GO'); }
+  var inMun=document.getElementById('nc-origem-mun');
+  if(inMun) inMun.value=mun;
+}
+
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
   var produto=document.getElementById('nc-produto').value.trim();
@@ -2510,6 +2524,7 @@ function addContratoNFA(){
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
           ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem-uf','nc-origem-mun','nc-info','nc-obs'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+          preencherOrigemEmitente();
           if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
           loadContratosNFADaPlanilha();
