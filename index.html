@@ -5213,23 +5213,29 @@ function autorizarNFA(o){
   o.nfa_autorizada_em = new Date().toLocaleString('pt-BR');
   const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
   try{ saveCloud(); }catch(e){}
-  enviar(o,'atualizar');           // grava a autorização na planilha
+  // grava a autorização na planilha (ação dedicada no Apps Script)
+  if(SHEETS_URL && navigator.onLine){
+    fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'autorizarNFA',ticket_id:o.id,por:usr?.nome||'',token:TOKEN})})
+      .then(r=>r.json()).then(j=>{ if(!(j&&j.ok)) toast('⚠️ Autorização salva localmente'); })
+      .catch(()=>toast('⚠️ Sem conexão — autorização salva localmente'));
+  } else {
+    toast('📵 Offline — autorização salva localmente');
+  }
   toast('✅ NFA autorizada — emitir no PC do escritório');
   atualizarBotoesNFA(o);
 }
 
-// Persiste o resultado da emissão (nº da NFA + link do Drive) no ticket/planilha
+// Atualiza o cache local após a emissão (o backend já gravou em NFAs_Emitidas
+// via processarNFA). Mantém os mesmos nomes de campo do listarPesagens.
 function persistirNFAEmitida(data){
   const o = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual && atual.id===_nfaTicketAtual ? atual : null);
   if(!o) return;
   o.nfa_emitida = true; o.nfa_autorizada = true;
-  if(data && data.numero_nfa) o.numero_nfa = data.numero_nfa;
+  if(data && data.numero_nfa) o.nfa_numero = data.numero_nfa;
   if(data && data.drive_url)  o.nfa_drive_url = data.drive_url;
-  o.nfa_emitida_em = new Date().toLocaleString('pt-BR');
-  o.nfa_emitida_por = usr?.nome || '';
   const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
   try{ saveCloud(); }catch(e){}
-  enviar(o,'atualizar');           // grava nº da NFA e Drive na planilha
 }
 
 // Abre o PDF da NFA (Drive) para impressão
