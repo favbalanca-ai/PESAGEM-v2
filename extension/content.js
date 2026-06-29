@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v5.8 (sequência de etapas + resumo de conferência)
+// FAV NFA - Content Script v5.9 (sequência de etapas + resumo de conferência)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {

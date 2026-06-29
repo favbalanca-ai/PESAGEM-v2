@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v5.8
+// FAV NFA - Background Service Worker v5.9
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '5.8' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '5.9' });
     return true;
   }
   return false;
