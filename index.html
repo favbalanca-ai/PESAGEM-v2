@@ -1222,6 +1222,34 @@ body.dark .card{background:#1a2d22}
   </div>
 </div>
 
+<!-- VALIDAR & AUTORIZAR NFA (admin) -->
+<div class="modal hide" id="modal-valida-nfa">
+  <div class="modal-box">
+    <div class="modal-tit">
+      ✅ Validar &amp; Autorizar NFA
+      <button class="modal-close" onclick="fecharValidaNFA()">✕</button>
+    </div>
+    <div id="vn-resumo" style="background:var(--g3);border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.7;color:var(--ink);margin-bottom:12px"></div>
+    <div class="f">
+      <label>Frete / Transporte</label>
+      <select id="vn-tipo" onchange="vnToggle()" style="width:100%;padding:10px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-family:'Inter',sans-serif;font-size:14px;-webkit-appearance:none">
+        <option value="motorista">🚛 Motorista (autônomo)</option>
+        <option value="transportadora">🏢 Transportadora</option>
+      </select>
+    </div>
+    <div id="vn-box-mot">
+      <div class="f"><label>Motorista</label><input type="text" id="vn-mot-nome" placeholder="Nome do motorista"></div>
+      <div class="f"><label>CPF</label><input type="text" id="vn-mot-cpf" placeholder="000.000.000-00" maxlength="14" oninput="mcpf(this)"></div>
+    </div>
+    <div id="vn-box-transp" style="display:none">
+      <div class="f"><label>CNPJ da Transportadora</label><input type="text" id="vn-transp-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
+      <div class="f"><label>Nome da Transportadora</label><input type="text" id="vn-transp-nome" placeholder="Razão social"></div>
+    </div>
+    <button class="btn btnp" onclick="confirmarValidaNFA()" style="margin-top:6px">✅ Autorizar emissão</button>
+    <button class="btn btns" onclick="fecharValidaNFA()" style="margin-top:6px">Cancelar</button>
+  </div>
+</div>
+
 <!-- PDF OVERLAY -->
 <div id="pdf-frame">
   <div id="pdf-header">
@@ -1250,7 +1278,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v16"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v17"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5436,16 +5464,62 @@ function _nfaLocalOk(o){
   return false;
 }
 
+// Autorizar = abrir a validação do Adm (escolher transporte + confirmar dados)
 function autorizarNFA(o){
   if(!o || !(usr && usr.nivel==='admin')) return;
   if(!_nfaLocalOk(o)) return;
-  if(!confirm('Autorizar a emissão da NFA deste ticket?\nA emissão será feita no PC do escritório.')) return;
+  abrirValidaNFA(o);
+}
+
+/* ── Validar & Autorizar NFA (escolha transportadora/motorista) ── */
+let _vnTicket=null;
+function abrirValidaNFA(o){
+  _vnTicket=o;
+  document.getElementById('vn-resumo').innerHTML=
+    '🚚 <b>'+(o.placa||'—')+'</b> · 📄 '+(o.numOrdem||'—')+'<br>'+
+    '⚖️ Carga: <b>'+Math.round((o.cargaLiquida||0)*1000).toLocaleString('pt-BR')+' kg</b><br>'+
+    '📍 Origem veículo: '+(o.municipio||'—')+' / '+(o.estado||'—');
+  var tipo = String(o.transpCnpj||'').trim() ? 'transportadora' : (o.nfa_transporte||'motorista');
+  document.getElementById('vn-tipo').value=tipo;
+  document.getElementById('vn-mot-nome').value=o.motorista||'';
+  document.getElementById('vn-mot-cpf').value=o.cpf||'';
+  document.getElementById('vn-transp-cnpj').value=o.transpCnpj||'';
+  document.getElementById('vn-transp-nome').value=o.transpNome||'';
+  vnToggle();
+  document.getElementById('modal-valida-nfa').classList.remove('hide');
+}
+function vnToggle(){
+  var t=document.getElementById('vn-tipo').value;
+  document.getElementById('vn-box-mot').style.display    = t==='transportadora'?'none':'block';
+  document.getElementById('vn-box-transp').style.display = t==='transportadora'?'block':'none';
+}
+function fecharValidaNFA(){ document.getElementById('modal-valida-nfa').classList.add('hide'); }
+function confirmarValidaNFA(){
+  var o=_vnTicket; if(!o) return;
+  var t=document.getElementById('vn-tipo').value;
+  if(t==='transportadora'){
+    var cnpj=document.getElementById('vn-transp-cnpj').value.trim();
+    var tnome=document.getElementById('vn-transp-nome').value.trim();
+    if(!cnpj && !tnome){ toast('⚠️ Informe a transportadora (CNPJ ou nome)'); return; }
+    o.transpCnpj=cnpj; o.transpNome=tnome; o.nfa_transporte='transportadora';
+  } else {
+    var mot=document.getElementById('vn-mot-nome').value.trim();
+    var cpf=document.getElementById('vn-mot-cpf').value.trim();
+    if(!mot){ toast('⚠️ Informe o motorista'); return; }
+    o.motorista=mot; o.cpf=cpf; o.transpCnpj=''; o.transpNome=''; o.nfa_transporte='motorista';
+  }
+  fecharValidaNFA();
+  _aplicarAutorizacao(o);
+}
+function _aplicarAutorizacao(o){
   o.nfa_autorizada = true;
   o.nfa_autorizada_por = usr?.nome || '';
   o.nfa_autorizada_em = new Date().toLocaleString('pt-BR');
   const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
+  if(atual && atual.id===o.id) atual=o;
   try{ saveCloud(); }catch(e){}
-  // grava a autorização na planilha (ação dedicada no Apps Script)
+  // grava dados de transporte (atualizar) + a autorização (autorizarNFA)
+  enviar(o,'atualizar');
   if(SHEETS_URL && navigator.onLine){
     fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'autorizarNFA',ticket_id:o.id,por:usr?.nome||'',token:TOKEN})})
@@ -5454,8 +5528,8 @@ function autorizarNFA(o){
   } else {
     toast('📵 Offline — autorização salva localmente');
   }
-  toast('✅ NFA autorizada — emitir no PC do escritório');
-  atualizarBotoesNFA(o);
+  toast('✅ NFA autorizada — pronta para emitir (app ou Painel)');
+  if(typeof atualizarBotoesNFA==='function') atualizarBotoesNFA(o);
 }
 
 // Atualiza o cache local após a emissão (o backend já gravou em NFAs_Emitidas
