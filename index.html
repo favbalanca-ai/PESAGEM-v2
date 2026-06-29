@@ -1123,13 +1123,18 @@ body.dark .card{background:#1a2d22}
   <div class="card">
     <div class="ct">📡 Status atual</div>
     <div id="diag-status" style="font-size:13px;line-height:1.8"></div>
+    <div id="diag-backend" style="font-size:12px;margin-top:8px;padding:8px 10px;background:var(--g3);border-radius:8px">Toque em “Testar servidor”.</div>
+    <button onclick="testarBackend()" style="margin-top:8px;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔌 Testar servidor</button>
   </div>
 
   <!-- Pendentes com detalhe -->
   <div class="card">
     <div class="ct">⏳ Fila offline (<span id="diag-pend-count">0</span>)</div>
     <div id="diag-pend-list" style="font-size:12px"></div>
-    <button onclick="limparFilaInvalidos()" style="margin-top:8px;background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar itens inválidos da fila</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button onclick="reenviarTodos()" style="background:var(--g1);border:none;color:#fff;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩️ Reenviar todos</button>
+      <button onclick="limparFilaInvalidos()" style="background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar inválidos</button>
+    </div>
   </div>
 
   <!-- Log de eventos -->
@@ -1235,6 +1240,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
+const APP_VER    = "v14"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1360,8 +1366,12 @@ window.addEventListener('load',()=>{
   }
   window.addEventListener('online', ()=>{
     document.getElementById('offb').style.display='none';
-    addLog('🌐 Conexão restaurada — iniciando sync','info');
-    syncP();
+    // Reconectou: dá nova chance aos itens que tinham falhado
+    let reset=0;
+    pend.forEach(p=>{ if(p.falhou){ p.falhou=false; p.tentativas=0; reset++; } });
+    if(reset){ saveDB(); addLog('🌐 Conexão restaurada — '+reset+' item(ns) com falha rearmados','info'); }
+    else addLog('🌐 Conexão restaurada — iniciando sync','info');
+    syncP().then(()=>updHome());
   });
   window.addEventListener('offline',()=>{
     document.getElementById('offb').style.display='block';
@@ -3789,13 +3799,62 @@ function iniciarBgSync(){
   }, 3*60*1000); // 3 minutos
 }
 
+/* ── Teste real de conexão com o backend (Apps Script) ───────── */
+async function pingBackend(){
+  const t0=Date.now();
+  if(!navigator.onLine) return {ok:false,msg:'Offline — sem rede no aparelho'};
+  if(!SHEETS_URL) return {ok:false,msg:'SHEETS_URL não configurado'};
+  try{
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'ping',token:TOKEN})});
+    const txt=await r.text();
+    const ms=Date.now()-t0;
+    let j; try{ j=JSON.parse(txt); }catch(e){ return {ok:false,msg:'Resposta inválida do servidor',ms:ms}; }
+    if(j.ok) return {ok:true,msg:'Servidor OK',ms:ms};
+    // erro comum: token diferente entre app e Apps Script
+    return {ok:false,msg:(j.erro==='Token invalido'?'Token inválido (confira TOKEN_SECRET no Apps Script)':('Servidor recusou: '+(j.erro||'erro'))),ms:ms};
+  }catch(e){ return {ok:false,msg:'Sem resposta do servidor: '+e.message,ms:Date.now()-t0}; }
+}
+async function testarBackend(){
+  const el=document.getElementById('diag-backend');
+  if(el) el.innerHTML='🔌 Testando conexão com o servidor...';
+  const r=await pingBackend();
+  if(el){
+    el.style.background = r.ok ? 'var(--g3)' : 'var(--r2)';
+    el.innerHTML = (r.ok
+      ? '<b style="color:var(--g1)">✅ '+r.msg+'</b>'
+      : '<b style="color:var(--r1)">❌ '+r.msg+'</b>')
+      + (r.ms!=null?' <span style="color:var(--ink3)">· '+r.ms+' ms</span>':'');
+  }
+  addLog((r.ok?'✅ Ping servidor OK':'❌ Ping servidor: '+r.msg)+(r.ms!=null?' ('+r.ms+'ms)':''), r.ok?'ok':'erro');
+}
+
+/* ── Reenviar todos os pendentes (reseta falhas e sincroniza) ── */
+function reenviarTodos(){
+  if(!pend.length){ toast('✅ Nada na fila'); return; }
+  pend.forEach(p=>{ p.falhou=false; p.tentativas=0; });
+  saveDB();
+  addLog('↩️ Reenvio de todos solicitado ('+pend.length+' item(ns))','info');
+  if(!navigator.onLine){ toast('📵 Sem internet — tentaremos ao reconectar'); renderDiag(); return; }
+  syncP().then(()=>{ renderDiag(); updHome(); });
+}
+
 /* ── Tela de diagnóstico ─────────────────────────────────────── */
+let _diagTimer=null;
 function irDiag(){
   document.getElementById('pg-diag').style.display='block';
   renderDiag();
+  testarBackend();
+  if(_diagTimer) clearInterval(_diagTimer);
+  _diagTimer=setInterval(()=>{
+    const pg=document.getElementById('pg-diag');
+    if(pg && pg.style.display!=='none') renderDiag();
+    else { clearInterval(_diagTimer); _diagTimer=null; }
+  }, 5000);
 }
 function hideDiag(){
   document.getElementById('pg-diag').style.display='none';
+  if(_diagTimer){ clearInterval(_diagTimer); _diagTimer=null; }
 }
 function renderDiag(){
   // Status
@@ -3810,8 +3869,10 @@ function renderDiag(){
         <div>🌐 Rede: <b style="color:${online?'var(--g1)':'var(--r1)'}">${online?'Online':'Offline'}</b></div>
         <div>🕐 Último sync bem-sucedido: <b>${ult}</b></div>
         <div>⏳ Aguardando envio: <b>${pendOk.length}</b></div>
-        <div style="color:${pendFalhos.length>0?'var(--r1)':'var(--ink3)'}">🔴 Com falha (${MAX_TENTATIVAS} tentativas): <b>${pendFalhos.length}</b>${pendFalhos.length>0?' — toque em "Reenviar" abaixo':''}</div>
+        <div style="color:${pendFalhos.length>0?'var(--r1)':'var(--ink3)'}">🔴 Com falha (${MAX_TENTATIVAS} tentativas): <b>${pendFalhos.length}</b>${pendFalhos.length>0?' — toque em "Reenviar"':''}</div>
         <div>☁️ Registros na planilha: <b>${cloud.length}</b></div>
+        <div>📄 Contratos carregados: <b>${(typeof contratosCloud!=='undefined'?contratosCloud.length:0)}</b></div>
+        <div style="color:var(--ink3)">👤 ${usr?usr.nome:'—'} · ⚖️ ${nomeBal(usr?usr.bal:0)} · 📦 ${APP_VER}</div>
       </div>`;
   }
 
