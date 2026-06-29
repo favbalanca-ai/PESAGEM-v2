@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v33"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v34"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4464,10 +4464,12 @@ function pdfContrato(){
 // visualizador, onde dá pra Compartilhar → Imprimir).
 var _ticketImg=null;
 var _ticketPdfUrl=null;
+var _ticketPdfBlob=null;
+function _ehToque(){ return (navigator.maxTouchPoints||0)>0 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent||''); }
 async function _prepararImpressao(){
   try{
     const page=document.getElementById('pdf-page');
-    if(!page||!page.innerHTML.trim()){ _ticketImg=null; _ticketPdfUrl=null; return; }
+    if(!page||!page.innerHTML.trim()){ _ticketImg=null; _ticketPdfUrl=null; _ticketPdfBlob=null; return; }
     const canvas=await html2canvas(page,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
     _ticketImg=canvas.toDataURL('image/jpeg',0.95);
     const { jsPDF } = window.jspdf;
@@ -4487,12 +4489,15 @@ async function _prepararImpressao(){
     try{ pdf.setLineDashPattern([1.5,1.5],0); }catch(e){}
     pdf.setDrawColor(150);
     pdf.line(margin,half,pgW-margin,half);                       // linha de corte no meio
-    pdf.autoPrint();                                             // PC: abre a caixa de impressão
+    if(!_ehToque()) pdf.autoPrint();                             // PC: abre a caixa de impressão
     if(_ticketPdfUrl){ try{ URL.revokeObjectURL(_ticketPdfUrl); }catch(e){} }
+    _ticketPdfBlob=pdf.output('blob');
     _ticketPdfUrl=''+pdf.output('bloburl');
-  }catch(e){ _ticketImg=null; _ticketPdfUrl=null; console.log('prep impressão:',e); }
+  }catch(e){ _ticketImg=null; _ticketPdfUrl=null; _ticketPdfBlob=null; console.log('prep impressão:',e); }
 }
-// Síncrona: abre o PDF imediatamente no toque (sem await antes — preserva o gesto).
+// Síncrona: dispara no toque (sem await antes — preserva o gesto do usuário).
+// iPhone/Android: abre a folha de Compartilhar (→ Imprimir/AirPrint) com o PDF.
+// PC: abre o PDF com autoPrint (caixa de impressão).
 function imprimirPDF(){
   const src=document.getElementById('pdf-page');
   if(!src||!src.innerHTML.trim()){
@@ -4500,15 +4505,27 @@ function imprimirPDF(){
     toast('⏳ PDF gerado — toque em Imprimir novamente');
     return;
   }
-  if(_ticketPdfUrl){
-    const w=window.open(_ticketPdfUrl,'_blank');
-    if(!w){ location.href=_ticketPdfUrl; }   // pop-up bloqueado: navega direto
-    toast('🖨️ Abrindo folha para impressão...');
-  }else{
-    // ainda não ficou pronto: prepara e pede pra tocar de novo
+  if(!_ticketPdfUrl && !_ticketPdfBlob){
     toast('⏳ Preparando impressão — toque novamente em 1s');
     _prepararImpressao();
+    return;
   }
+  // Celular: compartilhar o arquivo PDF → o iOS mostra "Imprimir" (AirPrint)
+  if(_ehToque() && _ticketPdfBlob && navigator.canShare){
+    try{
+      const arq=new File([_ticketPdfBlob], 'Ticket-2vias.pdf', {type:'application/pdf'});
+      if(navigator.canShare({files:[arq]})){
+        navigator.share({files:[arq], title:'Ticket — 2 vias'})
+          .catch(()=>{ if(_ticketPdfUrl){ const w=window.open(_ticketPdfUrl,'_blank'); if(!w) location.href=_ticketPdfUrl; } });
+        toast('🖨️ Escolha "Imprimir" para usar o AirPrint');
+        return;
+      }
+    }catch(e){ /* cai pro fallback abaixo */ }
+  }
+  // PC (ou se compartilhar não for suportado): abre o PDF
+  const w=window.open(_ticketPdfUrl,'_blank');
+  if(!w){ location.href=_ticketPdfUrl; }   // pop-up bloqueado: navega direto
+  toast('🖨️ Abrindo folha para impressão...');
 }
 
 /* ══════════════════════════════════════════════════════════════
