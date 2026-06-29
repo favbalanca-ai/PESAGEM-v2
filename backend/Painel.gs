@@ -93,7 +93,9 @@ function atualizarPainel(){
     if(!!b.nfa_autorizada !== !!a.nfa_autorizada) return (b.nfa_autorizada?1:0)-(a.nfa_autorizada?1:0);
     return _dataKey(b) - _dataKey(a);
   });
-  linha = secaoTitulo(aba, linha, "⏳  FILA DE EMISSÃO — NFA", aguardando.length + " cargas · " + autorizadas.length + " autorizadas");
+  var incompletas = aguardando.filter(function(o){ return !s(o.estado).trim() || !s(o.municipio).trim(); }).length;
+  var subFila = aguardando.length + " cargas · " + autorizadas.length + " autorizadas" + (incompletas? " · ⚠️ "+incompletas+" sem UF/Mun.":"");
+  linha = secaoTitulo(aba, linha, "⏳  FILA DE EMISSÃO — NFA", subFila);
   linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Contrato","Carga (kg)","Balança","Status","Emitir"]);
   if(aguardando.length === 0){
     linha = linhaVazia(aba, linha, "✓ Nenhuma carga aguardando NFA — tudo em dia!");
@@ -102,17 +104,23 @@ function atualizarPainel(){
     aguardando.forEach(function(o){
       var carga = Math.round(n(o.cargaLiquida)*1000); totFila += carga;
       var link = APP_URL + "?emitir=" + encodeURIComponent(o.id);
-      aba.getRange(linha,1,1,7).setBackground((z++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
+      var falta = !s(o.estado).trim() || !s(o.municipio).trim();   // UF/Município ausente
+      var bgRow = falta ? PNL.vermB : ((z%2)?PNL.zebra:PNL.branco); z++;
+      aba.getRange(linha,1,1,7).setBackground(bgRow).setVerticalAlignment("middle");
       aba.getRange(linha,1).setValue(o.placa||"—").setFontFamily("Roboto Mono").setFontWeight("bold");
       aba.getRange(linha,2).setValue(o.motorista||"—");
       aba.getRange(linha,3).setValue(o.numOrdem||"—").setFontColor(PNL.verde).setFontWeight("bold");
       aba.getRange(linha,4).setValue(carga).setNumberFormat("#,##0").setHorizontalAlignment("right");
-      aba.getRange(linha,5).setValue(_balNome(o)).setFontSize(10).setFontColor(PNL.ink3);
-      if(o.nfa_autorizada)
+      aba.getRange(linha,5).setValue(_balNome(o)).setFontSize(10).setFontColor(falta?PNL.vermT:PNL.ink3);
+      if(falta)
+        aba.getRange(linha,6).setValue("⚠️ Sem UF/Mun.").setBackground(PNL.vermB).setFontColor(PNL.vermT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
+      else if(o.nfa_autorizada)
         aba.getRange(linha,6).setValue("✅ Autorizada").setBackground(PNL.verdeB).setFontColor(PNL.verdeT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
       else
         aba.getRange(linha,6).setValue("⏳ Aguardando").setBackground(PNL.amareloB).setFontColor(PNL.amareloT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
-      aba.getRange(linha,7).setFormula('=HYPERLINK("'+link+'";"📄 EMITIR")').setBackground(PNL.azul).setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
+      // Sem UF/Município → botão vira "Corrigir" (o app abre e pede para completar)
+      aba.getRange(linha,7).setFormula('=HYPERLINK("'+link+'";"'+(falta?'✏️ CORRIGIR':'📄 EMITIR')+'")')
+        .setBackground(falta?PNL.vermT:PNL.azul).setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
       aba.setRowHeight(linha, 30); linha++;
     });
     linha = linhaTotal(aba, linha, "TOTAL NA FILA (kg)", 4, totFila, "#,##0");
