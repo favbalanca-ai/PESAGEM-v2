@@ -1305,7 +1305,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v26"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v27"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2782,25 +2782,41 @@ function onPlaca(placa){
   if(placa.length<7) return;
   const hist=[...cloud].reverse().find(o=>o.placa===placa&&o.motorista);
   if(hist){
+    const temEixos=(parseInt(hist.totalEixos)||0)>0;
     _dadosPlacaAnterior={
       motorista: hist.motorista,
       cpf:       hist.cpf||'',
       municipio: hist.municipio||'',
-      estado:    hist.estado||''
+      estado:    hist.estado||'',
+      transpCnpj:hist.transpCnpj||'',
+      transpNome:hist.transpNome||'',
+      eixos: temEixos?{d:hist.eixosDianteiro,s:hist.eixosSimples,dd:hist.eixosDuplos,t:hist.eixosTriplos}:null
     };
     const local=(hist.municipio||'')+(hist.municipio&&hist.estado?' - ':'')+( hist.estado||'');
     document.getElementById('placa-hist-txt').innerHTML=
       `👤 <b>${hist.motorista}</b>${hist.cpf?' · CPF: '+hist.cpf:''}<br>`+
       `${local?'📍 '+local+'<br>':''}`+
+      `${hist.transpNome||hist.transpCnpj?'🚚 '+(hist.transpNome||hist.transpCnpj)+'<br>':''}`+
+      `${temEixos?'⚙️ '+(hist.totalEixos)+' eixos<br>':''}`+
       `📋 Último: ${hist.numOrdem} · ${hist.dataEntrada}`;
     ph.style.display='block';
   }
 }
 function usarDadosPlaca(){
-  if(_dadosPlacaAnterior.motorista) document.getElementById('f-mt').value=_dadosPlacaAnterior.motorista;
-  if(_dadosPlacaAnterior.cpf)       document.getElementById('f-cpf').value=_dadosPlacaAnterior.cpf;
-  if(_dadosPlacaAnterior.estado)    {document.getElementById('f-uf').value=_dadosPlacaAnterior.estado; carregarMunicipios(_dadosPlacaAnterior.estado);}
-  if(_dadosPlacaAnterior.municipio) document.getElementById('f-mun').value=_dadosPlacaAnterior.municipio;
+  const d=_dadosPlacaAnterior;
+  if(d.motorista) document.getElementById('f-mt').value=d.motorista;
+  if(d.cpf)       document.getElementById('f-cpf').value=d.cpf;
+  if(d.estado)    {document.getElementById('f-uf').value=d.estado; carregarMunicipios(d.estado);}
+  if(d.municipio) document.getElementById('f-mun').value=d.municipio;
+  // Transportadora
+  if(d.transpCnpj){ const e=document.getElementById('f-transp-cnpj'); if(e){e.value=d.transpCnpj; mcnpj(e);} }
+  if(d.transpNome){ const e=document.getElementById('f-transp-nome'); if(e) e.value=d.transpNome; }
+  // Eixos (mesmo caminhão → mesma configuração)
+  if(d.eixos){
+    const setE=(id,v)=>{const el=document.getElementById(id); if(el&&v!=null&&v!=='') el.textContent=String(v);};
+    setE('nd',d.eixos.d); setE('ns',d.eixos.s); setE('ndd',d.eixos.dd); setE('nt',d.eixos.t);
+    if(typeof calcPBT==='function') calcPBT();
+  }
   document.getElementById('placa-hist').style.display='none';
   toast('✅ Dados preenchidos!');
 }
