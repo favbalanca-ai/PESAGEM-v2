@@ -1533,6 +1533,9 @@ function abrirConfigAdmin(){
 function irNova(){
   fotos={}; atual=null; utTara='kg'; utBruto='kg';
   ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf','f-transp-cnpj','f-transp-nome'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  // UF padrão GO (maioria das cargas é de Goiás) — agiliza e carrega a lista de municípios
+  const ufNova=document.getElementById('f-uf');
+  if(ufNova){ ufNova.value='GO'; carregarMunicipios('GO'); }
   // preencher funcionário com o nome do login
   const fnEl=document.getElementById('f-fn');
   if(fnEl) fnEl.value=usr?usr.nome:'—';;
@@ -5253,8 +5256,19 @@ function atualizarBotoesNFA(o){
   }
 }
 
+// Verifica se o ticket tem UF/Município (obrigatórios na NFA). Se faltar,
+// oferece abrir a edição. Retorna true se estiver OK para seguir.
+function _nfaLocalOk(o){
+  if(o && String(o.estado||'').trim() && String(o.municipio||'').trim()) return true;
+  if(confirm('⚠️ Faltam Estado/Município neste ticket — são obrigatórios na NFA.\n\nDeseja editar agora para preencher?')){
+    if(o){ atual=o; rTicket(o); abrirEditar(); }
+  }
+  return false;
+}
+
 function autorizarNFA(o){
   if(!o || !(usr && usr.nivel==='admin')) return;
+  if(!_nfaLocalOk(o)) return;
   if(!confirm('Autorizar a emissão da NFA deste ticket?\nA emissão será feita no PC do escritório.')) return;
   o.nfa_autorizada = true;
   o.nfa_autorizada_por = usr?.nome || '';
@@ -5324,6 +5338,9 @@ async function favEmitirPorURL(){
 
 async function abrirModalNFA(){
   if(!_nfaTicketAtual)return;
+  // Valida UF/Município antes de emitir (obrigatórios na NFA)
+  const _oNFA = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual&&atual.id===_nfaTicketAtual?atual:null);
+  if(_oNFA && !_nfaLocalOk(_oNFA)) return;
   toast('⏳ Montando NFA a partir do contrato do ticket...');
   try{
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,token:TOKEN})});
