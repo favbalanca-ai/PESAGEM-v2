@@ -488,8 +488,16 @@ body.dark .card{background:#1a2d22}
             <div id="placa-ia-txt" style="font-size:12px;color:var(--ink2)"></div>
           </div>
           <div class="r2">
-            <div class="f"><label>Município</label><input type="text" id="f-mun" placeholder="Ex: Brasília"></div>
-            <div class="f"><label>Estado (UF)</label><input type="text" id="f-uf" placeholder="Ex: DF" maxlength="2" oninput="this.value=this.value.toUpperCase()"></div>
+            <div class="f"><label>Estado (UF)</label>
+              <select id="f-uf" onchange="carregarMunicipios(this.value)" style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:15px;font-family:'Inter',sans-serif;background:var(--card);color:var(--ink);-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22><path fill=%22%237a9e8a%22 d=%22M7 10l5 5 5-5z%22/></svg>');background-repeat:no-repeat;background-position:right 12px center">
+                <option value="">UF...</option>
+                <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
+              </select>
+            </div>
+            <div class="f"><label>Município</label>
+              <input type="text" id="f-mun" list="lista-mun" placeholder="Escolha a UF e digite..." autocomplete="off">
+              <datalist id="lista-mun"></datalist>
+            </div>
           </div>
         </div>
       </div>
@@ -1613,6 +1621,33 @@ async function wizLerDoc(input){
   }catch(e){iaStatus('ia-status-doc-exp','err','❌ Erro de conexão — preencha manualmente');}
 }
 
+/* ── Municípios por UF (lista para o Município, evita erro na NFA) ──
+   Carrega da API do IBGE quando a UF é escolhida; cacheia em localStorage
+   (funciona offline depois). O campo continua aceitando digitação livre. */
+const _munCache = {};
+async function carregarMunicipios(uf){
+  const dl = document.getElementById('lista-mun');
+  if(!dl) return;
+  uf = (uf||'').trim().toUpperCase();
+  if(!uf){ dl.innerHTML=''; return; }
+  let lista = _munCache[uf];
+  if(!lista){ try{ const c=localStorage.getItem('mun-'+uf); if(c) lista=JSON.parse(c); }catch(e){} }
+  if((!lista || !lista.length) && navigator.onLine){
+    try{
+      const r = await fetch('https://servicodados.ibge.gov.br/api/v1/localidades/estados/'+uf+'/municipios?orderBy=nome');
+      const j = await r.json();
+      lista = (j||[]).map(m=>m.nome).filter(Boolean);
+      try{ localStorage.setItem('mun-'+uf, JSON.stringify(lista)); }catch(e){}
+    }catch(e){ /* offline/sem rede: mantém digitação livre */ }
+  }
+  if(lista && lista.length){
+    _munCache[uf]=lista;
+    dl.innerHTML = lista.map(nm=>'<option value="'+String(nm).replace(/"/g,'&quot;')+'"></option>').join('');
+  } else {
+    dl.innerHTML='';
+  }
+}
+
 /* ── IA: leitura de CNH na etapa 3 (motorista/CPF) ───────────── */
 async function wizLerCNH(input){
   if(!input.files||!input.files[0])return;
@@ -2624,8 +2659,8 @@ function onPlaca(placa){
 function usarDadosPlaca(){
   if(_dadosPlacaAnterior.motorista) document.getElementById('f-mt').value=_dadosPlacaAnterior.motorista;
   if(_dadosPlacaAnterior.cpf)       document.getElementById('f-cpf').value=_dadosPlacaAnterior.cpf;
+  if(_dadosPlacaAnterior.estado)    {document.getElementById('f-uf').value=_dadosPlacaAnterior.estado; carregarMunicipios(_dadosPlacaAnterior.estado);}
   if(_dadosPlacaAnterior.municipio) document.getElementById('f-mun').value=_dadosPlacaAnterior.municipio;
-  if(_dadosPlacaAnterior.estado)    document.getElementById('f-uf').value=_dadosPlacaAnterior.estado;
   document.getElementById('placa-hist').style.display='none';
   toast('✅ Dados preenchidos!');
 }
@@ -5128,6 +5163,7 @@ function confirmarDadosIA() {
       // Acionar callbacks
       if(campoId === 'f-pl') onPlaca(val.toUpperCase());
       if(campoId === 'f-cpf') mcpf({value:val});
+      if(campoId === 'f-uf') carregarMunicipios(el.value);
     }
   });
   fecharModalIA();
