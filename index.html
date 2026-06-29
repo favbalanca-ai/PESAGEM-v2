@@ -223,16 +223,17 @@ body.dark .hb{background:#1a2d22}
 body.dark .sbar{background:#1a2d22}
 body.dark .card{background:#1a2d22}
 @media print{
-  /* Ticket: landscape 2 cópias */
+  @page { size: A4 portrait; margin: 0; }
+  /* Ticket: retrato, 2 cópias espelhadas — metade de cima e metade de baixo */
   body.print-ticket { }
   body.print-ticket > *:not(#print-mirror) { display:none !important; }
-  body.print-ticket #print-mirror { display:flex !important; width:100%; background:#fff; }
+  body.print-ticket #print-mirror { display:flex !important; flex-direction:column; width:100%; height:100vh; background:#fff; }
   /* Relatório: retrato 1 página */
   body.print-relatorio > *:not(#print-relatorio) { display:none !important; }
   body.print-relatorio #print-relatorio { display:block !important; width:100%; background:#fff; }
   /* Compartilhado */
-  .print-col { flex:1; padding:6mm; overflow:hidden; }
-  .print-divider { width:0.4mm; background:#bbb; margin:6mm 0; flex-shrink:0; }
+  .print-col { flex:1; padding:6mm 8mm; overflow:hidden; }
+  .print-divider { height:0.4mm; background:#bbb; margin:0 8mm; flex-shrink:0; }
   .print-col .pdf-page { box-shadow:none !important; max-width:100% !important; padding:0 !important; font-size:10.5px !important; margin:0 !important; }
   #print-rel-page { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
@@ -1289,7 +1290,7 @@ body.dark .card{background:#1a2d22}
   </div>
 </div>
 
-<!-- Container de impressão A4 landscape — 2 cópias lado a lado -->
+<!-- Container de impressão A4 retrato — 2 cópias espelhadas (cima e baixo) -->
 <div id="print-mirror" style="display:none">
   <div class="print-col"><div class="pdf-page" id="print-page-1"></div></div>
   <div class="print-divider"></div>
@@ -1305,7 +1306,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v28"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v29"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
