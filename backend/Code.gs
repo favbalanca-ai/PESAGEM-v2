@@ -534,6 +534,11 @@ function atualizarPesagem(o){
   var row=idx+2;
   var st=s(o.statusPeso);
   var cor=st==="EXCEDIDO"?"#fce8e8":"#e8f5e9";
+  // Dados editáveis pelo Adm (validação/edição) — antes não eram persistidos
+  if(o.numOrdem!==undefined)  sh.getRange(row,4).setValue(s(o.numOrdem));
+  if(o.placa!==undefined)     sh.getRange(row,5).setValue(s(o.placa));
+  if(o.motorista!==undefined) sh.getRange(row,6).setValue(s(o.motorista));
+  if(o.cpf!==undefined)       sh.getRange(row,7).setValue(s(o.cpf));
   sh.getRange(row,15).setValue(n(o.tara));
   sh.getRange(row,16).setValue(n(o.pesoBruto));
   sh.getRange(row,17).setValue(n(o.cargaLiquida));
