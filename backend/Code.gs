@@ -960,13 +960,15 @@ function testarIAapi(){
   }catch(e){ return {ok:false, erro:e.message}; }
 }
 
+// Aviso tolerante: usa o alerta da planilha; se rodar pelo editor (sem UI), cai no log
+function _aviso(msg){ try{ SpreadsheetApp.getUi().alert(msg); }catch(e){ Logger.log(msg); } }
 function testeIA(){
-  if(!ANTHROPIC_KEY){SpreadsheetApp.getUi().alert("❌ Configure ANTHROPIC_KEY nas Propriedades do Script primeiro.");return;}
+  if(!ANTHROPIC_KEY){_aviso("❌ Configure ANTHROPIC_KEY nas Propriedades do Script primeiro.");return;}
   var resp;
   try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify({model:MODELO_IA,max_tokens:64,messages:[{role:"user",content:"Responda só: OK"}]}),muteHttpExceptions:true,followRedirects:true,validateHttpsCertificates:true});}
-  catch(e){SpreadsheetApp.getUi().alert("❌ Erro de rede ao chamar a API: "+e.message);return;}
+  catch(e){_aviso("❌ Erro de rede ao chamar a API: "+e.message);return;}
   var code=resp.getResponseCode();var body=resp.getContentText();
-  if(code!==200){SpreadsheetApp.getUi().alert("❌ API respondeu código "+code+":\n"+body.substring(0,300));return;}
-  try{var j=JSON.parse(body);var txt=j.content&&j.content[0]?j.content[0].text:"sem resposta";SpreadsheetApp.getUi().alert("✅ IA conectada! Resposta: "+txt);}
-  catch(e){SpreadsheetApp.getUi().alert("❌ Erro ao interpretar resposta: "+e.message+"\nBody: "+body.substring(0,200));}
+  if(code!==200){_aviso("❌ API respondeu código "+code+":\n"+body.substring(0,300));return;}
+  try{var j=JSON.parse(body);var txt=j.content&&j.content[0]?j.content[0].text:"sem resposta";_aviso("✅ IA conectada! Resposta: "+txt);}
+  catch(e){_aviso("❌ Erro ao interpretar resposta: "+e.message+"\nBody: "+body.substring(0,200));}
 }
