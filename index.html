@@ -1137,6 +1137,13 @@ body.dark .card{background:#1a2d22}
     </div>
   </div>
 
+  <!-- Histórico do servidor -->
+  <div class="card">
+    <div class="ct">📈 Histórico do servidor <span id="diag-ping-resumo" style="float:right;font-weight:600;text-transform:none;letter-spacing:0"></span></div>
+    <div id="diag-ping-hist" style="font-size:11px;font-family:'JetBrains Mono',monospace;line-height:1.7;max-height:200px;overflow-y:auto"></div>
+    <button onclick="limparPingHist()" style="margin-top:8px;background:none;border:1px solid var(--brd);color:var(--ink3);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar histórico</button>
+  </div>
+
   <!-- Log de eventos -->
   <div class="card">
     <div class="ct">📋 Log de sincronização</div>
@@ -1240,7 +1247,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v14"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v15"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3602,6 +3609,16 @@ function updS(){
   }
 }
 
+/* ── Histórico de status do servidor ────────────────────────── */
+let pingHist=JSON.parse(localStorage.getItem('pingHist')||'[]');
+function registrarPing(r){
+  const t=new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+  pingHist.unshift({t:t, ok:!!r.ok, ms:(r.ms!=null?r.ms:null), msg:r.msg||''});
+  if(pingHist.length>50) pingHist=pingHist.slice(0,50);
+  try{ localStorage.setItem('pingHist',JSON.stringify(pingHist)); }catch(e){}
+}
+function limparPingHist(){ pingHist=[]; localStorage.removeItem('pingHist'); renderDiag(); }
+
 /* ── Log de eventos de sync ─────────────────────────────────── */
 let syncLog=JSON.parse(localStorage.getItem('syncLog')||'[]');
 function addLog(msg,tipo){
@@ -3791,7 +3808,10 @@ let _bgSyncTimer=null;
 function iniciarBgSync(){
   if(_bgSyncTimer) clearInterval(_bgSyncTimer);
   _bgSyncTimer=setInterval(async()=>{
-    if(navigator.onLine&&pend.length>0){
+    if(!navigator.onLine) return;
+    // Checagem periódica de saúde do servidor (alimenta o histórico)
+    pingBackend().then(registrarPing).catch(()=>{});
+    if(pend.length>0){
       addLog('🕐 Sync automático em background','info');
       await syncP();
       updHome();
@@ -3827,6 +3847,28 @@ async function testarBackend(){
       + (r.ms!=null?' <span style="color:var(--ink3)">· '+r.ms+' ms</span>':'');
   }
   addLog((r.ok?'✅ Ping servidor OK':'❌ Ping servidor: '+r.msg)+(r.ms!=null?' ('+r.ms+'ms)':''), r.ok?'ok':'erro');
+  registrarPing(r);
+  renderPingHist();
+}
+
+/* ── Render do histórico do servidor ─────────────────────────── */
+function renderPingHist(){
+  const box=document.getElementById('diag-ping-hist');
+  const res=document.getElementById('diag-ping-resumo');
+  if(res){
+    if(pingHist.length){
+      const oks=pingHist.filter(p=>p.ok).length;
+      const pct=Math.round(oks/pingHist.length*100);
+      const cor=pct>=90?'var(--g1)':pct>=50?'var(--a1)':'var(--r1)';
+      res.innerHTML='disponibilidade <b style="color:'+cor+'">'+pct+'%</b> ('+pingHist.length+')';
+    } else res.textContent='';
+  }
+  if(!box) return;
+  if(!pingHist.length){ box.innerHTML='<span style="color:var(--ink3)">Sem checagens ainda. Toque em “Testar servidor”.</span>'; return; }
+  box.innerHTML=pingHist.map(p=>
+    '<div style="color:'+(p.ok?'var(--g1)':'var(--r1)')+'"><span style="opacity:.6">'+p.t+'</span> '
+    +(p.ok?'✅':'❌')+' '+(p.ok?'OK':p.msg)+(p.ms!=null?' · '+p.ms+'ms':'')+'</div>'
+  ).join('');
 }
 
 /* ── Reenviar todos os pendentes (reseta falhas e sincroniza) ── */
@@ -3911,6 +3953,9 @@ function renderDiag(){
       ).join('');
     }
   }
+
+  // Histórico do servidor
+  renderPingHist();
 }
 
 /* ══ HOME ══════════════════════════════════════════════════════ */
