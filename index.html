@@ -322,6 +322,13 @@ body.dark .card{background:#1a2d22}
       <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Dashboard admin</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Visão consolidada · todas as balanças</div></div>
       <div id="check-dash" style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--brd);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0"></div>
     </div>
+
+    <!-- Configuração de permissões — só admin -->
+    <div id="modo-func" onclick="irFuncionarios()" style="display:none;border:1.5px dashed var(--g1);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;background:var(--card);margin-top:6px">
+      <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👥</div>
+      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Funcionários &amp; Permissões</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Definir acessos e balança de cada um</div></div>
+      <div style="font-size:18px;color:var(--ink3);flex-shrink:0">›</div>
+    </div>
   </div>
 </div>
 
@@ -4127,6 +4134,7 @@ function mostrarTelaMode() {
   setVis('modo-rec',  mods.includes('rec'));
   setVis('modo-exp',  mods.includes('exp'));
   setVis('modo-dash', mods.includes('dash'));
+  setVis('modo-func', usr && usr.nivel === 'admin');
   // Se houver só um módulo disponível, entra direto sem perguntar
   const disp = ['rec','exp','dash'].filter(m => mods.includes(m));
   if (disp.length === 1) { entrarModo(disp[0]); return; }
@@ -5355,6 +5363,10 @@ async function salvarPermissoesCloud(){
 /* ── Tela de Funcionários & Permissões ── */
 function irFuncionarios(){
   if(!usr || usr.nivel !== 'admin'){ toast('🔒 Apenas administradores'); return; }
+  // Garante que o app esteja visível (pode ser chamado da tela de modo)
+  document.getElementById('tela-modo').style.display = 'none';
+  document.getElementById('pg-rec-home').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
   showPg('pg-func','👥 Funcionários');
   renderFuncionarios();
   carregarPermissoes().then(renderFuncionarios);
