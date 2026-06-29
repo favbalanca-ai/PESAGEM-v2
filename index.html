@@ -322,6 +322,13 @@ body.dark .card{background:#1a2d22}
       <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Dashboard admin</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Visão consolidada · todas as balanças</div></div>
       <div id="check-dash" style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--brd);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0"></div>
     </div>
+
+    <!-- Configuração de permissões — só admin -->
+    <div id="modo-func" onclick="irFuncionarios()" style="display:none;border:1.5px dashed var(--g1);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;background:var(--card);margin-top:6px">
+      <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👥</div>
+      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Funcionários &amp; Permissões</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Definir acessos e balança de cada um</div></div>
+      <div style="font-size:18px;color:var(--ink3);flex-shrink:0">›</div>
+    </div>
   </div>
 </div>
 
@@ -402,7 +409,18 @@ body.dark .card{background:#1a2d22}
       <div class="hb" onclick="irHist()"><div class="hi">📊</div><div class="ht">Histórico</div><div class="hs">Todos os registros</div></div>
       <div class="hb" id="btn-admin" style="display:none" onclick="irOrdens()"><div class="hi">📝</div><div class="ht">Contratos</div><div class="hs">Cadastro</div></div>
       <div class="hb adm-only" style="display:none" onclick="irDiag()"><div class="hi">🔍</div><div class="ht">Diagnóstico</div><div class="hs" id="diag-hs">Sync OK</div></div>
+      <div class="hb adm-only" style="display:none" onclick="irFuncionarios()"><div class="hi">👥</div><div class="ht">Funcionários</div><div class="hs">Permissões</div></div>
     </div>
+  </div>
+
+  <!-- FUNCIONÁRIOS & PERMISSÕES (admin) -->
+  <div class="pg" id="pg-func">
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700">👥 Funcionários &amp; Permissões</div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:4px;line-height:1.4">Defina, para cada funcionário, a quais módulos ele tem acesso (Recepção / Expedição) e a qual balança pertence. As mudanças valem no próximo login do funcionário.</div>
+    </div>
+    <div id="func-lista"></div>
+    <button class="btn btnp" onclick="salvarFuncionarios()" style="margin-top:8px">💾 Salvar permissões</button>
   </div>
 
   <!-- NOVA PESAGEM -->
@@ -4110,6 +4128,16 @@ const U_PAD = 13, I_PAD = 1, SC_KG = 60;
 
 /* ── Tela de modo ── */
 function mostrarTelaMode() {
+  // Módulos liberados para este funcionário (definidos pelo Adm)
+  const mods = modulosDe(usr);
+  const setVis = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? 'flex' : 'none'; };
+  setVis('modo-rec',  mods.includes('rec'));
+  setVis('modo-exp',  mods.includes('exp'));
+  setVis('modo-dash', mods.includes('dash'));
+  setVis('modo-func', usr && usr.nivel === 'admin');
+  // Se houver só um módulo disponível, entra direto sem perguntar
+  const disp = ['rec','exp','dash'].filter(m => mods.includes(m));
+  if (disp.length === 1) { entrarModo(disp[0]); return; }
   document.getElementById('tela-modo').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
   document.getElementById('pg-rec-home').style.display = 'none';
@@ -4118,9 +4146,7 @@ function mostrarTelaMode() {
   document.getElementById('modo-ola').textContent = `Olá, ${nome} 👋`;
   document.getElementById('modo-bal').textContent =
     bal === 1 ? 'Balança 1 · Água Viva' :
-    bal === 2 ? 'Balança 2 · Espora' : 'Acesso admin · todas as balanças';
-  // Dashboard só para admin
-  document.getElementById('modo-dash').style.display = bal === 0 ? 'flex' : 'none';
+    bal === 2 ? 'Balança 2 · Espora' : 'Acesso · todas as balanças';
   // Resetar checks
   ['rec','exp','dash'].forEach(m => {
     const el = document.getElementById('modo-' + m);
@@ -4198,8 +4224,11 @@ function trocarModo() {
 /* ── Sobrescrever openApp para mostrar tela de modo ── */
 const _openAppOriginal = openApp;
 function openApp(u) {
+  aplicarPermsAoUsr();           // aplica balança/módulos definidos pelo Adm
   document.getElementById('login').classList.add('h');
   loadDB(); loadCfg(); initSig(); initDark();
+  // Atualiza permissões da planilha em segundo plano (vale no próximo login)
+  carregarPermissoes().then(aplicarPermsAoUsr);
 
   // Admin UI — contratos e dashboard SOMENTE para admin
   const btnAdmin = document.getElementById('btn-admin');
@@ -4224,9 +4253,9 @@ function openApp(u) {
   if (heroTitle) heroTitle.textContent = bal===1?'Balança Água Viva':bal===2?'Balança Espora':'Pesagem';
   if (heroSub)   heroSub.textContent   = bal===0?'Água Viva · Espora · Consolidado':nomeBal(bal);
 
-  // Recuperar modo anterior ou mostrar tela de escolha
+  // Recuperar modo anterior — só se ainda for um módulo permitido
   const modoSalvo = localStorage.getItem('modo-v2');
-  if (modoSalvo) {
+  if (modoSalvo && modulosDe(usr).includes(modoSalvo)) {
     modoAtual = modoSalvo;
     confirmarModo();
   } else {
@@ -5255,6 +5284,158 @@ function exibirNFAConcluida(data){
 
 // Configurar ID da extensão: configurarExtNFA('ID_AQUI')
 function configurarExtNFA(id){localStorage.setItem('fav_ext_id',id);toast('✅ Extensão NFA configurada!');}
+
+/* ══ PERMISSÕES DE FUNCIONÁRIOS (definidas pelo Adm) ════════════
+   O administrador define, por funcionário, a quais módulos tem
+   acesso (Recepção / Expedição) e a qual balança pertence.
+   Persistência: Google Sheets via Apps Script, com cache local
+   ('perms-v2') para funcionar offline.
+
+   Backend (Apps Script) esperado:
+   • acao:'listarPermissoes'  → { ok:true, permissoes:[{email,modulos,bal}] }
+   • acao:'salvarPermissoes'  (body: {permissoes:[{email,modulos,bal}]}) → { ok:true }
+     - "modulos" pode ser array ["rec","exp"] ou texto "rec,exp"
+     - "bal": 0 (todas) | 1 (Água Viva) | 2 (Espora)
+   ════════════════════════════════════════════════════════════ */
+let PERMS = {};
+try { PERMS = JSON.parse(localStorage.getItem('perms-v2') || '{}') || {}; } catch(e) { PERMS = {}; }
+
+// Módulos efetivos do usuário (admin sempre tem acesso total)
+function modulosDe(u){
+  if(!u) return [];
+  if(u.nivel === 'admin') return ['rec','exp','dash'];
+  const p = PERMS[(u.email||'').toUpperCase()];
+  if(p && Array.isArray(p.modulos) && p.modulos.length) return p.modulos.slice();
+  return ['rec','exp']; // padrão: operador acessa Recepção e Expedição
+}
+// Balança efetiva (override do Adm tem prioridade sobre o padrão do USERS)
+function balDe(u){
+  if(!u) return 0;
+  const p = PERMS[(u.email||'').toUpperCase()];
+  if(p && p.bal !== undefined && p.bal !== null && p.bal !== '') return Number(p.bal);
+  return u.bal || 0;
+}
+// Aplica os overrides ao usuário logado
+function aplicarPermsAoUsr(){
+  if(!usr) return;
+  usr.bal = balDe(usr);
+  usr.modulos = modulosDe(usr);
+}
+
+async function carregarPermissoes(){
+  if(!SHEETS_URL || !navigator.onLine) return PERMS;
+  try{
+    const r = await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'listarPermissoes',token:TOKEN})});
+    const data = await r.json();
+    const lista = data.permissoes || data.lista || (Array.isArray(data) ? data : null);
+    if(lista && Array.isArray(lista)){
+      const map = {};
+      lista.forEach(p=>{
+        if(!p || !p.email) return;
+        let mods = p.modulos;
+        if(typeof mods === 'string') mods = mods.split(',').map(s=>s.trim()).filter(Boolean);
+        map[String(p.email).toUpperCase()] = {
+          modulos: Array.isArray(mods) ? mods : undefined,
+          bal: (p.bal===undefined||p.bal===null||p.bal==='') ? undefined : Number(p.bal)
+        };
+      });
+      PERMS = map;
+      localStorage.setItem('perms-v2', JSON.stringify(PERMS));
+    }
+  }catch(e){ addLog('⚠️ Permissões: usando cache local ('+e.message+')','aviso'); }
+  return PERMS;
+}
+
+async function salvarPermissoesCloud(){
+  localStorage.setItem('perms-v2', JSON.stringify(PERMS));
+  const permissoes = Object.keys(PERMS).map(em=>({email:em, modulos:PERMS[em].modulos||[], bal:PERMS[em].bal}));
+  if(!SHEETS_URL || !navigator.onLine){ toast('📵 Salvo localmente — sincroniza ao reconectar'); return false; }
+  try{
+    const r = await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'salvarPermissoes',token:TOKEN,permissoes})});
+    const data = await r.json().catch(()=>({}));
+    if(data && (data.ok || data.sucesso)){ toast('✅ Permissões salvas na planilha'); return true; }
+    toast('⚠️ Salvo local — confirme o backend da planilha'); return false;
+  }catch(e){ toast('⚠️ Salvo local — falha ao enviar: '+e.message); return false; }
+}
+
+/* ── Tela de Funcionários & Permissões ── */
+function irFuncionarios(){
+  if(!usr || usr.nivel !== 'admin'){ toast('🔒 Apenas administradores'); return; }
+  // Garante que o app esteja visível (pode ser chamado da tela de modo)
+  document.getElementById('tela-modo').style.display = 'none';
+  document.getElementById('pg-rec-home').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  showPg('pg-func','👥 Funcionários');
+  renderFuncionarios();
+  carregarPermissoes().then(renderFuncionarios);
+}
+
+function _cardFunc(u){
+  const em = u.email.toUpperCase();
+  const mods = modulosDe(u);
+  const bal = balDe(u);
+  return `<div class="card" style="margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px">
+      <div style="font-size:13px;font-weight:700">${u.nome}</div>
+      <div style="font-size:10px;color:var(--ink3)">${em}</div>
+    </div>
+    <div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" data-fn-mod="${em}" value="rec" ${mods.includes('rec')?'checked':''}> 📥 Recepção</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" data-fn-mod="${em}" value="exp" ${mods.includes('exp')?'checked':''}> 📤 Expedição</label>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:12px;color:var(--ink3)">Balança</span>
+      <select data-fn-bal="${em}" style="flex:1;padding:7px;border:1px solid var(--brd);border-radius:8px;background:var(--card);color:var(--ink);font-size:12px">
+        <option value="1" ${bal===1?'selected':''}>Balança 1 · Água Viva</option>
+        <option value="2" ${bal===2?'selected':''}>Balança 2 · Espora</option>
+        <option value="0" ${bal===0?'selected':''}>Todas (consolidado)</option>
+      </select>
+    </div>
+  </div>`;
+}
+function _cardFuncAdmin(u){
+  return `<div class="card" style="margin-bottom:8px;opacity:.75">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-size:13px;font-weight:700">${u.nome}</div>
+      <div style="font-size:10px;color:var(--g1);font-weight:700">ADMIN · acesso total</div>
+    </div>
+  </div>`;
+}
+function renderFuncionarios(){
+  const el = document.getElementById('func-lista');
+  if(!el) return;
+  const ops = USERS.filter(u => u.nivel !== 'admin');
+  const admins = USERS.filter(u => u.nivel === 'admin');
+  const titulo = t => `<div style="font-size:11px;font-weight:700;color:var(--ink3);margin:4px 2px 7px;letter-spacing:.5px">${t}</div>`;
+  el.innerHTML =
+    titulo('OPERADORES') + ops.map(_cardFunc).join('') +
+    titulo('ADMINISTRADORES') + admins.map(_cardFuncAdmin).join('');
+}
+function salvarFuncionarios(){
+  const map = {};
+  const garante = em => { if(!map[em]) map[em] = {modulos:[], bal:undefined}; };
+  document.querySelectorAll('[data-fn-mod]').forEach(cb=>{
+    const em = cb.getAttribute('data-fn-mod'); garante(em);
+    if(cb.checked) map[em].modulos.push(cb.value);
+  });
+  document.querySelectorAll('[data-fn-bal]').forEach(sel=>{
+    const em = sel.getAttribute('data-fn-bal'); garante(em);
+    map[em].bal = Number(sel.value);
+  });
+  // Validação: cada funcionário precisa de pelo menos um módulo
+  for(const em in map){
+    if(!map[em].modulos.length){
+      const u = USERS.find(x => x.email.toUpperCase() === em);
+      toast('⚠️ '+(u?u.nome:em)+' precisa de ao menos um módulo'); return;
+    }
+  }
+  PERMS = map;
+  salvarPermissoesCloud();
+}
 
 </script>
 
