@@ -1,18 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
-// FAV — PAINEL DE CONTROLE (aba "Painel")
-// Faz parte do mesmo projeto Apps Script do Code.gs.
+// FAV — PAINEL DE EXPEDIÇÃO (aba "Painel")
+// Foco 100% em expedição: fila de NFA, pesagens em andamento,
+// expedição por balança, saldo de contratos e NFAs emitidas.
 // Rode "atualizarPainel" pelo menu "FAV v2".
 // ═══════════════════════════════════════════════════════════════
 
-// URL do app (para o botão Emitir abrir o app já na carga — Opção A)
+// URL do app (botão Emitir abre o app já na carga)
 var APP_URL = "https://favbalanca-ai.github.io/PESAGEM-v2/";
 
-// Cores do tema FAV
 var PNL = {
-  verde:   "#1a5c45",
-  verdeEsc:"#0d2b1e",
-  verdeCl: "#e6f4ee",
-  azul:    "#1a3a6c",  azulCl:"#e8eef7",
+  verde:   "#1a5c45", verdeEsc:"#0d2b1e", verdeCl:"#e6f4ee",
+  azul:    "#1a3a6c", azulCl:"#e8eef7",
   amareloB:"#fff3cd", amareloT:"#856404",
   verdeB:  "#d4edda", verdeT:"#155724",
   vermB:   "#fce8e8", vermT:"#a32d2d",
@@ -20,92 +18,96 @@ var PNL = {
   brd:     "#dce8e2", branco:"#ffffff", zebra:"#f7faf8"
 };
 
-function _nf(x){ return Number(x||0).toLocaleString("pt-BR"); }              // inteiro
+function _nf(x){ return Number(x||0).toLocaleString("pt-BR"); }
 function _nf1(x){ return Number(x||0).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1}); }
+function _balNome(o){
+  var b=s(o.balanca);
+  if(/gua viva|bal.*1|^1$/i.test(b)) return "Água Viva";
+  if(/espora|bal.*2|^2$/i.test(b))   return "Espora";
+  return b||"—";
+}
 
 function atualizarPainel(){
   var ss = SpreadsheetApp.openById(PLANILHA_ID);
   var aba = ss.getSheetByName("Painel");
   if(aba) ss.deleteSheet(aba);
-  aba = ss.insertSheet("Painel", 0); // cria como primeira aba
+  aba = ss.insertSheet("Painel", 0);
 
-  // folha limpa
   aba.getRange(1, 1, aba.getMaxRows(), aba.getMaxColumns()).breakApart();
   aba.setHiddenGridlines(true);
   aba.setColumnWidths(1, 8, 132);
 
-  // ── Coleta de dados ──
+  // ── Dados (somente expedição) ──
   var pes   = (listarPesagens().ordens) || [];
   var contr = (listarContratosUnico({}).contratos) || [];
-  var rec   = [];   try{ rec = (listarRecepcoes().recepcoes) || []; }catch(e){}
-  var estR  = {};   try{ estR = listarEstoque() || {}; }catch(e){}
-  var estoque = estR.estoque || [];
-
-  var hoje = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy");
+  var hoje  = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy");
 
   var finalizadas = pes.filter(function(o){ return (o.status||"").indexOf("Finalizado") >= 0; });
-  var aguardando  = finalizadas.filter(function(o){ return !o.nfa_emitida; });
+  var emProcesso  = pes.filter(function(o){ return (o.status||"").indexOf("Finalizado") < 0; }); // aguardando pesar
+  var aguardando  = finalizadas.filter(function(o){ return !o.nfa_emitida; });                    // aguardando NFA
   var autorizadas = aguardando.filter(function(o){ return o.nfa_autorizada; });
   var emitidas    = pes.filter(function(o){ return o.nfa_emitida; });
-  var cargasHoje  = pes.filter(function(o){ return o.dataEntrada === hoje; });
   var contrAtivos = contr.filter(function(c){ return c.status !== "Inativo" && c.status !== "Encerrado" && c.status !== "Nao"; });
 
-  var cargaHojeT  = cargasHoje.reduce(function(t,o){ return t + n(o.cargaLiquida); }, 0);      // toneladas
-  var recHoje     = rec.filter(function(r){ return r.data === hoje; });
-  var recSacasHj  = recHoje.reduce(function(t,r){ return t + n(r.sacas); }, 0);
-  var estoqueTot  = estoque.reduce(function(t,e){ return t + n(e.saldo_sc); }, 0);
+  var cargasHoje   = finalizadas.filter(function(o){ return o.dataEntrada === hoje; });
+  var cargaHojeT   = cargasHoje.reduce(function(t,o){ return t + n(o.cargaLiquida); }, 0);
+  var emitidasHoje = emitidas.filter(function(o){ return o.dataEntrada === hoje; });
+  var excedHoje    = cargasHoje.filter(function(o){ return (o.statusPeso||"").indexOf("EXCEDIDO") >= 0; });
 
   var linha = 1;
 
   // ── CABEÇALHO ──
   aba.getRange(linha,1,1,8).merge()
-    .setValue("🌾  FAV — PAINEL DE CONTROLE")
+    .setValue("🚚  FAV — PAINEL DE EXPEDIÇÃO")
     .setBackground(PNL.verde).setFontColor("#ffffff").setFontSize(18).setFontWeight("bold")
     .setVerticalAlignment("middle").setHorizontalAlignment("left");
   aba.setRowHeight(linha, 48); linha++;
-  aba.getRange(linha,1,1,8).merge()
-    .setValue("Fazenda Água Viva · atualizado em " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm"))
+  aba.getRange(linha,1,1,6).merge()
+    .setValue("Fazenda Água Viva · armazém → comprador · atualizado em " + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), "dd/MM/yyyy 'às' HH:mm"))
     .setBackground(PNL.verdeEsc).setFontColor("#aac4b8").setFontSize(10).setVerticalAlignment("middle");
+  aba.getRange(linha,7,1,2).merge()
+    .setFormula('=HYPERLINK("'+APP_URL+'";"📲 Abrir App")')
+    .setBackground(PNL.verdeEsc).setFontColor("#ffffff").setFontSize(10).setFontWeight("bold")
+    .setVerticalAlignment("middle").setHorizontalAlignment("center");
   aba.setRowHeight(linha, 22); linha += 2;
 
-  // ── KPIs — linha 1 (expedição / NFA) ──
+  // ── KPIs linha 1 — operação do dia ──
   var k = linha;
-  desenharKPI(aba, k, 1, "AGUARDANDO NFA", aguardando.length, "cargas sem nota",  PNL.amareloB, PNL.amareloT);
-  desenharKPI(aba, k, 3, "AUTORIZADAS",    autorizadas.length, "liberadas p/ emitir", PNL.azulCl, PNL.azul);
-  desenharKPI(aba, k, 5, "NFA EMITIDAS",   emitidas.length,   "total registrado", PNL.verdeCl, PNL.verde);
-  desenharKPI(aba, k, 7, "CONTRATOS",      contrAtivos.length,"ativos com saldo", PNL.verdeCl, PNL.verde);
+  desenharKPI(aba, k, 1, "CARGAS HOJE",      cargasHoje.length,       "expedidas",          PNL.verdeCl, PNL.azul);
+  desenharKPI(aba, k, 3, "EXPEDIDO HOJE",    _nf1(cargaHojeT)+" t",   "carga líquida",      PNL.verdeCl, PNL.verde);
+  desenharKPI(aba, k, 5, "EM PESAGEM",       emProcesso.length,       "aguardando peso",    PNL.amareloB, PNL.amareloT);
+  var exBg = excedHoje.length? PNL.vermB:PNL.verdeCl, exFg = excedHoje.length? PNL.vermT:PNL.verde;
+  desenharKPI(aba, k, 7, "EXCEDIDOS HOJE",   excedHoje.length,        "acima do PBT",       exBg, exFg);
   linha += 4;
 
-  // ── KPIs — linha 2 (volume / recepção / estoque) ──
+  // ── KPIs linha 2 — fiscal / NFA ──
   k = linha;
-  desenharKPI(aba, k, 1, "CARGAS HOJE",     cargasHoje.length,        hoje,                  PNL.verdeCl, PNL.azul);
-  desenharKPI(aba, k, 3, "EXPEDIDO HOJE",   _nf1(cargaHojeT)+" t",    "carga líquida",       PNL.verdeCl, PNL.verde);
-  desenharKPI(aba, k, 5, "RECEPÇÃO HOJE",   _nf(recSacasHj)+" sc",    recHoje.length+" cargas", PNL.verdeCl, PNL.verde);
-  desenharKPI(aba, k, 7, "ESTOQUE",         _nf(estoqueTot)+" sc",    "saldo em armazém",    PNL.verdeCl, PNL.verde);
+  desenharKPI(aba, k, 1, "AGUARDANDO NFA",   aguardando.length,       "cargas sem nota",    PNL.amareloB, PNL.amareloT);
+  desenharKPI(aba, k, 3, "AUTORIZADAS",      autorizadas.length,      "liberadas p/ emitir",PNL.azulCl, PNL.azul);
+  desenharKPI(aba, k, 5, "NFA HOJE",         emitidasHoje.length,     "emitidas hoje",      PNL.verdeCl, PNL.verde);
+  desenharKPI(aba, k, 7, "CONTRATOS",        contrAtivos.length,      "ativos com saldo",   PNL.verdeCl, PNL.verde);
   linha += 4;
 
-  // ── FILA DE EMISSÃO ──
-  // ordena: autorizadas primeiro, depois mais recentes
+  // ── FILA DE EMISSÃO NFA (controle principal) ──
   aguardando.sort(function(a,b){
     if(!!b.nfa_autorizada !== !!a.nfa_autorizada) return (b.nfa_autorizada?1:0)-(a.nfa_autorizada?1:0);
     return _dataKey(b) - _dataKey(a);
   });
-  linha = secaoTitulo(aba, linha, "⏳  FILA DE EMISSÃO", aguardando.length + " cargas · " + autorizadas.length + " autorizadas");
-  linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Contrato","Carga (kg)","Data","Status","Emitir NFA"]);
+  linha = secaoTitulo(aba, linha, "⏳  FILA DE EMISSÃO — NFA", aguardando.length + " cargas · " + autorizadas.length + " autorizadas");
+  linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Contrato","Carga (kg)","Balança","Status","Emitir"]);
   if(aguardando.length === 0){
-    linha = linhaVazia(aba, linha, "✓ Nenhuma carga aguardando — tudo em dia!");
+    linha = linhaVazia(aba, linha, "✓ Nenhuma carga aguardando NFA — tudo em dia!");
   } else {
     var totFila = 0, z = 0;
     aguardando.forEach(function(o){
       var carga = Math.round(n(o.cargaLiquida)*1000); totFila += carga;
       var link = APP_URL + "?emitir=" + encodeURIComponent(o.id);
-      var bgRow = (z++ % 2) ? PNL.zebra : PNL.branco;
-      aba.getRange(linha,1,1,7).setBackground(bgRow).setVerticalAlignment("middle");
+      aba.getRange(linha,1,1,7).setBackground((z++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
       aba.getRange(linha,1).setValue(o.placa||"—").setFontFamily("Roboto Mono").setFontWeight("bold");
       aba.getRange(linha,2).setValue(o.motorista||"—");
       aba.getRange(linha,3).setValue(o.numOrdem||"—").setFontColor(PNL.verde).setFontWeight("bold");
       aba.getRange(linha,4).setValue(carga).setNumberFormat("#,##0").setHorizontalAlignment("right");
-      aba.getRange(linha,5).setValue((o.dataEntrada||"")+" "+(o.horaEntrada||"")).setFontSize(9).setFontColor(PNL.ink3);
+      aba.getRange(linha,5).setValue(_balNome(o)).setFontSize(10).setFontColor(PNL.ink3);
       if(o.nfa_autorizada)
         aba.getRange(linha,6).setValue("✅ Autorizada").setBackground(PNL.verdeB).setFontColor(PNL.verdeT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
       else
@@ -113,29 +115,52 @@ function atualizarPainel(){
       aba.getRange(linha,7).setFormula('=HYPERLINK("'+link+'";"📄 EMITIR")').setBackground(PNL.azul).setFontColor("#ffffff").setFontWeight("bold").setHorizontalAlignment("center");
       aba.setRowHeight(linha, 30); linha++;
     });
-    linha = linhaTotal(aba, linha, "TOTAL NA FILA", 4, totFila, "#,##0");
+    linha = linhaTotal(aba, linha, "TOTAL NA FILA (kg)", 4, totFila, "#,##0");
   }
   linha += 1;
 
-  // ── ESTOQUE POR CULTURA ──
-  linha = secaoTitulo(aba, linha, "📦  ESTOQUE POR CULTURA", _nf(estoqueTot)+" sc no total");
-  linha = cabecalhoTabela(aba, linha, ["Cultura","Safra","Entradas (sc)","Saídas (sc)","Saldo (sc)","","Atualizado"]);
-  if(estoque.length === 0){
-    linha = linhaVazia(aba, linha, "Nenhum estoque registrado.");
+  // ── PESAGENS EM ANDAMENTO (entraram, falta peso de saída) ──
+  emProcesso.sort(function(a,b){ return _dataKey(b)-_dataKey(a); });
+  linha = secaoTitulo(aba, linha, "🚧  EM PESAGEM (aguardando peso)", emProcesso.length + " caminhões");
+  linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Contrato","Balança","Entrada","",""]);
+  if(emProcesso.length === 0){
+    linha = linhaVazia(aba, linha, "Nenhum caminhão em pesagem.");
   } else {
-    var z2 = 0;
-    estoque.sort(function(a,b){ return n(b.saldo_sc)-n(a.saldo_sc); }).forEach(function(e){
-      var bgRow = (z2++ % 2) ? PNL.zebra : PNL.branco;
-      aba.getRange(linha,1,1,7).setBackground(bgRow).setVerticalAlignment("middle");
-      aba.getRange(linha,1).setValue(e.cultura||"—").setFontWeight("bold");
-      aba.getRange(linha,2).setValue(e.safra||"—").setFontColor(PNL.ink3);
-      aba.getRange(linha,3).setValue(n(e.entradas_sc)).setNumberFormat("#,##0").setHorizontalAlignment("right");
-      aba.getRange(linha,4).setValue(n(e.saidas_sc)).setNumberFormat("#,##0").setHorizontalAlignment("right");
-      aba.getRange(linha,5).setValue(n(e.saldo_sc)).setNumberFormat("#,##0").setHorizontalAlignment("right").setFontWeight("bold").setFontColor(PNL.verde);
-      aba.getRange(linha,7).setValue(e.atualizacao||"").setFontSize(9).setFontColor(PNL.ink3);
+    var z5 = 0;
+    emProcesso.slice(0,15).forEach(function(o){
+      aba.getRange(linha,1,1,7).setBackground((z5++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
+      aba.getRange(linha,1).setValue(o.placa||"—").setFontFamily("Roboto Mono").setFontWeight("bold");
+      aba.getRange(linha,2).setValue(o.motorista||"—");
+      aba.getRange(linha,3).setValue(o.numOrdem||"—").setFontColor(PNL.verde).setFontWeight("bold");
+      aba.getRange(linha,4).setValue(_balNome(o)).setFontSize(10).setFontColor(PNL.ink3);
+      aba.getRange(linha,5).setValue((o.dataEntrada||"")+" "+(o.horaEntrada||"")).setFontSize(9).setFontColor(PNL.ink3);
+      aba.getRange(linha,6,1,2).merge().setValue("⏳ aguardando peso").setFontSize(10).setFontColor(PNL.amareloT).setHorizontalAlignment("center").setBackground(PNL.amareloB);
       aba.setRowHeight(linha, 28); linha++;
     });
-    linha = linhaTotal(aba, linha, "SALDO TOTAL", 5, estoqueTot, "#,##0");
+  }
+  linha += 1;
+
+  // ── EXPEDIÇÃO POR BALANÇA (hoje) ──
+  var porBal = {};
+  cargasHoje.forEach(function(o){
+    var bn=_balNome(o); if(!porBal[bn]) porBal[bn]={n:0,t:0};
+    porBal[bn].n++; porBal[bn].t += n(o.cargaLiquida);
+  });
+  var balKeys = Object.keys(porBal);
+  linha = secaoTitulo(aba, linha, "⚖️  EXPEDIÇÃO POR BALANÇA (hoje)", cargasHoje.length + " cargas");
+  linha = cabecalhoTabela(aba, linha, ["Balança","Cargas","Carga (t)","","","",""]);
+  if(balKeys.length === 0){
+    linha = linhaVazia(aba, linha, "Nenhuma expedição hoje.");
+  } else {
+    var z6=0;
+    balKeys.forEach(function(bn){
+      aba.getRange(linha,1,1,7).setBackground((z6++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
+      aba.getRange(linha,1).setValue("⚖️ "+bn).setFontWeight("bold");
+      aba.getRange(linha,2).setValue(porBal[bn].n).setHorizontalAlignment("right");
+      aba.getRange(linha,3).setValue(porBal[bn].t).setNumberFormat("#,##0.0").setHorizontalAlignment("right").setFontWeight("bold").setFontColor(PNL.verde);
+      aba.setRowHeight(linha, 28); linha++;
+    });
+    linha = linhaTotal(aba, linha, "TOTAL (t)", 3, cargaHojeT, "#,##0.0");
   }
   linha += 1;
 
@@ -145,14 +170,13 @@ function atualizarPainel(){
   if(contrAtivos.length === 0){
     linha = linhaVazia(aba, linha, "Nenhum contrato ativo.");
   } else {
-    var z3 = 0, totVol=0, totEnt=0, totSal=0;
+    var z3=0, totVol=0, totEnt=0, totSal=0;
     contrAtivos.sort(function(a,b){ return (n(b.volume_total)-n(b.volume_entregue)) - (n(a.volume_total)-n(a.volume_entregue)); })
     .forEach(function(c){
       var vol=n(c.volume_total), ent=n(c.volume_entregue), sal=vol-ent;
       var pct = vol>0 ? Math.round(ent/vol*100) : 0;
       totVol+=vol; totEnt+=ent; totSal+=sal;
-      var bgRow = (z3++ % 2) ? PNL.zebra : PNL.branco;
-      aba.getRange(linha,1,1,7).setBackground(bgRow).setVerticalAlignment("middle");
+      aba.getRange(linha,1,1,7).setBackground((z3++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
       aba.getRange(linha,1).setValue(c.id).setFontWeight("bold");
       aba.getRange(linha,2).setValue(c.destinatario_nome||"—");
       aba.getRange(linha,3).setValue(c.grupo_produto||c.produto||"—");
@@ -164,7 +188,6 @@ function atualizarPainel(){
         .setFontColor(pct>=100?PNL.verdeT:(pct>=70?PNL.amareloT:PNL.azul)).setFontWeight("bold");
       aba.setRowHeight(linha, 28); linha++;
     });
-    // total
     aba.getRange(linha,1,1,3).merge().setValue("TOTAL").setFontWeight("bold").setHorizontalAlignment("right").setBackground(PNL.verdeCl);
     aba.getRange(linha,4).setValue(totVol).setNumberFormat("#,##0").setHorizontalAlignment("right").setFontWeight("bold").setBackground(PNL.verdeCl);
     aba.getRange(linha,5).setValue(totEnt).setNumberFormat("#,##0").setHorizontalAlignment("right").setFontWeight("bold").setBackground(PNL.verdeCl);
@@ -173,17 +196,16 @@ function atualizarPainel(){
     aba.setRowHeight(linha, 26); linha += 2;
   }
 
-  // ── LIBERADOS (NFA emitida) ──
+  // ── NFA EMITIDAS (recentes) ──
   linha = secaoTitulo(aba, linha, "✅  NFA EMITIDAS (recentes)", "últimas " + Math.min(emitidas.length,12));
-  linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Nº NFA","Contrato","Carga (kg)","Data","NFA"]);
+  linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Nº NFA","Contrato","Carga (kg)","Data","PDF"]);
   if(emitidas.length === 0){
     linha = linhaVazia(aba, linha, "Nenhuma NFA emitida ainda.");
   } else {
-    var z4 = 0;
+    var z4=0;
     emitidas.slice(-12).reverse().forEach(function(o){
       var carga = Math.round(n(o.cargaLiquida)*1000);
-      var bgRow = (z4++ % 2) ? PNL.zebra : PNL.branco;
-      aba.getRange(linha,1,1,7).setBackground(bgRow).setVerticalAlignment("middle");
+      aba.getRange(linha,1,1,7).setBackground((z4++%2)?PNL.zebra:PNL.branco).setVerticalAlignment("middle");
       aba.getRange(linha,1).setValue(o.placa||"—").setFontFamily("Roboto Mono").setFontWeight("bold");
       aba.getRange(linha,2).setValue(o.motorista||"—");
       aba.getRange(linha,3).setValue(o.nfa_numero||"—").setFontWeight("bold").setFontColor(PNL.azul);
@@ -201,13 +223,13 @@ function atualizarPainel(){
 
   // ── Rodapé ──
   aba.getRange(linha,1,1,8).merge()
-    .setValue("💡 Clique em 📄 EMITIR para abrir o app na carga e disparar a emissão pelo SEFAZ (a extensão preenche; você seleciona o certificado A1). "
-            + "As cargas marcadas ✅ Autorizada já foram liberadas pelo administrador no app.")
+    .setValue("💡 📄 EMITIR abre o app na carga e dispara a emissão pelo SEFAZ (a extensão preenche; você seleciona o certificado A1). "
+            + "✅ Autorizada = liberada pelo administrador no app. Atualize por: menu FAV v2 → 📊 Atualizar Painel.")
     .setFontColor(PNL.ink3).setFontSize(10).setFontStyle("italic").setWrap(true).setVerticalAlignment("middle");
-  aba.setRowHeight(linha, 40);
+  aba.setRowHeight(linha, 42);
 
   aba.setFrozenRows(4);
-  SpreadsheetApp.getActiveSpreadsheet().toast("Painel atualizado!", "📊 FAV", 3);
+  SpreadsheetApp.getActiveSpreadsheet().toast("Painel de Expedição atualizado!", "🚚 FAV", 3);
 }
 
 // chave de ordenação por data/hora (dd/MM/yyyy [HH:mm])
