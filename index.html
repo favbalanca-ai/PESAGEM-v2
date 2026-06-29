@@ -1141,7 +1141,10 @@ body.dark .card{background:#1a2d22}
   <div class="card">
     <div class="ct">📈 Histórico do servidor <span id="diag-ping-resumo" style="float:right;font-weight:600;text-transform:none;letter-spacing:0"></span></div>
     <div id="diag-ping-hist" style="font-size:11px;font-family:'JetBrains Mono',monospace;line-height:1.7;max-height:200px;overflow-y:auto"></div>
-    <button onclick="limparPingHist()" style="margin-top:8px;background:none;border:1px solid var(--brd);color:var(--ink3);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar histórico</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button onclick="exportarPingHistWA()" style="background:#25d366;border:none;color:#fff;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">📤 Enviar por WhatsApp</button>
+      <button onclick="limparPingHist()" style="background:none;border:1px solid var(--brd);color:var(--ink3);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar histórico</button>
+    </div>
   </div>
 
   <!-- Log de eventos -->
@@ -1247,7 +1250,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v15"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v16"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3618,6 +3621,27 @@ function registrarPing(r){
   try{ localStorage.setItem('pingHist',JSON.stringify(pingHist)); }catch(e){}
 }
 function limparPingHist(){ pingHist=[]; localStorage.removeItem('pingHist'); renderDiag(); }
+// Exporta o histórico do servidor por WhatsApp
+function exportarPingHistWA(){
+  if(!pingHist.length){ toast('Sem histórico para enviar'); return; }
+  const oks=pingHist.filter(p=>p.ok).length;
+  const pct=Math.round(oks/pingHist.length*100);
+  const ult=localStorage.getItem('syncUlt-v2')||'nunca';
+  const pendOk=pend.filter(p=>!p.falhou).length, pendF=pend.filter(p=>p.falhou).length;
+  let msg='🔍 *FAV — Histórico do Servidor*\n';
+  msg+='👤 '+(usr?usr.nome:'—')+' · ⚖️ '+nomeBal(usr?usr.bal:0)+'\n';
+  msg+='📦 App '+APP_VER+' · 🌐 '+(navigator.onLine?'Online':'Offline')+'\n';
+  msg+='🕐 Último sync: '+ult+'\n';
+  msg+='⏳ Fila: '+pendOk+' aguardando · 🔴 '+pendF+' com falha\n';
+  msg+='📈 Disponibilidade: *'+pct+'%* ('+pingHist.length+' checagens)\n\n';
+  msg+='*Últimas checagens:*\n';
+  pingHist.slice(0,20).forEach(p=>{
+    msg+=(p.ok?'✅':'❌')+' '+p.t+(p.ms!=null?' · '+p.ms+'ms':'')+(p.ok?'':' · '+p.msg)+'\n';
+  });
+  const wa=(DB.cfg&&DB.cfg.wa)?DB.cfg.wa.replace(/\D/g,''):'';
+  const url='https://wa.me/'+wa+'?text='+encodeURIComponent(msg.trim());
+  window.open(url,'_blank');
+}
 
 /* ── Log de eventos de sync ─────────────────────────────────── */
 let syncLog=JSON.parse(localStorage.getItem('syncLog')||'[]');
