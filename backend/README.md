@@ -27,6 +27,19 @@ Preencha-os **somente no editor do Apps Script** (não commite os reais):
 | `EMITENTES` | Nome/IE/CPF de cada emitente (dados fiscais) |
 | `ANTHROPIC_KEY` | Vai em **Propriedades do Script**, não no código |
 
+## Autorização (escopos)
+A primeira execução exige autorizar os escopos do projeto. Se aparecer
+**"Você não tem permissão para chamar UrlFetchApp.fetch"**, falta o escopo
+`script.external_request`. Para resolver:
+1. No editor, **Executar** uma função que usa rede (ex.: `testeIA`).
+2. **Revisar permissões → conta dona → Avançado → Acessar projeto → Permitir**
+   (inclui "Conectar-se a um serviço externo", Planilhas, Drive e Gmail).
+3. **Reimplantar** o Web App (nova versão).
+
+O `appsscript.json` deste repositório já traz os `oauthScopes` explícitos —
+cole-o no manifesto do projeto (Configurações do projeto → "Mostrar
+appsscript.json no editor") para a tela de consentimento pedir tudo de uma vez.
+
 ## Implantação
 1. Cole `Code.gs` e `Painel.gs` no projeto Apps Script da planilha.
 2. Preencha os segredos.
