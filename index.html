@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v32"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v33"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4348,9 +4348,9 @@ function gerarPDF(){
       Gerado em ${dataGerado} · ${emp}
     </div>`;
   document.getElementById('pdf-frame').classList.add('show');
-  // pré-rasteriza o ticket p/ a impressão sair na hora ao tocar em Imprimir
-  _ticketImg=null;
-  setTimeout(_rasterizarTicket,250);
+  // prepara a folha de impressão (PDF 2 vias) p/ abrir na hora ao tocar em Imprimir
+  _ticketImg=null; _ticketPdfUrl=null;
+  setTimeout(_prepararImpressao,250);
 }
 function fecharPDF(){ document.getElementById('pdf-frame').classList.remove('show'); }
 
@@ -4457,26 +4457,42 @@ function pdfContrato(){
     document.getElementById('print-relatorio').style.display='none';
   },4000);
 }
-// Imagem do ticket pré-rasterizada (preenchida quando o preview é montado).
-// Guardar pronto evita usar await DENTRO do toque de Imprimir — no celular,
-// chamar window.print() depois de um await perde o "gesto do usuário" e a
-// impressão não dispara (parecia "preparar mas não imprimir").
+// Impressão via PDF REAL (2 vias cima/baixo + linha de corte) em vez de
+// window.print() — que no iPhone/PWA simplesmente não funciona. O PDF é
+// montado quando o preview abre e guardado pronto; ao tocar em Imprimir,
+// abre o PDF (no PC já chama a caixa de impressão; no celular abre o
+// visualizador, onde dá pra Compartilhar → Imprimir).
 var _ticketImg=null;
-async function _rasterizarTicket(){
+var _ticketPdfUrl=null;
+async function _prepararImpressao(){
   try{
     const page=document.getElementById('pdf-page');
-    if(!page||!page.innerHTML.trim()){ _ticketImg=null; return; }
+    if(!page||!page.innerHTML.trim()){ _ticketImg=null; _ticketPdfUrl=null; return; }
     const canvas=await html2canvas(page,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
     _ticketImg=canvas.toDataURL('image/jpeg',0.95);
-    const im1=document.getElementById('print-img-1');
-    const im2=document.getElementById('print-img-2');
-    const col1=document.getElementById('print-col-1');
-    const col2=document.getElementById('print-col-2');
-    if(im1&&col1){ col1.innerHTML=''; col1.appendChild(im1); im1.src=_ticketImg; }
-    if(im2&&col2){ col2.innerHTML=''; col2.appendChild(im2); im2.src=_ticketImg; }
-  }catch(e){ _ticketImg=null; }
+    const { jsPDF } = window.jspdf;
+    const pdf=new jsPDF({orientation:'portrait',unit:'mm',format:'a4'});
+    const pgW=pdf.internal.pageSize.getWidth();    // 210
+    const pgH=pdf.internal.pageSize.getHeight();   // 297
+    const props=pdf.getImageProperties(_ticketImg);
+    const ratio=props.width/props.height;
+    const margin=8, half=pgH/2;
+    const maxW=pgW-2*margin, maxH=half-2*margin;
+    // ajusta a via p/ caber na metade da folha preservando o aspecto (não corta)
+    let w=maxW, h=w/ratio;
+    if(h>maxH){ h=maxH; w=h*ratio; }
+    const x=(pgW-w)/2;
+    pdf.addImage(_ticketImg,'JPEG',x,(half-h)/2,w,h);            // via de cima
+    pdf.addImage(_ticketImg,'JPEG',x,half+(half-h)/2,w,h);       // via de baixo
+    try{ pdf.setLineDashPattern([1.5,1.5],0); }catch(e){}
+    pdf.setDrawColor(150);
+    pdf.line(margin,half,pgW-margin,half);                       // linha de corte no meio
+    pdf.autoPrint();                                             // PC: abre a caixa de impressão
+    if(_ticketPdfUrl){ try{ URL.revokeObjectURL(_ticketPdfUrl); }catch(e){} }
+    _ticketPdfUrl=''+pdf.output('bloburl');
+  }catch(e){ _ticketImg=null; _ticketPdfUrl=null; console.log('prep impressão:',e); }
 }
-// Síncrona: dispara window.print() imediatamente no toque (não pode ter await antes).
+// Síncrona: abre o PDF imediatamente no toque (sem await antes — preserva o gesto).
 function imprimirPDF(){
   const src=document.getElementById('pdf-page');
   if(!src||!src.innerHTML.trim()){
@@ -4484,32 +4500,15 @@ function imprimirPDF(){
     toast('⏳ PDF gerado — toque em Imprimir novamente');
     return;
   }
-  const col1=document.getElementById('print-col-1');
-  const col2=document.getElementById('print-col-2');
-  const im1=document.getElementById('print-img-1');
-  const im2=document.getElementById('print-img-2');
-  if(_ticketImg){
-    // caso normal: imagem já pronta (aspecto preservado, não corta)
-    col1.innerHTML=''; col1.appendChild(im1);
-    col2.innerHTML=''; col2.appendChild(im2);
-    if(im1.src!==_ticketImg) im1.src=_ticketImg;
-    if(im2.src!==_ticketImg) im2.src=_ticketImg;
+  if(_ticketPdfUrl){
+    const w=window.open(_ticketPdfUrl,'_blank');
+    if(!w){ location.href=_ticketPdfUrl; }   // pop-up bloqueado: navega direto
+    toast('🖨️ Abrindo folha para impressão...');
   }else{
-    // ainda não rasterizou: imprime o HTML direto (pode cortar tickets longos),
-    // mas garante a impressão; já pré-rasteriza p/ a próxima vez
-    col1.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
-    col2.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
-    setTimeout(_rasterizarTicket,50);
+    // ainda não ficou pronto: prepara e pede pra tocar de novo
+    toast('⏳ Preparando impressão — toque novamente em 1s');
+    _prepararImpressao();
   }
-  document.getElementById('print-mirror').style.display='flex';
-  document.body.classList.add('print-ticket');
-  window.print();
-  const limpar=()=>{
-    document.body.classList.remove('print-ticket');
-    document.getElementById('print-mirror').style.display='none';
-  };
-  window.addEventListener('afterprint',function cb(){ limpar(); window.removeEventListener('afterprint',cb); },{once:true});
-  setTimeout(limpar,6000);
 }
 
 /* ══════════════════════════════════════════════════════════════
