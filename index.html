@@ -227,13 +227,14 @@ body.dark .card{background:#1a2d22}
   /* Ticket: retrato, 2 cópias espelhadas — metade de cima e metade de baixo */
   body.print-ticket { }
   body.print-ticket > *:not(#print-mirror) { display:none !important; }
-  body.print-ticket #print-mirror { display:flex !important; flex-direction:column; width:100%; height:100vh; background:#fff; }
+  body.print-ticket #print-mirror { display:flex !important; flex-direction:column; align-items:center; width:100%; height:100vh; background:#fff; }
   /* Relatório: retrato 1 página */
   body.print-relatorio > *:not(#print-relatorio) { display:none !important; }
   body.print-relatorio #print-relatorio { display:block !important; width:100%; background:#fff; }
   /* Compartilhado */
-  .print-col { flex:1; padding:6mm 8mm; overflow:hidden; }
-  .print-divider { height:0.4mm; background:#bbb; margin:0 8mm; flex-shrink:0; }
+  .print-col { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:4mm 8mm; overflow:hidden; }
+  .print-col img { max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
+  .print-divider { height:0.3mm; background:#bbb; margin:0 8mm; flex-shrink:0; align-self:stretch; }
   .print-col .pdf-page { box-shadow:none !important; max-width:100% !important; padding:0 !important; font-size:10.5px !important; margin:0 !important; }
   #print-rel-page { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
@@ -1292,9 +1293,9 @@ body.dark .card{background:#1a2d22}
 
 <!-- Container de impressão A4 retrato — 2 cópias espelhadas (cima e baixo) -->
 <div id="print-mirror" style="display:none">
-  <div class="print-col"><div class="pdf-page" id="print-page-1"></div></div>
+  <div class="print-col" id="print-col-1"><img id="print-img-1" alt=""></div>
   <div class="print-divider"></div>
-  <div class="print-col"><div class="pdf-page" id="print-page-2"></div></div>
+  <div class="print-col" id="print-col-2"><img id="print-img-2" alt=""></div>
 </div>
 
 <!-- Container de impressão do relatório — A4 retrato, 1 por folha -->
@@ -1306,7 +1307,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v29"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v30"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4452,27 +4453,44 @@ function pdfContrato(){
     document.getElementById('print-relatorio').style.display='none';
   },4000);
 }
-function imprimirPDF(){
+async function imprimirPDF(){
   const src=document.getElementById('pdf-page');
   if(!src||!src.innerHTML.trim()){
     gerarPDF();
     toast('⏳ PDF gerado — toque em Imprimir novamente');
     return;
   }
-  document.getElementById('print-page-1').innerHTML=src.innerHTML;
-  document.getElementById('print-page-2').innerHTML=src.innerHTML;
+  const col1=document.getElementById('print-col-1');
+  const col2=document.getElementById('print-col-2');
+  const im1=document.getElementById('print-img-1');
+  const im2=document.getElementById('print-img-2');
+  toast('🖨️ Preparando impressão...');
+  // Rasteriza o ticket UMA vez e usa como imagem nas duas metades (cima/baixo).
+  // Como imagem com aspecto preservado, cada via encolhe p/ caber na metade da
+  // folha sem cortar nada (o layout em HTML cortava quando o ticket era alto).
+  let usouImg=false;
+  try{
+    const canvas=await html2canvas(src,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
+    const data=canvas.toDataURL('image/jpeg',0.95);
+    col1.innerHTML=''; col1.appendChild(im1);
+    col2.innerHTML=''; col2.appendChild(im2);
+    im1.src=data; im2.src=data;
+    await new Promise(r=>{ if(im1.complete) r(); else { im1.onload=r; im1.onerror=r; } });
+    usouImg=true;
+  }catch(e){
+    // Fallback: usa o HTML direto (pode cortar em tickets longos, mas imprime)
+    col1.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
+    col2.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
+  }
   document.getElementById('print-mirror').style.display='flex';
   document.body.classList.add('print-ticket');
-  window.print();
-  window.addEventListener('afterprint',function cb(){
+  setTimeout(()=>{ window.print(); }, usouImg?120:300);
+  const limpar=()=>{
     document.body.classList.remove('print-ticket');
     document.getElementById('print-mirror').style.display='none';
-    window.removeEventListener('afterprint',cb);
-  },{once:true});
-  setTimeout(()=>{
-    document.body.classList.remove('print-ticket');
-    document.getElementById('print-mirror').style.display='none';
-  },4000);
+  };
+  window.addEventListener('afterprint',function cb(){ limpar(); window.removeEventListener('afterprint',cb); },{once:true});
+  setTimeout(limpar,6000);
 }
 
 /* ══════════════════════════════════════════════════════════════
