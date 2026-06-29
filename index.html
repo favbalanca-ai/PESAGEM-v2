@@ -1249,6 +1249,20 @@ body.dark .card{background:#1a2d22}
   </div>
 </div>
 
+<!-- EMISSÃO MANUAL (meia automação — celular sem extensão) -->
+<div class="modal hide" id="modal-nfa-manual">
+  <div class="modal-box" style="max-width:480px">
+    <div class="modal-tit">
+      📋 Emissão manual da NFA
+      <button class="modal-close" onclick="fecharNFAManual()">✕</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:6px;line-height:1.4">Abra a SEFAZ e, em cada campo, toque no 📋 ao lado do dado para copiar e cole no portal.</div>
+    <button class="btn btnp" onclick="abrirSefazManual()" style="margin-bottom:8px">🌐 Abrir SEFAZ-GO</button>
+    <div id="nfaman-campos"></div>
+    <button class="btn btns" onclick="fecharNFAManual()" style="margin-top:8px">Fechar</button>
+  </div>
+</div>
+
 <!-- PDF OVERLAY -->
 <div id="pdf-frame">
   <div id="pdf-header">
@@ -1277,7 +1291,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v20"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v21"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5638,14 +5652,80 @@ async function confirmarEmissaoNFA(){
   if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
     chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:dadosNFA},(resp)=>{
       if(resp&&resp.ok){toast('🚀 SEFAZ-GO aberto! Preenchendo automaticamente...');iniciarPollingNFA();}
-      else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');toast('⚠️ Extensão não respondeu. SEFAZ aberta manualmente.');}
+      else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));abrirNFAManual(dadosNFA);toast('⚠️ Extensão não respondeu — use a emissão manual.');}
     });
   }else{
+    // Sem extensão (ex.: celular): meia automação — campos prontos p/ copiar
     localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));
-    window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank');
-    toast('🚀 SEFAZ-GO aberto. Instale a extensão para automação completa.');
+    abrirNFAManual(dadosNFA);
   }
 }
+
+/* ── Meia automação (celular): campos da NFA prontos p/ copiar/colar ── */
+let _nfaManualDados=null;
+function _copiarTxt(txt, btn){
+  const ok=()=>{ if(btn){const t=btn.textContent; btn.textContent='✓'; setTimeout(()=>{btn.textContent=t;},1000);} toast('📋 Copiado'); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(ok).catch(()=>_copiarFallback(txt,ok));
+  } else _copiarFallback(txt,ok);
+}
+function _copiarFallback(txt,ok){
+  try{ const ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ok&&ok(); }
+  catch(e){ toast('Não foi possível copiar'); }
+}
+function _linhaCopia(label,val){
+  if(val===undefined||val===null||String(val).trim()==='') return null;
+  val=String(val);
+  const row=document.createElement('div');
+  row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:.5px solid var(--brd)';
+  const left=document.createElement('div'); left.style.cssText='flex:1;min-width:0';
+  const lb=document.createElement('div'); lb.style.cssText='font-size:10px;color:var(--ink3)'; lb.textContent=label;
+  const vl=document.createElement('div'); vl.style.cssText='font-size:13px;font-weight:600;word-break:break-word'; vl.textContent=val;
+  left.appendChild(lb); left.appendChild(vl);
+  const b=document.createElement('button'); b.textContent='📋';
+  b.style.cssText='background:var(--g3);border:none;color:var(--g1);padding:6px 11px;border-radius:7px;font-size:13px;cursor:pointer;flex-shrink:0';
+  b.onclick=()=>_copiarTxt(val,b);
+  row.appendChild(left); row.appendChild(b);
+  return row;
+}
+function abrirNFAManual(d){
+  _nfaManualDados=d;
+  const box=document.getElementById('nfaman-campos'); if(!box) return;
+  box.innerHTML='';
+  const sec=(t)=>{ const h=document.createElement('div'); h.textContent=t;
+    h.style.cssText='font-size:11px;font-weight:700;color:var(--g1);margin:12px 0 2px;text-transform:uppercase;letter-spacing:.05em'; box.appendChild(h); };
+  const add=(l,v)=>{ const r=_linhaCopia(l,v); if(r) box.appendChild(r); };
+  sec('Destinatário');
+  add('CNPJ/CPF', d.destinatario_cnpj||d.destinatario_cpf);
+  add('Inscrição Estadual', d.destinatario_ie);
+  add('Nome', d.destinatario_nome);
+  sec('Transporte');
+  if(d.transportadora_cnpj){ add('CNPJ Transportadora', d.transportadora_cnpj); add('Transportadora', d.transportadora_nome); }
+  add('Placa', d.placa);
+  add('UF do veículo', d.uf_veiculo);
+  add('Município do veículo', d.municipio_veiculo);
+  add('Data do transporte', d.data_transporte);
+  add('Origem da mercadoria', d.origem_mercadoria);
+  add('Responsável pelo frete', d.responsavel_frete);
+  add('Peso bruto (kg)', d.peso_bruto_kg);
+  add('Peso líquido (kg)', d.peso_liquido_kg);
+  sec('Produtos');
+  (d.produtos||[]).forEach((p,i)=>{
+    const sfx=(d.produtos.length>1)?(' '+(i+1)):'';
+    add('Grupo'+sfx, p.grupo);
+    add('Natureza/Operação'+sfx, p.tipo_operacao||p.natureza);
+    add('Produto'+sfx, p.produto);
+    if(p.dispositivo_legal) add('Dispositivo legal'+sfx, p.dispositivo_legal);
+    add('Quantidade'+sfx, String(p.quantidade).replace('.',','));
+    add('Valor unitário'+sfx, String(p.valor_unitario).replace('.',','));
+  });
+  sec('Informações complementares');
+  add('Info complementar', d.info_complementar);
+  document.getElementById('modal-nfa-manual').classList.remove('hide');
+}
+function fecharNFAManual(){ document.getElementById('modal-nfa-manual').classList.add('hide'); }
+function abrirSefazManual(){ window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank'); }
 
 function iniciarPollingNFA(){
   if(_nfaPolling)clearInterval(_nfaPolling);
