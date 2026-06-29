@@ -949,7 +949,15 @@ body.dark .card{background:#1a2d22}
         </div>
         <div class="r2">
           <div class="f"><label>Safra</label><input type="text" id="nc-safra" placeholder="2025/2026"></div>
-          <div class="f"><label>Origem Mercadoria</label><input type="text" id="nc-origem" placeholder="Município / UF"></div>
+          <div class="f"><label>Origem — UF</label>
+            <select id="nc-origem-uf" onchange="carregarMunicipios(this.value)" style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:15px;font-family:'Inter',sans-serif;background:var(--card);color:var(--ink);-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22><path fill=%22%237a9e8a%22 d=%22M7 10l5 5 5-5z%22/></svg>');background-repeat:no-repeat;background-position:right 12px center">
+              <option value="">UF...</option>
+              <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
+            </select>
+          </div>
+        </div>
+        <div class="r2">
+          <div class="f"><label>Origem — Município</label><input type="text" id="nc-origem-mun" list="lista-mun" autocomplete="off" placeholder="Escolha a UF e digite..."></div>
         </div>
         <div class="r2">
           <div class="f">
@@ -2480,7 +2488,11 @@ function addContratoNFA(){
     valor_unitario: valor,
     volume_total: vol,
     safra: document.getElementById('nc-safra').value.trim(),
-    origem_mercadoria: document.getElementById('nc-origem').value.trim(),
+    origem_mercadoria: (function(){
+      var u=document.getElementById('nc-origem-uf').value.trim();
+      var m=document.getElementById('nc-origem-mun').value.trim();
+      return m && u ? (m+' / '+u) : (m||u);
+    })(),
     responsavel_frete: document.getElementById('nc-frete').value,
     info_complementar: document.getElementById('nc-info').value.trim(),
     balanca: parseInt(document.getElementById('nc-bal').value)||1,
@@ -2497,7 +2509,7 @@ function addContratoNFA(){
         var j=JSON.parse(t);
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
-          ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem','nc-info','nc-obs'].forEach(function(id){document.getElementById(id).value='';});
+          ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem-uf','nc-origem-mun','nc-info','nc-obs'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
           if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
           loadContratosNFADaPlanilha();
