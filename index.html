@@ -3963,6 +3963,9 @@ function salvarEdicao(){
 /* ══ PDF ════════════════════════════════════════════════════════ */
 function gerarPDF(){
   if(!atual) return;
+  // Validação do ticket antes de gerar o PDF (placa, motorista, contrato)
+  const _faltaTk=_faltandoCampos(atual,['placa','motorista','numOrdem']);
+  if(_faltaTk.length && !confirm('⚠️ O ticket está sem: '+_faltaTk.join(', ')+'.\n\nGerar o PDF mesmo assim?')) return;
   const o=atual, tol=DB.cfg.tol||7;
   const st=(o.statusPeso||'CONFORME').replace(/^Finalizado\s*[-—]\s*/i,'');
   const stCls=st==='EXCEDIDO'?'pdf-er':st==='ATENÇÃO'?'pdf-wn':'pdf-ok';
@@ -5258,9 +5261,19 @@ function atualizarBotoesNFA(o){
 
 // Verifica se o ticket tem UF/Município (obrigatórios na NFA). Se faltar,
 // oferece abrir a edição. Retorna true se estiver OK para seguir.
+// Lista os campos vazios entre os exigidos (rótulos amigáveis)
+function _faltandoCampos(o, campos){
+  const lbl={placa:'Placa',motorista:'Motorista',cpf:'CPF',numOrdem:'Nº do Contrato',estado:'Estado (UF)',municipio:'Município'};
+  const faltam=[];
+  campos.forEach(c=>{ if(!String(o&&o[c]!=null?o[c]:'').trim()) faltam.push(lbl[c]||c); });
+  return faltam;
+}
+
+// Valida os dados obrigatórios para a NFA; se faltar, oferece editar
 function _nfaLocalOk(o){
-  if(o && String(o.estado||'').trim() && String(o.municipio||'').trim()) return true;
-  if(confirm('⚠️ Faltam Estado/Município neste ticket — são obrigatórios na NFA.\n\nDeseja editar agora para preencher?')){
+  const faltam=_faltandoCampos(o,['placa','motorista','numOrdem','estado','municipio']);
+  if(!faltam.length) return true;
+  if(confirm('⚠️ Faltam dados obrigatórios para a NFA:\n\n• '+faltam.join('\n• ')+'\n\nDeseja editar agora para preencher?')){
     if(o){ atual=o; rTicket(o); abrirEditar(); }
   }
   return false;
