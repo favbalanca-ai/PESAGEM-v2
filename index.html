@@ -409,7 +409,6 @@ body.dark .card{background:#1a2d22}
       <div class="hb" onclick="irHist()"><div class="hi">📊</div><div class="ht">Histórico</div><div class="hs">Todos os registros</div></div>
       <div class="hb" id="btn-admin" style="display:none" onclick="irOrdens()"><div class="hi">📝</div><div class="ht">Contratos</div><div class="hs">Cadastro</div></div>
       <div class="hb adm-only" style="display:none" onclick="irDiag()"><div class="hi">🔍</div><div class="ht">Diagnóstico</div><div class="hs" id="diag-hs">Sync OK</div></div>
-      <div class="hb adm-only" style="display:none" onclick="irFuncionarios()"><div class="hi">👥</div><div class="ht">Funcionários</div><div class="hs">Permissões</div></div>
     </div>
   </div>
 
@@ -1490,9 +1489,10 @@ function showPg(id,tit,dots,da){
 }
 function goBack(){pgAntes&&pgAntes!==pgAtual?showPg(pgAntes):home();}
 function home(){updHome();showPg('pg-home','⚖️ Pesagem');}
-function showCfg(){
+function showCfg(origem){
+  // Permissões de funcionários só na tela de seleção (não na Expedição)
   const pc=document.getElementById('cfg-perm-card');
-  if(pc) pc.style.display=(usr&&usr.nivel==='admin')?'block':'none';
+  if(pc) pc.style.display=(origem==='sel' && usr && usr.nivel==='admin')?'block':'none';
   document.getElementById('pg-cfg').style.display='block';
 }
 function hideCfg(){document.getElementById('pg-cfg').style.display='none';}
@@ -1500,7 +1500,7 @@ function hideCfg(){document.getElementById('pg-cfg').style.display='none';}
 function abrirConfigAdmin(){
   if(!usr || usr.nivel!=='admin'){ toast('🔒 Apenas administradores'); return; }
   document.getElementById('tela-modo').style.display='none';
-  showCfg();
+  showCfg('sel');
 }
 function irNova(){
   fotos={}; atual=null; utTara='kg'; utBruto='kg';
