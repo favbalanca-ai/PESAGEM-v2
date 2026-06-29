@@ -1294,7 +1294,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v22"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v23"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4031,9 +4031,16 @@ function renderDiag(){
 }
 
 /* ══ HOME ══════════════════════════════════════════════════════ */
+// Filtra pesagens pela balança do usuário (admin/bal 0 vê tudo) — mesmo critério do histórico
+function filtrarPorBalancaExp(lista){
+  const bal=usr?usr.bal:0;
+  if(bal===1) return lista.filter(o=>!o.balanca||String(o.balanca).includes('Água Viva')||String(o.balanca).includes('1'));
+  if(bal===2) return lista.filter(o=>o.balanca&&(String(o.balanca).includes('Espora')||String(o.balanca).includes('2')));
+  return lista; // admin (0) → consolidado
+}
 function updHome(){
   const hj=new Date().toLocaleDateString('pt-BR');
-  const todos=cloud.length>0?cloud:DB.ordens; // prefere cloud
+  const todos=filtrarPorBalancaExp(cloud.length>0?cloud:DB.ordens); // resumo da balança do operador; admin vê tudo
   const dh=todos.filter(o=>o.dataEntrada===hj);
   const ag=todos.filter(o=>(o.status||'').toLowerCase().includes('aguardando'));
   const fn=todos.filter(o=>o.dataEntrada===hj&&(o.status||'').toLowerCase().includes('finalizado'));
