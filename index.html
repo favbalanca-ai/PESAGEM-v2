@@ -1173,6 +1173,13 @@ body.dark .card{background:#1a2d22}
     <div class="f"><label>Placa</label><input type="text" id="ed-placa" class="placa"></div>
     <div class="f"><label>Motorista</label><input type="text" id="ed-mot"></div>
     <div class="f"><label>CPF</label><input type="text" id="ed-cpf"></div>
+    <div class="f"><label>Estado (UF)</label>
+      <select id="ed-uf" onchange="carregarMunicipios(this.value)" style="width:100%;padding:10px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-family:'Inter',sans-serif;font-size:14px;-webkit-appearance:none">
+        <option value="">UF...</option>
+        <option>AC</option><option>AL</option><option>AP</option><option>AM</option><option>BA</option><option>CE</option><option>DF</option><option>ES</option><option>GO</option><option>MA</option><option>MT</option><option>MS</option><option>MG</option><option>PA</option><option>PB</option><option>PR</option><option>PE</option><option>PI</option><option>RJ</option><option>RN</option><option>RS</option><option>RO</option><option>RR</option><option>SC</option><option>SP</option><option>SE</option><option>TO</option>
+      </select>
+    </div>
+    <div class="f"><label>Município</label><input type="text" id="ed-mun" list="lista-mun" autocomplete="off" placeholder="Escolha a UF e digite..."></div>
     <div class="f"><label>Nº do Contrato</label><input type="text" id="ed-oc"></div>
     <div class="f"><label>Tara (toneladas)</label><input type="number" id="ed-tara" step="0.001"></div>
     <div class="f"><label>Peso Bruto (toneladas)</label><input type="number" id="ed-bruto" step="0.001" oninput="calcEditBruto()"></div>
@@ -3896,6 +3903,9 @@ function abrirEditar(){
   document.getElementById('ed-placa').value  = atual.placa||'';
   document.getElementById('ed-mot').value    = atual.motorista||'';
   document.getElementById('ed-cpf').value    = atual.cpf||'';
+  document.getElementById('ed-uf').value     = atual.estado||'';
+  carregarMunicipios(atual.estado||'');
+  document.getElementById('ed-mun').value    = atual.municipio||'';
   document.getElementById('ed-oc').value     = atual.numOrdem||'';
   document.getElementById('ed-tara').value   = atual.tara||0;
   document.getElementById('ed-bruto').value  = atual.pesoBruto||0;
@@ -3931,6 +3941,8 @@ function salvarEdicao(){
   atual.placa       =document.getElementById('ed-placa').value.trim().toUpperCase();
   atual.motorista   =document.getElementById('ed-mot').value.trim();
   atual.cpf         =document.getElementById('ed-cpf').value.trim();
+  atual.estado      =document.getElementById('ed-uf').value.trim().toUpperCase();
+  atual.municipio   =document.getElementById('ed-mun').value.trim();
   atual.numOrdem    =document.getElementById('ed-oc').value.trim();
   atual.tara        =t;
   atual.pesoBruto   =b>0?b:atual.pesoBruto;
