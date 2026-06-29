@@ -99,3 +99,44 @@ Portar o mapeamento de campos da extensão para um script **Playwright**
 3. Adicionar os handlers no Apps Script.
 4. Instalar o A1 no servidor Windows e subir a Opção 2a (extensão no Chrome).
 5. Testar ponta a ponta com idempotência e auditoria.
+
+---
+
+## Fase 1 — Implementado no app (PC do escritório)
+
+> Servidor fica para uma etapa posterior. Por ora, a emissão acontece no
+> **PC do escritório** (extensão já instalada). O app passou a ter o fluxo
+> de **autorizar → emitir → imprimir**, gravando tudo na planilha.
+
+### Fluxo
+1. **Autorizar (celular, admin):** no ticket finalizado aparece
+   **✅ Autorizar emissão de NFA**. Marca `nfa_autorizada` e grava na
+   planilha (ação `atualizar`).
+2. **Emitir (PC do escritório):** com a extensão presente, o ticket mostra
+   **📄 Emitir NFA** (fluxo existente). Após emitir, o app grava no ticket
+   `numero_nfa`, `nfa_drive_url` e `nfa_emitida` (ação `atualizar`).
+3. **Imprimir:** quando a NFA está emitida, o ticket mostra
+   **🖨️ Imprimir NFA**, que abre o PDF do Drive para impressão (também há
+   botão no modal de conclusão).
+4. **Acompanhar:** no Histórico há o filtro **✅ Autorizadas** (tickets
+   autorizados e ainda não emitidos) — usado no PC para saber o que emitir.
+
+### Visibilidade dos botões (por estado)
+| Estado | Celular (sem extensão) | PC do escritório (com extensão) |
+|--------|------------------------|---------------------------------|
+| Não autorizada | ✅ Autorizar | 📄 Emitir |
+| Autorizada, não emitida | ✓ Autorizada (aguardando) | 📄 Emitir |
+| Emitida | 🖨️ Imprimir | 🖨️ Imprimir |
+
+### Campos novos no ticket (planilha)
+O app passa a enviar estes campos via ação `atualizar` — **o Apps Script
+precisa ter/gravar estas colunas** para persistirem entre dispositivos:
+
+- `nfa_autorizada` (bool), `nfa_autorizada_por`, `nfa_autorizada_em`
+- `nfa_emitida` (bool — já existia), `nfa_emitida_por`, `nfa_emitida_em`
+- `numero_nfa`, `nfa_drive_url`
+
+### Pendências de backend
+- Garantir que `atualizar` persista as colunas acima.
+- Confirmar que a emissão (extensão/`montarDadosNFA`) retorna `drive_url` e
+  `numero_nfa` (o app já os consome em `exibirNFAConcluida`).

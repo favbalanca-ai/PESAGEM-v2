@@ -796,11 +796,23 @@ body.dark .card{background:#1a2d22}
     <button class="btn btnp" onclick="home();updHome()" style="margin-top:4px">🏠 Nova Pesagem</button>
     <!-- Botão editar (só admin) -->
     <button class="btn btns" id="btn-edit-tk" onclick="abrirEditar()" style="margin-top:4px;display:none">✏️ Editar Ticket</button>
-    <!-- Botão Emitir NFA (só admin) -->
+    <!-- Botão Emitir NFA (só admin, PC do escritório com extensão) -->
     <button id="btn-emitir-nfa" onclick="abrirModalNFA()"
       style="margin-top:4px;display:none;background:#1a3a6c;color:white;border:none;
              width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
       📄 Emitir NFA
+    </button>
+    <!-- Botão Autorizar NFA (admin, no celular) -->
+    <button id="btn-autorizar-nfa"
+      style="margin-top:4px;display:none;background:#1a6c3c;color:white;border:none;
+             width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+      ✅ Autorizar emissão de NFA
+    </button>
+    <!-- Botão Imprimir NFA (quando já emitida) -->
+    <button id="btn-imprimir-nfa"
+      style="margin-top:4px;display:none;background:#2a4d7a;color:white;border:none;
+             width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+      🖨️ Imprimir NFA
     </button>
   </div>
 
@@ -822,6 +834,7 @@ body.dark .card{background:#1a2d22}
       <button class="fil" onclick="setF(this,'hj')">Hoje</button>
       <button class="fil" onclick="setF(this,'ag')">Aguardando</button>
       <button class="fil" onclick="setF(this,'nfa-ag')">⏳ Aguardando NFA</button>
+      <button class="fil" onclick="setF(this,'nfa-aut')">✅ Autorizadas</button>
       <button class="fil" onclick="setF(this,'nfa-ok')">✅ Liberados</button>
       <button class="fil" onclick="setF(this,'ok')">Conformes</button>
       <button class="fil" onclick="setF(this,'er')">Excedidos</button>
@@ -3239,9 +3252,8 @@ function rTicket(o){
   }
   const btnEdit=document.getElementById('btn-edit-tk');
   if(btnEdit) btnEdit.style.display=(usr&&usr.nivel==='admin')?'block':'none';
-  // Botão Emitir NFA (só admin)
-  const btnNFA=document.getElementById('btn-emitir-nfa');
-  if(btnNFA){btnNFA.style.display=(usr&&usr.nivel==='admin')?'block':'none';_nfaTicketAtual=o.id;}
+  // Botões de NFA: autorizar (celular) / emitir (PC) / imprimir (emitida)
+  atualizarBotoesNFA(o);
   // Botões de envio para classificador/comprador do contrato
   renderBotoesContatos(o);
 }
@@ -3422,6 +3434,7 @@ function rHist(){
   if(filAtivo==='hj') ls=ls.filter(o=>o.dataEntrada===hj);
   else if(filAtivo==='ag') ls=ls.filter(o=>(o.status||'').toLowerCase().includes('aguardando'));
   else if(filAtivo==='nfa-ag') ls=ls.filter(o=>(o.status||'').includes('Finalizado')&&!o.nfa_emitida);
+  else if(filAtivo==='nfa-aut') ls=ls.filter(o=>o.nfa_autorizada&&!o.nfa_emitida);
   else if(filAtivo==='nfa-ok') ls=ls.filter(o=>o.nfa_emitida);
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
@@ -5151,6 +5164,82 @@ let _nfaDados=null,_nfaTicketAtual=null,_nfaContratos=[],_nfaPolling=null;
 
 function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'ddnaadghnmimdndmlpcebiioedaafgne';}
 
+// Extensão de emissão disponível? (verdadeiro no PC do escritório com a extensão)
+function extNFADisponivel(){ return typeof chrome!=='undefined' && !!chrome.runtime && !!getNFAExtId(); }
+
+/* ══ NFA: autorizar (celular) · emitir (PC) · imprimir ══════════
+   Fluxo (PC do escritório, certificado A1):
+   1) Admin autoriza a emissão pelo celular → grava na planilha (atualizar)
+   2) No PC do escritório (extensão instalada), abre o ticket autorizado
+      e emite → grava nº da NFA e link do Drive na planilha
+   3) Qualquer admin pode imprimir a NFA emitida (abre o PDF do Drive)
+   ═══════════════════════════════════════════════════════════════ */
+function atualizarBotoesNFA(o){
+  _nfaTicketAtual = o.id;
+  const isAdm = usr && usr.nivel === 'admin';
+  const emitida = !!o.nfa_emitida;
+  const autorizada = !!o.nfa_autorizada;
+  const temExt = extNFADisponivel();
+  const btnNFA = document.getElementById('btn-emitir-nfa');
+  const btnAut = document.getElementById('btn-autorizar-nfa');
+  const btnImp = document.getElementById('btn-imprimir-nfa');
+  // Imprimir NFA — já emitida e com arquivo no Drive
+  if(btnImp){
+    if(isAdm && emitida && o.nfa_drive_url){ btnImp.style.display='block'; btnImp.onclick=()=>imprimirNFA(o.nfa_drive_url); }
+    else btnImp.style.display='none';
+  }
+  // Emitir NFA — admin, não emitida, com extensão (PC do escritório)
+  if(btnNFA) btnNFA.style.display=(isAdm && !emitida && temExt)?'block':'none';
+  // Autorizar emissão — admin, não emitida, sem extensão (celular)
+  if(btnAut){
+    if(isAdm && !emitida && !temExt){
+      btnAut.style.display='block';
+      if(autorizada){
+        btnAut.textContent='✓ NFA autorizada — emitir no PC';
+        btnAut.disabled=true; btnAut.style.opacity='.6'; btnAut.style.cursor='default'; btnAut.onclick=null;
+      }else{
+        btnAut.textContent='✅ Autorizar emissão de NFA';
+        btnAut.disabled=false; btnAut.style.opacity='1'; btnAut.style.cursor='pointer'; btnAut.onclick=()=>autorizarNFA(o);
+      }
+    } else btnAut.style.display='none';
+  }
+}
+
+function autorizarNFA(o){
+  if(!o || !(usr && usr.nivel==='admin')) return;
+  if(!confirm('Autorizar a emissão da NFA deste ticket?\nA emissão será feita no PC do escritório.')) return;
+  o.nfa_autorizada = true;
+  o.nfa_autorizada_por = usr?.nome || '';
+  o.nfa_autorizada_em = new Date().toLocaleString('pt-BR');
+  const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
+  try{ saveCloud(); }catch(e){}
+  enviar(o,'atualizar');           // grava a autorização na planilha
+  toast('✅ NFA autorizada — emitir no PC do escritório');
+  atualizarBotoesNFA(o);
+}
+
+// Persiste o resultado da emissão (nº da NFA + link do Drive) no ticket/planilha
+function persistirNFAEmitida(data){
+  const o = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual && atual.id===_nfaTicketAtual ? atual : null);
+  if(!o) return;
+  o.nfa_emitida = true; o.nfa_autorizada = true;
+  if(data && data.numero_nfa) o.numero_nfa = data.numero_nfa;
+  if(data && data.drive_url)  o.nfa_drive_url = data.drive_url;
+  o.nfa_emitida_em = new Date().toLocaleString('pt-BR');
+  o.nfa_emitida_por = usr?.nome || '';
+  const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
+  try{ saveCloud(); }catch(e){}
+  enviar(o,'atualizar');           // grava nº da NFA e Drive na planilha
+}
+
+// Abre o PDF da NFA (Drive) para impressão
+function imprimirNFA(url){
+  if(!url){ toast('⚠️ NFA ainda sem arquivo no Drive'); return; }
+  toast('🖨️ Abrindo NFA para impressão...');
+  const w = window.open(url,'_blank');
+  if(!w) location.href = url;      // pop-up bloqueado: navega direto
+}
+
 // ── Opção A: emitir NFA a partir de link da planilha (?emitir=TICKET_ID) ──
 async function favEmitirPorURL(){
   try{
@@ -5293,6 +5382,8 @@ function exibirNFAConcluida(data){
     a.textContent=i===0?'📱 WhatsApp — Destinatário':'📱 WhatsApp — Escritório FAV';
     btns.appendChild(a);
   });
+  // Grava nº da NFA + link do Drive no ticket/planilha
+  persistirNFAEmitida(data);
   document.getElementById('modal-nfa-ok').style.display='flex';
   if(typeof rHist==='function')rHist();
 }
@@ -5529,6 +5620,7 @@ function salvarFuncionarios(){
       <div class="nfa-ln"><span>Drive</span><a id="nfa-ok-drive" href="#" target="_blank" style="color:#1a3a6c;font-size:12px;text-decoration:underline">📂 Ver arquivo</a></div>
       <div class="nfa-ln"><span>E-mail</span><span id="nfa-ok-email" style="color:#1a6c3c;font-size:12px"></span></div>
       <div id="nfa-ok-zap-btns" style="margin-top:14px"></div>
+      <button onclick="imprimirNFA(document.getElementById('nfa-ok-drive').getAttribute('href'))" style="width:100%;margin-top:10px;padding:12px;background:#2a4d7a;color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">🖨️ Imprimir NFA</button>
     </div>
     <div style="padding:14px 18px;background:#f8f8f8;border-top:1px solid #eee">
       <button onclick="document.getElementById('modal-nfa-ok').style.display='none'" style="width:100%;padding:13px;background:#1a3a6c;color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">Fechar</button>
