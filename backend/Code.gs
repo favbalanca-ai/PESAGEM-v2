@@ -79,6 +79,7 @@ function doPost(e){
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame));
+    if(d.acao==="lerTransportadora")  return resposta(lerTransportadora(d.frame));
     if(d.acao==="testarIA")           return resposta(testarIAapi());
     // NFA via app
     if(d.acao==="salvarContratoNFA")  return resposta(salvarContratoNFA(d.dados));
@@ -962,6 +963,21 @@ function testarIAapi(){
 
 // Aviso tolerante: usa o alerta da planilha; se rodar pelo editor (sem UI), cai no log
 function _aviso(msg){ try{ SpreadsheetApp.getUi().alert(msg); }catch(e){ Logger.log(msg); } }
+// Lê o documento da transportadora (CNPJ + razão social) — prompt focado
+function lerTransportadora(frame){
+  if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
+  if(!frame||!frame.base64)return{ok:false,erro:"Nenhuma imagem enviada"};
+  if(frame.base64.length>3000000)return{ok:false,erro:"Imagem muito grande — reduza a resolução da foto"};
+  var prompt="Analise este documento de uma transportadora (cartão CNPJ, comprovante de inscrição, CT-e ou nota de serviço de transporte).\nExtraia os dados da TRANSPORTADORA e retorne APENAS JSON puro:\n{\"cnpj\": \"00.000.000/0000-00\", \"razao_social\": \"RAZAO SOCIAL\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Retorne null para campos não encontrados\n- CNPJ com pontuação (00.000.000/0000-00)\n- Razão social em MAIÚSCULAS, sem abreviar\n- Se houver mais de um CNPJ, use o da TRANSPORTADORA (prestadora do transporte), não o do destinatário/remetente\n- Não invente dados";
+  var payload={model:MODELO_IA,max_tokens:300,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}},{type:"text",text:prompt}]}]};
+  var resp;
+  try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});}
+  catch(e){return{ok:false,erro:"Erro de rede: "+e.message};}
+  if(resp.getResponseCode()!==200)return{ok:false,erro:"API erro "+resp.getResponseCode()+": "+resp.getContentText().substring(0,300)};
+  try{var j=JSON.parse(resp.getContentText());var txt=j.content&&j.content[0]?j.content[0].text.replace(/```json|```/g,"").trim():"{}";return{ok:true,resultado:JSON.parse(txt)};}
+  catch(e){return{ok:false,erro:"Erro ao interpretar resposta: "+e.message};}
+}
+
 function testeIA(){
   if(!ANTHROPIC_KEY){_aviso("❌ Configure ANTHROPIC_KEY nas Propriedades do Script primeiro.");return;}
   var resp;
