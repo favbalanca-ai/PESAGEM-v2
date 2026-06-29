@@ -79,6 +79,7 @@ function doPost(e){
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame));
+    if(d.acao==="testarIA")           return resposta(testarIAapi());
     // NFA via app
     if(d.acao==="salvarContratoNFA")  return resposta(salvarContratoNFA(d.dados));
     if(d.acao==="listarContratosNFA") return resposta(listarContratosNFA(d.filtros||{}));
@@ -946,6 +947,17 @@ function lerDocumento(frame){
   if(resp.getResponseCode()!==200)return{ok:false,erro:"API erro "+resp.getResponseCode()+": "+resp.getContentText().substring(0,300)};
   try{var j=JSON.parse(resp.getContentText());var txt=j.content&&j.content[0]?j.content[0].text.replace(/```json|```/g,"").trim():"{}";return{ok:true,resultado:JSON.parse(txt)};}
   catch(e){return{ok:false,erro:"Erro ao interpretar resposta: "+e.message};}
+}
+
+// Teste de IA chamável pelo app (Diagnóstico → Testar IA)
+function testarIAapi(){
+  if(!ANTHROPIC_KEY) return {ok:false, erro:'ANTHROPIC_KEY não configurada'};
+  try{
+    var resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify({model:MODELO_IA,max_tokens:16,messages:[{role:"user",content:"Responda: OK"}]}),muteHttpExceptions:true});
+    var code=resp.getResponseCode();
+    if(code===200) return {ok:true, modelo:MODELO_IA};
+    return {ok:false, codigo:code, erro:'API '+code+': '+resp.getContentText().substring(0,160)};
+  }catch(e){ return {ok:false, erro:e.message}; }
 }
 
 function testeIA(){

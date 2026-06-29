@@ -1123,7 +1123,11 @@ body.dark .card{background:#1a2d22}
     <div class="ct">📡 Status atual</div>
     <div id="diag-status" style="font-size:13px;line-height:1.8"></div>
     <div id="diag-backend" style="font-size:12px;margin-top:8px;padding:8px 10px;background:var(--g3);border-radius:8px">Toque em “Testar servidor”.</div>
-    <button onclick="testarBackend()" style="margin-top:8px;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔌 Testar servidor</button>
+    <div id="diag-ia" style="font-size:12px;margin-top:6px;padding:8px 10px;background:var(--g3);border-radius:8px">Toque em “Testar IA”.</div>
+    <div style="display:flex;gap:6px;margin-top:8px">
+      <button onclick="testarBackend()" style="flex:1;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔌 Testar servidor</button>
+      <button onclick="testarIAApp()" style="flex:1;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🤖 Testar IA</button>
+    </div>
   </div>
 
   <!-- Pendentes com detalhe -->
@@ -1294,7 +1298,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v23"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v24"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3921,6 +3925,21 @@ async function testarBackend(){
   addLog((r.ok?'✅ Ping servidor OK':'❌ Ping servidor: '+r.msg)+(r.ms!=null?' ('+r.ms+'ms)':''), r.ok?'ok':'erro');
   registrarPing(r);
   renderPingHist();
+}
+async function testarIAApp(){
+  const el=document.getElementById('diag-ia');
+  if(el) el.innerHTML='🤖 Testando IA...';
+  if(!navigator.onLine){ if(el){el.style.background='var(--r2)';el.innerHTML='<b style="color:var(--r1)">❌ Offline</b>';} return; }
+  try{
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'testarIA',token:TOKEN})});
+    const j=await r.json();
+    if(el){
+      if(j&&j.ok){ el.style.background='var(--g3)'; el.innerHTML='<b style="color:var(--g1)">✅ IA OK</b>'+(j.modelo?' <span style="color:var(--ink3)">· '+j.modelo+'</span>':''); }
+      else { el.style.background='var(--r2)'; el.innerHTML='<b style="color:var(--r1)">❌ '+((j&&(j.erro||(j.codigo&&('código '+j.codigo))))||'falha na IA')+'</b>'; }
+    }
+    addLog((j&&j.ok)?'✅ IA OK':'❌ IA: '+((j&&(j.erro||j.codigo))||'falha'), (j&&j.ok)?'ok':'erro');
+  }catch(e){ if(el){el.style.background='var(--r2)';el.innerHTML='<b style="color:var(--r1)">❌ '+e.message+'</b>';} }
 }
 
 /* ── Render do histórico do servidor ─────────────────────────── */
