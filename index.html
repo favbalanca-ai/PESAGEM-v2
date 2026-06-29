@@ -232,9 +232,10 @@ body.dark .card{background:#1a2d22}
   body.print-relatorio > *:not(#print-relatorio) { display:none !important; }
   body.print-relatorio #print-relatorio { display:block !important; width:100%; background:#fff; }
   /* Compartilhado */
-  .print-col { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:4mm 8mm; overflow:hidden; }
-  .print-col img { max-width:100%; max-height:100%; width:auto; height:auto; display:block; }
-  .print-divider { height:0.3mm; background:#bbb; margin:0 8mm; flex-shrink:0; align-self:stretch; }
+  .print-col { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:5mm 10mm; overflow:hidden; }
+  .print-col img { max-width:100%; max-height:90%; width:auto; height:auto; display:block; }
+  /* Linha tracejada de corte no meio, com folga p/ a tesoura */
+  .print-divider { height:0; border-top:0.3mm dashed #999; margin:3mm 6mm; flex-shrink:0; align-self:stretch; }
   .print-col .pdf-page { box-shadow:none !important; max-width:100% !important; padding:0 !important; font-size:10.5px !important; margin:0 !important; }
   #print-rel-page { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
 }
@@ -1307,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v30"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v31"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
