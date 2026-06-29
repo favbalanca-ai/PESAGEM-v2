@@ -1256,8 +1256,11 @@ body.dark .card{background:#1a2d22}
       📋 Emissão manual da NFA
       <button class="modal-close" onclick="fecharNFAManual()">✕</button>
     </div>
-    <div style="font-size:11px;color:var(--ink3);margin-bottom:6px;line-height:1.4">Abra a SEFAZ e, em cada campo, toque no 📋 ao lado do dado para copiar e cole no portal.</div>
-    <button class="btn btnp" onclick="abrirSefazManual()" style="margin-bottom:8px">🌐 Abrir SEFAZ-GO</button>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:6px;line-height:1.4">Abra a SEFAZ e toque em cada linha (ou no 📋) para copiar e colar no portal.</div>
+    <div style="display:flex;gap:6px;margin-bottom:8px">
+      <button class="btn btnp" onclick="abrirSefazManual()" style="flex:1;margin:0">🌐 Abrir SEFAZ-GO</button>
+      <button class="btn btns" onclick="copiarTudoNFA()" style="flex:1;margin:0">📋 Copiar tudo</button>
+    </div>
     <div id="nfaman-campos"></div>
     <button class="btn btns" onclick="fecharNFAManual()" style="margin-top:8px">Fechar</button>
   </div>
@@ -1291,7 +1294,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v21"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v22"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5678,24 +5681,21 @@ function _linhaCopia(label,val){
   if(val===undefined||val===null||String(val).trim()==='') return null;
   val=String(val);
   const row=document.createElement('div');
-  row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-bottom:.5px solid var(--brd)';
+  row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:.5px solid var(--brd);cursor:pointer';
   const left=document.createElement('div'); left.style.cssText='flex:1;min-width:0';
   const lb=document.createElement('div'); lb.style.cssText='font-size:10px;color:var(--ink3)'; lb.textContent=label;
-  const vl=document.createElement('div'); vl.style.cssText='font-size:13px;font-weight:600;word-break:break-word'; vl.textContent=val;
+  const vl=document.createElement('div'); vl.style.cssText='font-size:14px;font-weight:600;word-break:break-word'; vl.textContent=val;
   left.appendChild(lb); left.appendChild(vl);
   const b=document.createElement('button'); b.textContent='📋';
-  b.style.cssText='background:var(--g3);border:none;color:var(--g1);padding:6px 11px;border-radius:7px;font-size:13px;cursor:pointer;flex-shrink:0';
-  b.onclick=()=>_copiarTxt(val,b);
+  b.style.cssText='background:var(--g3);border:none;color:var(--g1);padding:8px 12px;border-radius:7px;font-size:14px;cursor:pointer;flex-shrink:0';
+  b.onclick=(e)=>{ e.stopPropagation(); _copiarTxt(val,b); };
+  row.onclick=()=>_copiarTxt(val,b);   // toca a linha inteira para copiar
   row.appendChild(left); row.appendChild(b);
   return row;
 }
-function abrirNFAManual(d){
-  _nfaManualDados=d;
-  const box=document.getElementById('nfaman-campos'); if(!box) return;
-  box.innerHTML='';
-  const sec=(t)=>{ const h=document.createElement('div'); h.textContent=t;
-    h.style.cssText='font-size:11px;font-weight:700;color:var(--g1);margin:12px 0 2px;text-transform:uppercase;letter-spacing:.05em'; box.appendChild(h); };
-  const add=(l,v)=>{ const r=_linhaCopia(l,v); if(r) box.appendChild(r); };
+// Lista ordenada de campos da NFA (compartilhada por exibir e "copiar tudo")
+function _nfaCampos(d){
+  const out=[]; const sec=(t)=>out.push({sec:t}); const add=(l,v)=>{ if(v!==undefined&&v!==null&&String(v).trim()!=='') out.push({l:l,v:String(v)}); };
   sec('Destinatário');
   add('CNPJ/CPF', d.destinatario_cnpj||d.destinatario_cpf);
   add('Inscrição Estadual', d.destinatario_ie);
@@ -5722,7 +5722,28 @@ function abrirNFAManual(d){
   });
   sec('Informações complementares');
   add('Info complementar', d.info_complementar);
+  return out;
+}
+function abrirNFAManual(d){
+  _nfaManualDados=d;
+  const box=document.getElementById('nfaman-campos'); if(!box) return;
+  box.innerHTML='';
+  _nfaCampos(d).forEach(it=>{
+    if(it.sec){ const h=document.createElement('div'); h.textContent=it.sec;
+      h.style.cssText='font-size:11px;font-weight:700;color:var(--g1);margin:12px 0 2px;text-transform:uppercase;letter-spacing:.05em'; box.appendChild(h); }
+    else { const r=_linhaCopia(it.l,it.v); if(r) box.appendChild(r); }
+  });
   document.getElementById('modal-nfa-manual').classList.remove('hide');
+}
+function copiarTudoNFA(){
+  if(!_nfaManualDados){ return; }
+  let txt='';
+  _nfaCampos(_nfaManualDados).forEach(it=>{
+    if(it.sec) txt+='\n*'+it.sec+'*\n';
+    else txt+=it.l+': '+it.v+'\n';
+  });
+  _copiarTxt(txt.trim());
+  toast('📋 Todos os dados copiados');
 }
 function fecharNFAManual(){ document.getElementById('modal-nfa-manual').classList.add('hide'); }
 function abrirSefazManual(){ window.open('https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf','_blank'); }
