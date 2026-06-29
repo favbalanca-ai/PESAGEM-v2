@@ -1,6 +1,6 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v3';
+const CACHE    = 'fav-v2-v5';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";

@@ -323,10 +323,10 @@ body.dark .card{background:#1a2d22}
       <div id="check-dash" style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--brd);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0"></div>
     </div>
 
-    <!-- Configuração de permissões — só admin -->
-    <div id="modo-func" onclick="irFuncionarios()" style="display:none;border:1.5px dashed var(--g1);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;background:var(--card);margin-top:6px">
-      <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👥</div>
-      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Funcionários &amp; Permissões</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Definir acessos e balança de cada um</div></div>
+    <!-- Configurações do administrador — só admin -->
+    <div id="modo-func" onclick="abrirConfigAdmin()" style="display:none;border:1.5px solid var(--brd);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;background:var(--card)">
+      <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">⚙️</div>
+      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Configurações</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Empresa, sistema e permissões de funcionários</div></div>
       <div style="font-size:18px;color:var(--ink3);flex-shrink:0">›</div>
     </div>
   </div>
@@ -409,7 +409,6 @@ body.dark .card{background:#1a2d22}
       <div class="hb" onclick="irHist()"><div class="hi">📊</div><div class="ht">Histórico</div><div class="hs">Todos os registros</div></div>
       <div class="hb" id="btn-admin" style="display:none" onclick="irOrdens()"><div class="hi">📝</div><div class="ht">Contratos</div><div class="hs">Cadastro</div></div>
       <div class="hb adm-only" style="display:none" onclick="irDiag()"><div class="hi">🔍</div><div class="ht">Diagnóstico</div><div class="hs" id="diag-hs">Sync OK</div></div>
-      <div class="hb adm-only" style="display:none" onclick="irFuncionarios()"><div class="hi">👥</div><div class="ht">Funcionários</div><div class="hs">Permissões</div></div>
     </div>
   </div>
 
@@ -1134,6 +1133,11 @@ body.dark .card{background:#1a2d22}
       <input type="checkbox" id="cfg-wa-auto" style="width:22px;height:22px;cursor:pointer;accent-color:var(--g1)">
     </div>
   </div>
+  <div class="card" id="cfg-perm-card" style="display:none">
+    <div class="ct">👥 Funcionários &amp; Permissões</div>
+    <div style="font-size:12px;color:var(--ink3);margin-bottom:10px;line-height:1.4">Defina a quais módulos cada funcionário tem acesso (Recepção / Expedição) e a qual balança pertence. Vale no próximo login do funcionário.</div>
+    <button class="btn btnp" onclick="irFuncionarios()">Gerenciar permissões →</button>
+  </div>
   <button class="btn btnp" onclick="saveCfg()">💾 Salvar Configurações</button>
   <button class="btn btnd" onclick="if(confirm('Sair?'))logout()" style="margin-top:7px">🚪 Sair</button>
 </div>
@@ -1485,8 +1489,19 @@ function showPg(id,tit,dots,da){
 }
 function goBack(){pgAntes&&pgAntes!==pgAtual?showPg(pgAntes):home();}
 function home(){updHome();showPg('pg-home','⚖️ Pesagem');}
-function showCfg(){document.getElementById('pg-cfg').style.display='block';}
+function showCfg(origem){
+  // Permissões de funcionários só na tela de seleção (não na Expedição)
+  const pc=document.getElementById('cfg-perm-card');
+  if(pc) pc.style.display=(origem==='sel' && usr && usr.nivel==='admin')?'block':'none';
+  document.getElementById('pg-cfg').style.display='block';
+}
 function hideCfg(){document.getElementById('pg-cfg').style.display='none';}
+// Abre as configurações do admin a partir da tela de seleção de modo
+function abrirConfigAdmin(){
+  if(!usr || usr.nivel!=='admin'){ toast('🔒 Apenas administradores'); return; }
+  document.getElementById('tela-modo').style.display='none';
+  showCfg('sel');
+}
 function irNova(){
   fotos={}; atual=null; utTara='kg'; utBruto='kg';
   ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf','f-transp-cnpj','f-transp-nome'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
@@ -5363,9 +5378,10 @@ async function salvarPermissoesCloud(){
 /* ── Tela de Funcionários & Permissões ── */
 function irFuncionarios(){
   if(!usr || usr.nivel !== 'admin'){ toast('🔒 Apenas administradores'); return; }
-  // Garante que o app esteja visível (pode ser chamado da tela de modo)
+  // Garante que o app esteja visível (pode ser chamado da tela de modo ou da config)
   document.getElementById('tela-modo').style.display = 'none';
   document.getElementById('pg-rec-home').style.display = 'none';
+  document.getElementById('pg-cfg').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   showPg('pg-func','👥 Funcionários');
   renderFuncionarios();
