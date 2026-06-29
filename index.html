@@ -525,6 +525,13 @@ body.dark .card{background:#1a2d22}
 
         <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--brd)">
           <div style="font-size:12px;font-weight:700;color:var(--ink2);margin-bottom:8px">🚚 Transportadora (para emissão da NFA)</div>
+          <label class="fb" id="fb-tr" style="width:100%;flex-direction:row;padding:14px;gap:10px;justify-content:flex-start;min-height:60px;margin-bottom:10px">
+            <span class="fi" id="fi-tr" style="font-size:24px">📄</span>
+            <span class="fl" id="fl-tr" style="font-size:12px;font-weight:600">Fotografar doc. da transportadora</span>
+            <input type="file" accept="image/*" capture="environment" onchange="foto(this,'fb-tr',null,'transp','fi-tr','fl-tr','Doc ✓');wizLerTransportadora(this)">
+            <span style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
+          </label>
+          <div id="ia-status-transp" class="ia-status"></div>
           <div class="f"><label>CNPJ da Transportadora</label><input type="text" id="f-transp-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
           <div class="f"><label>Nome da Transportadora</label><input type="text" id="f-transp-nome" placeholder="Razão social (opcional)"></div>
         </div>
@@ -1298,7 +1305,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v25"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v26"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1755,6 +1762,29 @@ async function wizLerCNH(input){
     iaStatus('ia-status-cnh','ok','✅ IA leu a CNH — confirme os dados');
     mostrarModalIA(dados, 'CNH', 3);
   }catch(e){iaStatus('ia-status-cnh','err','❌ Erro de conexão — preencha manualmente');}
+}
+
+/* ── IA: ler documento da transportadora (CNPJ + razão social) ── */
+async function wizLerTransportadora(input){
+  if(!input.files||!input.files[0])return;
+  iaStatus('ia-status-transp','load','🤖 IA lendo o documento da transportadora...');
+  try{
+    const {base64,mime}=await fileToBase64IA(input.files[0]);
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'lerTransportadora',token:TOKEN,frame:{base64,mime}})});
+    const j=await r.json();
+    if(!j.ok){iaStatus('ia-status-transp','err','❌ '+(j.erro||'Erro na IA'));return;}
+    const res=j.resultado||{};
+    const dados={};
+    if(res.cnpj)         dados['CNPJ da Transportadora'] = {campo:'f-transp-cnpj', valor:res.cnpj};
+    if(res.razao_social) dados['Nome da Transportadora'] = {campo:'f-transp-nome', valor:res.razao_social};
+    if(Object.keys(dados).length===0){
+      iaStatus('ia-status-transp','err','⚠️ Não encontrei CNPJ/razão social — tente foto mais nítida');
+      return;
+    }
+    iaStatus('ia-status-transp','ok','✅ IA leu a transportadora — confirme os dados');
+    mostrarModalIA(dados, 'Transportadora', 3);
+  }catch(e){iaStatus('ia-status-transp','err','❌ Erro de conexão — preencha manualmente');}
 }
 
 function irAg(){
@@ -5412,6 +5442,7 @@ function confirmarDadosIA() {
       // Acionar callbacks
       if(campoId === 'f-pl') onPlaca(val.toUpperCase());
       if(campoId === 'f-cpf') mcpf({value:val});
+      if(campoId === 'f-transp-cnpj') mcnpj(el);
       if(campoId === 'f-uf') carregarMunicipios(el.value);
     }
   });
