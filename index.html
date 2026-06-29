@@ -805,7 +805,7 @@ body.dark .card{background:#1a2d22}
     <!-- Botão editar (só admin) -->
     <button class="btn btns" id="btn-edit-tk" onclick="abrirEditar()" style="margin-top:4px;display:none">✏️ Editar Ticket</button>
     <!-- Botão Emitir NFA (só admin, PC do escritório com extensão) -->
-    <button id="btn-emitir-nfa" onclick="abrirModalNFA()"
+    <button id="btn-emitir-nfa" onclick="emitirNFAFluxo()"
       style="margin-top:4px;display:none;background:#1a3a6c;color:white;border:none;
              width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
       📄 Emitir NFA
@@ -842,7 +842,6 @@ body.dark .card{background:#1a2d22}
       <button class="fil" onclick="setF(this,'hj')">Hoje</button>
       <button class="fil" onclick="setF(this,'ag')">Aguardando</button>
       <button class="fil" onclick="setF(this,'nfa-ag')">⏳ Aguardando NFA</button>
-      <button class="fil" onclick="setF(this,'nfa-aut')">✅ Autorizadas</button>
       <button class="fil" onclick="setF(this,'nfa-ok')">✅ Liberados</button>
       <button class="fil" onclick="setF(this,'ok')">Conformes</button>
       <button class="fil" onclick="setF(this,'er')">Excedidos</button>
@@ -1226,7 +1225,7 @@ body.dark .card{background:#1a2d22}
 <div class="modal hide" id="modal-valida-nfa">
   <div class="modal-box">
     <div class="modal-tit">
-      ✅ Validar &amp; Autorizar NFA
+      ✅ Validar dados — NFA
       <button class="modal-close" onclick="fecharValidaNFA()">✕</button>
     </div>
     <div id="vn-resumo" style="background:var(--g3);border-radius:9px;padding:10px 12px;font-size:12px;line-height:1.7;color:var(--ink);margin-bottom:12px"></div>
@@ -1245,7 +1244,7 @@ body.dark .card{background:#1a2d22}
       <div class="f"><label>CNPJ da Transportadora</label><input type="text" id="vn-transp-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
       <div class="f"><label>Nome da Transportadora</label><input type="text" id="vn-transp-nome" placeholder="Razão social"></div>
     </div>
-    <button class="btn btnp" onclick="confirmarValidaNFA()" style="margin-top:6px">✅ Autorizar emissão</button>
+    <button class="btn btnp" onclick="confirmarValidaNFA()" style="margin-top:6px">➡️ Continuar para emissão</button>
     <button class="btn btns" onclick="fecharValidaNFA()" style="margin-top:6px">Cancelar</button>
   </div>
 </div>
@@ -1278,7 +1277,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v17"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v18"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3554,7 +3553,6 @@ function rHist(){
   if(filAtivo==='hj') ls=ls.filter(o=>o.dataEntrada===hj);
   else if(filAtivo==='ag') ls=ls.filter(o=>(o.status||'').toLowerCase().includes('aguardando'));
   else if(filAtivo==='nfa-ag') ls=ls.filter(o=>(o.status||'').includes('Finalizado')&&!o.nfa_emitida);
-  else if(filAtivo==='nfa-aut') ls=ls.filter(o=>o.nfa_autorizada&&!o.nfa_emitida);
   else if(filAtivo==='nfa-ok') ls=ls.filter(o=>o.nfa_emitida);
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
@@ -5406,19 +5404,16 @@ function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'ddnaadghnmimd
 // Extensão de emissão disponível? (verdadeiro no PC do escritório com a extensão)
 function extNFADisponivel(){ return typeof chrome!=='undefined' && !!chrome.runtime && !!getNFAExtId(); }
 
-/* ══ NFA: autorizar (celular) · emitir (PC) · imprimir ══════════
-   Fluxo (PC do escritório, certificado A1):
-   1) Admin autoriza a emissão pelo celular → grava na planilha (atualizar)
-   2) No PC do escritório (extensão instalada), abre o ticket autorizado
-      e emite → grava nº da NFA e link do Drive na planilha
-   3) Qualquer admin pode imprimir a NFA emitida (abre o PDF do Drive)
+/* ══ NFA: emitir · imprimir ════════════════════════════════════
+   Sem etapa de autorização: ao finalizar o peso, a carga já fica
+   disponível para o Adm emitir (pelo app ou pelo Painel).
+   No emitir, o Adm valida os dados e escolhe o transporte.
    ═══════════════════════════════════════════════════════════════ */
 function atualizarBotoesNFA(o){
   _nfaTicketAtual = o.id;
   const isAdm = usr && usr.nivel === 'admin';
   const emitida = !!o.nfa_emitida;
-  const autorizada = !!o.nfa_autorizada;
-  const temExt = extNFADisponivel();
+  const finalizado = (String(o.status||'').indexOf('Finalizado')>=0) || (parseFloat(o.cargaLiquida)>0);
   const btnNFA = document.getElementById('btn-emitir-nfa');
   const btnAut = document.getElementById('btn-autorizar-nfa');
   const btnImp = document.getElementById('btn-imprimir-nfa');
@@ -5427,21 +5422,10 @@ function atualizarBotoesNFA(o){
     if(isAdm && emitida && o.nfa_drive_url){ btnImp.style.display='block'; btnImp.onclick=()=>imprimirNFA(o.nfa_drive_url); }
     else btnImp.style.display='none';
   }
-  // Emitir NFA — admin, não emitida, com extensão (PC do escritório)
-  if(btnNFA) btnNFA.style.display=(isAdm && !emitida && temExt)?'block':'none';
-  // Autorizar emissão — admin, não emitida, sem extensão (celular)
-  if(btnAut){
-    if(isAdm && !emitida && !temExt){
-      btnAut.style.display='block';
-      if(autorizada){
-        btnAut.textContent='✓ NFA autorizada — emitir no PC';
-        btnAut.disabled=true; btnAut.style.opacity='.6'; btnAut.style.cursor='default'; btnAut.onclick=null;
-      }else{
-        btnAut.textContent='✅ Autorizar emissão de NFA';
-        btnAut.disabled=false; btnAut.style.opacity='1'; btnAut.style.cursor='pointer'; btnAut.onclick=()=>autorizarNFA(o);
-      }
-    } else btnAut.style.display='none';
-  }
+  // Emitir NFA — admin, peso finalizado e ainda não emitida
+  if(btnNFA) btnNFA.style.display=(isAdm && finalizado && !emitida)?'block':'none';
+  // Botão de autorização removido
+  if(btnAut) btnAut.style.display='none';
 }
 
 // Verifica se o ticket tem UF/Município (obrigatórios na NFA). Se faltar,
@@ -5464,8 +5448,9 @@ function _nfaLocalOk(o){
   return false;
 }
 
-// Autorizar = abrir a validação do Adm (escolher transporte + confirmar dados)
-function autorizarNFA(o){
+// Emitir = validar dados/transporte e seguir para a emissão (app ou Painel)
+function emitirNFAFluxo(){
+  const o = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual && atual.id===_nfaTicketAtual ? atual : (atual||null));
   if(!o || !(usr && usr.nivel==='admin')) return;
   if(!_nfaLocalOk(o)) return;
   abrirValidaNFA(o);
@@ -5508,28 +5493,14 @@ function confirmarValidaNFA(){
     if(!mot){ toast('⚠️ Informe o motorista'); return; }
     o.motorista=mot; o.cpf=cpf; o.transpCnpj=''; o.transpNome=''; o.nfa_transporte='motorista';
   }
-  fecharValidaNFA();
-  _aplicarAutorizacao(o);
-}
-function _aplicarAutorizacao(o){
-  o.nfa_autorizada = true;
-  o.nfa_autorizada_por = usr?.nome || '';
-  o.nfa_autorizada_em = new Date().toLocaleString('pt-BR');
+  // Grava os dados de transporte e segue para a emissão
   const i = cloud.findIndex(x=>x.id===o.id); if(i>=0) cloud[i]=o;
   if(atual && atual.id===o.id) atual=o;
   try{ saveCloud(); }catch(e){}
-  // grava dados de transporte (atualizar) + a autorização (autorizarNFA)
   enviar(o,'atualizar');
-  if(SHEETS_URL && navigator.onLine){
-    fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({acao:'autorizarNFA',ticket_id:o.id,por:usr?.nome||'',token:TOKEN})})
-      .then(r=>r.json()).then(j=>{ if(!(j&&j.ok)) toast('⚠️ Autorização salva localmente'); })
-      .catch(()=>toast('⚠️ Sem conexão — autorização salva localmente'));
-  } else {
-    toast('📵 Offline — autorização salva localmente');
-  }
-  toast('✅ NFA autorizada — pronta para emitir (app ou Painel)');
-  if(typeof atualizarBotoesNFA==='function') atualizarBotoesNFA(o);
+  fecharValidaNFA();
+  _nfaTicketAtual=o.id;
+  abrirModalNFA();   // segue para a prévia/emissão da NFA
 }
 
 // Atualiza o cache local após a emissão (o backend já gravou em NFAs_Emitidas

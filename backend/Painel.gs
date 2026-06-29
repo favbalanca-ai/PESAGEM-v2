@@ -44,8 +44,7 @@ function atualizarPainel(){
 
   var finalizadas = pes.filter(function(o){ return (o.status||"").indexOf("Finalizado") >= 0; });
   var emProcesso  = pes.filter(function(o){ return (o.status||"").indexOf("Finalizado") < 0; }); // aguardando pesar
-  var aguardando  = finalizadas.filter(function(o){ return !o.nfa_emitida; });                    // aguardando NFA
-  var autorizadas = aguardando.filter(function(o){ return o.nfa_autorizada; });
+  var aguardando  = finalizadas.filter(function(o){ return !o.nfa_emitida; });                    // disponível p/ emitir
   var emitidas    = pes.filter(function(o){ return o.nfa_emitida; });
   var contrAtivos = contr.filter(function(c){ return c.status !== "Inativo" && c.status !== "Encerrado" && c.status !== "Nao"; });
 
@@ -82,19 +81,23 @@ function atualizarPainel(){
 
   // ── KPIs linha 2 — fiscal / NFA ──
   k = linha;
-  desenharKPI(aba, k, 1, "AGUARDANDO NFA",   aguardando.length,       "cargas sem nota",    PNL.amareloB, PNL.amareloT);
-  desenharKPI(aba, k, 3, "AUTORIZADAS",      autorizadas.length,      "liberadas p/ emitir",PNL.azulCl, PNL.azul);
+  var incompletas0 = aguardando.filter(function(o){ return !s(o.estado).trim() || !s(o.municipio).trim(); }).length;
+  desenharKPI(aba, k, 1, "DISPONÍVEIS NFA",  aguardando.length,       "prontas p/ emitir",  PNL.amareloB, PNL.amareloT);
+  var icBg = incompletas0? PNL.vermB:PNL.verdeCl, icFg = incompletas0? PNL.vermT:PNL.verde;
+  desenharKPI(aba, k, 3, "SEM UF/MUN.",      incompletas0,            "corrigir antes",     icBg, icFg);
   desenharKPI(aba, k, 5, "NFA HOJE",         emitidasHoje.length,     "emitidas hoje",      PNL.verdeCl, PNL.verde);
   desenharKPI(aba, k, 7, "CONTRATOS",        contrAtivos.length,      "ativos com saldo",   PNL.verdeCl, PNL.verde);
   linha += 4;
 
   // ── FILA DE EMISSÃO NFA (controle principal) ──
+  // incompletas (sem UF/Mun.) primeiro, depois mais recentes
   aguardando.sort(function(a,b){
-    if(!!b.nfa_autorizada !== !!a.nfa_autorizada) return (b.nfa_autorizada?1:0)-(a.nfa_autorizada?1:0);
+    var fa=(!s(a.estado).trim()||!s(a.municipio).trim())?1:0, fb=(!s(b.estado).trim()||!s(b.municipio).trim())?1:0;
+    if(fb!==fa) return fb-fa;
     return _dataKey(b) - _dataKey(a);
   });
   var incompletas = aguardando.filter(function(o){ return !s(o.estado).trim() || !s(o.municipio).trim(); }).length;
-  var subFila = aguardando.length + " cargas · " + autorizadas.length + " autorizadas" + (incompletas? " · ⚠️ "+incompletas+" sem UF/Mun.":"");
+  var subFila = aguardando.length + " cargas" + (incompletas? " · ⚠️ "+incompletas+" sem UF/Mun.":"");
   linha = secaoTitulo(aba, linha, "⏳  FILA DE EMISSÃO — NFA", subFila);
   linha = cabecalhoTabela(aba, linha, ["Placa","Motorista","Contrato","Carga (kg)","Balança","Status","Emitir"]);
   if(aguardando.length === 0){
@@ -114,8 +117,6 @@ function atualizarPainel(){
       aba.getRange(linha,5).setValue(_balNome(o)).setFontSize(10).setFontColor(falta?PNL.vermT:PNL.ink3);
       if(falta)
         aba.getRange(linha,6).setValue("⚠️ Sem UF/Mun.").setBackground(PNL.vermB).setFontColor(PNL.vermT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
-      else if(o.nfa_autorizada)
-        aba.getRange(linha,6).setValue("✅ Autorizada").setBackground(PNL.verdeB).setFontColor(PNL.verdeT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
       else
         aba.getRange(linha,6).setValue("⏳ Aguardando").setBackground(PNL.amareloB).setFontColor(PNL.amareloT).setFontWeight("bold").setHorizontalAlignment("center").setFontSize(10);
       // Sem UF/Município → botão vira "Corrigir" (o app abre e pede para completar)
@@ -232,7 +233,7 @@ function atualizarPainel(){
   // ── Rodapé ──
   aba.getRange(linha,1,1,8).merge()
     .setValue("💡 📄 EMITIR abre o app na carga e dispara a emissão pelo SEFAZ (a extensão preenche; você seleciona o certificado A1). "
-            + "✅ Autorizada = liberada pelo administrador no app. Atualize por: menu FAV v2 → 📊 Atualizar Painel.")
+            + "⚠️ Sem UF/Mun. = corrija no app antes de emitir. Atualize por: menu FAV v2 → 📊 Atualizar Painel.")
     .setFontColor(PNL.ink3).setFontSize(10).setFontStyle("italic").setWrap(true).setVerticalAlignment("middle");
   aba.setRowHeight(linha, 42);
 
