@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "FAV - Emissor NFA SEFAZ-GO",
+  "version": "5.7",
+  "description": "Preenche automaticamente a NFA no portal SEFAZ-GO com dados do sistema de pesagem FAV.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA17qE6EBoqOwd2h2VXiEPfXPDf7Z9r9KxSXxhuCv1xEPEBS86i3CpH+2lB8zZOEzyFhSGRsd1/KmqeQvu6TlK6VwK6jGHYUlMoixf4CsyfXIbboK9MEZUIejR0vUonZ6vw5yOy8C4p3uzlEooxSjiIABeRsjZAnpGg9oCNHRiJXmOsLZM+BaVkSJIJSy1CNBRmOyoHmUU+hjvCo/qEfZZdqYKmwJVm6qd+VxbMobSh+3tGH4rqLELpemzI171/9YF2VIQGKuw+9pPAeWpRk6DcEPsl5ZsO61OGH9BtNQGajSWrtYTgi7Z4L5We4j11VA++bjyhSxiCgViZ4px9sHRsQIDAQAB",
+  "permissions": [
+    "storage",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://nfw.sefaz.go.gov.br/*",
+    "https://sistemas.sefaz.go.gov.br/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://favbalanca-ai.github.io/*"
+    ]
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FAV NFA"
+  }
+}

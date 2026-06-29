@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<style>
+  body { font-family: Arial; width: 220px; padding: 12px; margin: 0; background: #f5f5f5; }
+  h3 { margin: 0 0 8px; color: #1a3a6c; font-size: 13px; }
+  .status { font-size: 11px; color: #555; margin-bottom: 10px; }
+  button {
+    width: 100%; padding: 8px; background: #c0392b; color: white;
+    border: none; border-radius: 4px; cursor: pointer; font-size: 12px;
+  }
+  button:hover { background: #a93226; }
+  .verde { background: #1a6c3c; }
+  .verde:hover { background: #145a32; }
+</style>
+</head>
+<body>
+  <h3>🤖 FAV - Emissor NFA</h3>
+  <div class="status" id="status">Verificando dados pendentes...</div>
+  <button class="verde" id="btnLimpar">🗑️ Limpar dados pendentes</button>
+  <script>
+    chrome.storage.local.get('nfa_pendente', (data) => {
+      const s = document.getElementById('status');
+      if (data.nfa_pendente) {
+        s.innerHTML = `✅ Nota pendente:<br><b>${data.nfa_pendente.emitente_nome}</b><br>→ ${data.nfa_pendente.destinatario_nome || 'Destinatário...'}`;
+      } else {
+        s.textContent = '⚪ Nenhuma nota pendente.';
+      }
+    });
+    document.getElementById('btnLimpar').onclick = () => {
+      chrome.runtime.sendMessage({ action: 'LIMPAR_NFA' }, () => {
+        document.getElementById('status').textContent = 'Dados limpos.';
+      });
+    };
+  </script>
+</body>
+</html>
