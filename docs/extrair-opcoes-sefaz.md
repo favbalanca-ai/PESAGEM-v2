@@ -39,6 +39,27 @@ natureza que o habilita e rode de novo.
 })();
 ```
 
+## Script FOCADO (só os campos de produto)
+Use este na **aba Produtos** (com um Grupo selecionado) — só extrai os 4
+dropdowns de produto, sem as listas enormes de município:
+```js
+(function(){
+  const ids=['grupoProduto','naturezaOperacaoAdmin','nomeProdutoAdmin','dispositivoLegalProduto'];
+  const lixo=t=>!t||t==='-'||/^selecione/i.test(t)||/nenhum/i.test(t);
+  const out=[];
+  ids.forEach(key=>{
+    const sel=[...document.querySelectorAll('select')].find(s=>s.id&&s.id.includes(key));
+    if(sel){const o=[...sel.options].map(x=>(x.text||'').trim()).filter(t=>!lixo(t));
+      if(o.length) out.push('### '+key+'\n'+o.join('\n'));}
+  });
+  const txt=out.join('\n\n')||'(nenhum campo de produto — confirme aba Produtos + Grupo)';
+  const ta=document.createElement('textarea');ta.value=txt;document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');}catch(e){}ta.remove();
+  console.log(txt);alert('Produtos copiados ('+out.length+' listas).');
+})();
+```
+> Dica: o Chrome pede `allow pasting` uma vez — digite isso e Enter **antes** de colar o script.
+
 ## O que fazer com o resultado
 Os campos do SEFAZ têm `id` contendo:
 - `grupoProduto` → Grupo de Produto
