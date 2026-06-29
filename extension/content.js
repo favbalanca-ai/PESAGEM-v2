@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v5.2 (reconstruído limpo)
+// FAV NFA - Content Script v5.8 (sequência de etapas + resumo de conferência)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -72,10 +72,33 @@ function clicarBotaoVisivelPorId(trechoId) {
   return false;
 }
 
+// ─── SEQUÊNCIA DE ETAPAS (mostra o fluxo p/ o operador) ───────────────────────
+// A etapa corrente é derivada da página atual a cada injeção, então o progresso
+// se mantém correto mesmo o content.js recarregando entre as telas do SEFAZ.
+const ETAPAS_NFA = ['tipo','emitente','destinatario','transporte','produtos','resumo'];
+const ETAPAS_NOME = {
+  tipo:'Tipo de nota', emitente:'Emitente', destinatario:'Destinatário',
+  transporte:'Transporte', produtos:'Produtos', resumo:'Resumo / Enviar'
+};
+let _etapaCorrente = null;
+function definirEtapa(ch){ if (ETAPAS_NFA.indexOf(ch) >= 0) { _etapaCorrente = ch; if (_overlay) atualizarStatus(_ultimaMsg || '...', _ultimoTipo); } }
+function _passosHTML(){
+  const idx = ETAPAS_NFA.indexOf(_etapaCorrente);
+  return '<div style="margin:2px 0 9px;display:grid;grid-template-columns:1fr 1fr;gap:1px 12px">' +
+    ETAPAS_NFA.map(function(c,i){
+      var ic  = (idx < 0) ? '⚪' : (i < idx ? '✅' : (i === idx ? '⏳' : '⚪'));
+      var cor = (i === idx) ? '#ffffff' : (i < idx ? '#9fe0b6' : '#aebfdd');
+      var peso = (i === idx) ? '700' : '400';
+      return '<div style="color:'+cor+';font-weight:'+peso+';font-size:11px;white-space:nowrap">'+ic+' '+(i+1)+'. '+ETAPAS_NOME[c]+'</div>';
+    }).join('') + '</div>';
+}
+
 // ─── OVERLAY + BOTÕES PARAR / CONTINUAR IA ────────────────────────────────────
 let _overlay = null;
+let _ultimaMsg = '', _ultimoTipo = 'info';
 function atualizarStatus(msg, tipo = 'info') {
-  console.log('[FAV NFA]', msg);
+  _ultimaMsg = msg; _ultimoTipo = tipo;
+  console.log('[FAV NFA]', typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
   if (!_overlay) {
     _overlay = document.createElement('div');
     _overlay.id = 'fav-nfa-overlay';
@@ -84,8 +107,9 @@ function atualizarStatus(msg, tipo = 'info') {
   }
   const cores = { info:'#1a3a6c', ok:'#1a6c3c', erro:'#c0392b', aviso:'#e67e22' };
   _overlay.style.background = cores[tipo] || cores.info;
-  _overlay.innerHTML = '<div style="font-weight:bold;margin-bottom:4px">🤖 FAV — Automação NFA</div>' +
-    '<div id="fav-status-msg" style="margin-bottom:8px">' + msg + '</div>' +
+  _overlay.innerHTML = '<div style="font-weight:bold;margin-bottom:6px">🤖 FAV — Automação NFA</div>' +
+    _passosHTML() +
+    '<div id="fav-status-msg" style="margin-bottom:8px;border-top:1px solid rgba(255,255,255,.25);padding-top:7px">' + msg + '</div>' +
     '<div style="display:flex;gap:6px">' +
     '<button id="fav-btn-parar" style="flex:1;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⛔ PARAR</button>' +
     '<button id="fav-btn-continuar" style="flex:1;padding:8px;background:#1a6c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">▶ Continuar IA</button>' +
@@ -320,6 +344,7 @@ async function selecionarPrimeFaces(baseIdParcial, texto) {
 // ─── ETAPAS ───────────────────────────────────────────────────────────────────
 async function etapa_TelaInicial() {
   try { sessionStorage.removeItem('fav_dest_pesquisado'); sessionStorage.removeItem('fav_nfa_parar'); } catch(e){}
+  definirEtapa('tipo');
   atualizarStatus('Abrindo formulário...');
   await aguardarElemento(['input[value*="Emitir"]','button']);
   await clicarBotao('Emitir Nota Fiscal');
@@ -555,13 +580,27 @@ async function irParaContinuarProdutos() {
 }
 
 async function etapa_Resumo(dados) {
+  definirEtapa('resumo');
   atualizarStatus('Revisando resumo...');
   await wait(DELAY);
   if (dados.info_complementar) {
     const ta = document.querySelector('textarea[id*="informacoes"],textarea[id*="complementar"],textarea[id*="Informacoes"]');
     if (ta) { ta.value = dados.info_complementar; ta.dispatchEvent(new Event('change',{bubbles:true})); }
   }
-  atualizarStatus('✅ Tudo preenchido! Revise e clique em "Enviar Nota" você mesmo.', 'ok');
+  // Resumo de conferência (fluxo de informação): mostra o principal antes de enviar
+  const prod = (dados.produtos && dados.produtos[0]) || {};
+  const fmtKg = v => v ? Number(String(v).replace(',','.')).toLocaleString('pt-BR') + ' kg' : '—';
+  const linhas = [
+    '👤 ' + (dados.destinatario_nome || '—'),
+    '📦 ' + (prod.produto || '—'),
+    '⚖️ Líq.: ' + fmtKg(dados.peso_liquido_kg) + (dados.peso_bruto_kg ? ' · Bruto: ' + fmtKg(dados.peso_bruto_kg) : ''),
+    '🚚 ' + (dados.placa || '—') + (dados.uf_veiculo ? ' / ' + dados.uf_veiculo : '')
+  ].join('<br>');
+  atualizarStatus(
+    '<b>✅ Tudo preenchido!</b> Confira abaixo e clique em <b>"Enviar Nota"</b> você mesmo.' +
+    '<div style="margin-top:7px;font-size:11px;color:#e6f0ff;line-height:1.45;background:rgba(0,0,0,.18);padding:7px 9px;border-radius:7px">' + linhas + '</div>',
+    'ok'
+  );
 }
 
 async function detectarPaginaEExecutar(dados) {
@@ -576,16 +615,17 @@ async function detectarPaginaEExecutar(dados) {
   const temResumo = txtPagina.includes('Resumo da Nota');
   const enviarVisivel = [...document.querySelectorAll('input,button')].some(e => /enviar nota|finalizar/i.test(((e.value||'')+(e.textContent||'')).toLowerCase()) && e.offsetParent !== null);
   if (url.includes('ConsultaNFA') && !abaEmitente && !abaDestinat && !abaTransporte && !abaProdutos) {
+    definirEtapa('tipo');
     atualizarStatus('Iniciando nova nota...');
     await wait(1000);
     if (!await clicarPorId('buttonNovaNota')) await clicarBotao('Nova Nota');
     await wait(DELAY); await etapa_TipoNota(dados); return;
   }
-  if (abaProdutos) { await etapa_Produtos(dados); }
-  else if (abaTransporte) { await etapa_Transporte(dados); }
-  else if (abaDestinat) { await etapa_Destinatario(dados); }
-  else if (abaEmitente) { await etapa_Emitente(dados); }
-  else if (enviarVisivel || temResumo) { await etapa_Resumo(dados); }
+  if (abaProdutos) { definirEtapa('produtos'); await etapa_Produtos(dados); }
+  else if (abaTransporte) { definirEtapa('transporte'); await etapa_Transporte(dados); }
+  else if (abaDestinat) { definirEtapa('destinatario'); await etapa_Destinatario(dados); }
+  else if (abaEmitente) { definirEtapa('emitente'); await etapa_Emitente(dados); }
+  else if (enviarVisivel || temResumo) { definirEtapa('resumo'); await etapa_Resumo(dados); }
   else { atualizarStatus('⏳ Aguardando próxima tela do SEFAZ...', 'aviso'); }
 }
 
