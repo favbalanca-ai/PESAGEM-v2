@@ -1277,7 +1277,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbxs7y4PiJ1bj_zrykqwxaG3OVkGwznrbV38bM9AwLKgAodbxZApbSOwudzBk3K2aZ8Y/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v19"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v20"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2487,12 +2487,17 @@ var FAV_DISPLEGAL = {
   '5151':['SAIDA INTERNA DE PRODUCAO PROPRIA DO ESTAB. PARA OUTRO PERTENCENTE A MESMA PESSOA NATURAL OU JURIDIC'],
   '5152':['SAIDA INTERNA DE PRODUCAO PROPRIA DO ESTAB. PARA OUTRO PERTENCENTE A MESMA PESSOA NATURAL OU JURIDIC']
 };
+// Dispositivo Legal POR GRUPO. SOJA vem do doc oficial; demais grupos usam o
+// mapa comum (textos genéricos por código) até termos o doc específico deles.
+var FAV_DISPLEGAL_GRUPO = { SOJA: FAV_DISPLEGAL };
 function favPreencherDispLegal(){
+  var grupo=document.getElementById('nc-grupo').value;
   var tipoop=document.getElementById('nc-tipoop').value;
   var wrap=document.getElementById('nc-displegal-wrap');
   var sel=document.getElementById('nc-displegal');
   var cod=(tipoop.match(/(\d{4})\s*$/)||[])[1]||'';
-  var opcoes=FAV_DISPLEGAL[cod];
+  var mapa=FAV_DISPLEGAL_GRUPO[grupo]||FAV_DISPLEGAL; // SOJA tem doc; demais usam o comum
+  var opcoes=mapa[cod];
   sel.innerHTML='';
   if(!opcoes){
     // operação sem dispositivo legal (ex: vendas) -> esconde
