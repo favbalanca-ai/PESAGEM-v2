@@ -128,15 +128,24 @@ Portar o mapeamento de campos da extensão para um script **Playwright**
 | Autorizada, não emitida | ✓ Autorizada (aguardando) | 📄 Emitir |
 | Emitida | 🖨️ Imprimir | 🖨️ Imprimir |
 
-### Campos novos no ticket (planilha)
-O app passa a enviar estes campos via ação `atualizar` — **o Apps Script
-precisa ter/gravar estas colunas** para persistirem entre dispositivos:
+### Integração com o backend real (Apps Script)
+O backend (`Code.gs`) já tem a maior parte:
+- **Emissão + Drive:** `processarNFA` salva o PDF no Drive (`salvarPDFnfa`),
+  envia e-mail/WhatsApp e registra a linha em **`NFAs_Emitidas`**
+  (com `drive_url` e `numero_nfa`). ✅ já funciona.
+- **`listarPesagens`** marca `nfa_emitida` e devolve `nfa_numero` a partir
+  da aba `NFAs_Emitidas`.
 
-- `nfa_autorizada` (bool), `nfa_autorizada_por`, `nfa_autorizada_em`
-- `nfa_emitida` (bool — já existia), `nfa_emitida_por`, `nfa_emitida_em`
-- `numero_nfa`, `nfa_drive_url`
+O app foi alinhado a esses nomes (`nfa_numero`, `nfa_drive_url`) e a
+autorização passou a usar uma ação dedicada (`autorizarNFA`).
 
-### Pendências de backend
-- Garantir que `atualizar` persista as colunas acima.
-- Confirmar que a emissão (extensão/`montarDadosNFA`) retorna `drive_url` e
-  `numero_nfa` (o app já os consome em `exibirNFAConcluida`).
+### Mudanças necessárias no Apps Script
+1. **Aba `Pesagem`** — adicionar 3 colunas (28–30):
+   `NFA_Autorizada`, `NFA_Autorizada_Por`, `NFA_Autorizada_Em`
+   (incluir também no cabeçalho de `configurarPlanilha`).
+2. **Nova ação `autorizarNFA`** (rota no `doPost` + função) que grava essas
+   colunas pelo `ticket_id`.
+3. **`listarPesagens`** — passar a ler até a coluna 30 e devolver:
+   `nfa_autorizada`, `nfa_autorizada_por` e `nfa_drive_url`
+   (este último vindo da coluna *Drive URL* da aba `NFAs_Emitidas`).
+4. *(Opcional)* No **Painel**, mostrar/filtrar a fila por "autorizada".
