@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v31"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v32"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4348,6 +4348,9 @@ function gerarPDF(){
       Gerado em ${dataGerado} · ${emp}
     </div>`;
   document.getElementById('pdf-frame').classList.add('show');
+  // pré-rasteriza o ticket p/ a impressão sair na hora ao tocar em Imprimir
+  _ticketImg=null;
+  setTimeout(_rasterizarTicket,250);
 }
 function fecharPDF(){ document.getElementById('pdf-frame').classList.remove('show'); }
 
@@ -4454,7 +4457,27 @@ function pdfContrato(){
     document.getElementById('print-relatorio').style.display='none';
   },4000);
 }
-async function imprimirPDF(){
+// Imagem do ticket pré-rasterizada (preenchida quando o preview é montado).
+// Guardar pronto evita usar await DENTRO do toque de Imprimir — no celular,
+// chamar window.print() depois de um await perde o "gesto do usuário" e a
+// impressão não dispara (parecia "preparar mas não imprimir").
+var _ticketImg=null;
+async function _rasterizarTicket(){
+  try{
+    const page=document.getElementById('pdf-page');
+    if(!page||!page.innerHTML.trim()){ _ticketImg=null; return; }
+    const canvas=await html2canvas(page,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
+    _ticketImg=canvas.toDataURL('image/jpeg',0.95);
+    const im1=document.getElementById('print-img-1');
+    const im2=document.getElementById('print-img-2');
+    const col1=document.getElementById('print-col-1');
+    const col2=document.getElementById('print-col-2');
+    if(im1&&col1){ col1.innerHTML=''; col1.appendChild(im1); im1.src=_ticketImg; }
+    if(im2&&col2){ col2.innerHTML=''; col2.appendChild(im2); im2.src=_ticketImg; }
+  }catch(e){ _ticketImg=null; }
+}
+// Síncrona: dispara window.print() imediatamente no toque (não pode ter await antes).
+function imprimirPDF(){
   const src=document.getElementById('pdf-page');
   if(!src||!src.innerHTML.trim()){
     gerarPDF();
@@ -4465,27 +4488,22 @@ async function imprimirPDF(){
   const col2=document.getElementById('print-col-2');
   const im1=document.getElementById('print-img-1');
   const im2=document.getElementById('print-img-2');
-  toast('🖨️ Preparando impressão...');
-  // Rasteriza o ticket UMA vez e usa como imagem nas duas metades (cima/baixo).
-  // Como imagem com aspecto preservado, cada via encolhe p/ caber na metade da
-  // folha sem cortar nada (o layout em HTML cortava quando o ticket era alto).
-  let usouImg=false;
-  try{
-    const canvas=await html2canvas(src,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
-    const data=canvas.toDataURL('image/jpeg',0.95);
+  if(_ticketImg){
+    // caso normal: imagem já pronta (aspecto preservado, não corta)
     col1.innerHTML=''; col1.appendChild(im1);
     col2.innerHTML=''; col2.appendChild(im2);
-    im1.src=data; im2.src=data;
-    await new Promise(r=>{ if(im1.complete) r(); else { im1.onload=r; im1.onerror=r; } });
-    usouImg=true;
-  }catch(e){
-    // Fallback: usa o HTML direto (pode cortar em tickets longos, mas imprime)
+    if(im1.src!==_ticketImg) im1.src=_ticketImg;
+    if(im2.src!==_ticketImg) im2.src=_ticketImg;
+  }else{
+    // ainda não rasterizou: imprime o HTML direto (pode cortar tickets longos),
+    // mas garante a impressão; já pré-rasteriza p/ a próxima vez
     col1.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
     col2.innerHTML='<div class="pdf-page">'+src.innerHTML+'</div>';
+    setTimeout(_rasterizarTicket,50);
   }
   document.getElementById('print-mirror').style.display='flex';
   document.body.classList.add('print-ticket');
-  setTimeout(()=>{ window.print(); }, usouImg?120:300);
+  window.print();
   const limpar=()=>{
     document.body.classList.remove('print-ticket');
     document.getElementById('print-mirror').style.display='none';
