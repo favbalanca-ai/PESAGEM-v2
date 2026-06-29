@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v34"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v35"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5548,7 +5548,19 @@ async function iaLerDocumentoRec(input){
 // ═══════════════════════════════════════════════════════════
 let _nfaDados=null,_nfaTicketAtual=null,_nfaContratos=[],_nfaPolling=null;
 
-function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'ddnaadghnmimdndmlpcebiioedaafgne';}
+// ID padrão = calculado da "key" do manifest da extensão (plug-and-play).
+// Pode ser sobrescrito pelo handshake (a extensão anuncia o próprio ID) ou manualmente.
+function getNFAExtId(){return localStorage.getItem('fav_ext_id')||'eafpoighfngimhecffbnkedbacnincpo';}
+
+// Handshake: a extensão (content script anuncio.js) posta o próprio ID na página.
+// Guardamos em fav_ext_id para o app achar a extensão sem configuração manual.
+window.addEventListener('message',function(e){
+  if(e.source===window && e.data && e.data.__FAV_EXT__ && e.data.id){
+    var atual=localStorage.getItem('fav_ext_id');
+    if(atual!==e.data.id){ localStorage.setItem('fav_ext_id',e.data.id); console.log('[FAV] Extensão NFA detectada:',e.data.id,'v'+(e.data.version||'?')); }
+  }
+});
+try{ window.postMessage({__FAV_EXT_PING__:true},'*'); }catch(e){}
 
 // Extensão de emissão disponível? (verdadeiro no PC do escritório com a extensão)
 function extNFADisponivel(){ return typeof chrome!=='undefined' && !!chrome.runtime && !!getNFAExtId(); }
