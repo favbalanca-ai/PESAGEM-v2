@@ -921,7 +921,7 @@ body.dark .card{background:#1a2d22}
           </div>
           <div class="f">
             <label>Unidade</label>
-            <select id="nc-unidade"><option value="KG">KG</option><option value="CABECA">CABEÇA</option><option value="SC">SACA</option></select>
+            <select id="nc-unidade"><option value="KG">KG</option><option value="T">TONELADA (T)</option><option value="SC">SACA</option><option value="CABECA">CABEÇA</option></select>
           </div>
         </div>
         <div class="f"><label>Tipo de Operação *</label>
@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v35"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v36"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5722,8 +5722,8 @@ async function abrirModalNFA(){
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,token:TOKEN})});
     const d=await r.json();
     if(!d.ok||d.erro)throw new Error(d.erro||'Falha ao montar NFA');
-    _nfaDados=d.nfa;
-    renderPreviaNFA(d.nfa);
+    _nfaDados=_ajustarQtdUnidadeNFA(d.nfa);
+    renderPreviaNFA(_nfaDados);
     const extId=getNFAExtId();
     var aviso=document.getElementById('nfa-aviso-ext');
     if(aviso) aviso.style.display=(extId&&typeof chrome!=='undefined'&&chrome.runtime)?'none':'block';
@@ -5757,12 +5757,27 @@ async function abrirPreviaNFA(){
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(body)});
     const d=await r.json();
     if(d.erro)throw new Error(d.erro);
-    _nfaDados=d.nfa;
-    renderPreviaNFA(d.nfa);
+    _nfaDados=_ajustarQtdUnidadeNFA(d.nfa);
+    renderPreviaNFA(_nfaDados);
     document.getElementById('modal-previa-nfa').style.display='flex';
   }catch(e){toast('❌ Erro ao montar NFA: '+e.message);}
 }
 
+// Rótulo curto da unidade p/ exibição
+function _unidLabelNFA(u){u=String(u||'').toUpperCase();return (u==='T'||u==='TON'||u==='TONELADA')?'t':(u==='SC'||u==='SACA')?'sc':(u==='CABECA')?'cb':'kg';}
+// O backend manda a quantidade em kg. Se a unidade do contrato for TONELADA,
+// converte a quantidade da NFA para toneladas (o valor unitário já é R$/t).
+function _ajustarQtdUnidadeNFA(nfa){
+  if(!nfa||!nfa.produtos)return nfa;
+  var liq=Number(nfa.peso_liquido_kg)||0;
+  nfa.produtos.forEach(function(p){
+    var u=String(p.unidade||'').toUpperCase();
+    if((u==='T'||u==='TON'||u==='TONELADA')&&liq>0){
+      p.quantidade=(liq/1000).toFixed(3);   // toneladas (3 casas = precisão de kg)
+    }
+  });
+  return nfa;
+}
 function renderPreviaNFA(n){
   document.getElementById('nfa-prev-tk').textContent=n.ticket_id||'';
   document.getElementById('nfa-prev-sub').textContent=(n.contrato_id||'')+' · '+new Date().toLocaleDateString('pt-BR');
@@ -5779,7 +5794,7 @@ function renderPreviaNFA(n){
   let total=0;
   document.getElementById('nfa-prev-prods').innerHTML=(n.produtos||[]).map(p=>{
     const t=Number(p.quantidade||0)*Number(p.valor_unitario||0);total+=t;
-    return `<div class="nfa-prod-item"><div class="pn">${p.produto}</div><div class="pv"><span>${Number(p.quantidade||0).toLocaleString('pt-BR')} kg × R$ ${Number(p.valor_unitario||0).toFixed(4)}</span><span style="font-weight:700;color:#1a3a6c">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div></div>`;
+    return `<div class="nfa-prod-item"><div class="pn">${p.produto}</div><div class="pv"><span>${Number(p.quantidade||0).toLocaleString('pt-BR')} ${_unidLabelNFA(p.unidade)} × R$ ${Number(p.valor_unitario||0).toFixed(4)}</span><span style="font-weight:700;color:#1a3a6c">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div></div>`;
   }).join('');
   document.getElementById('nfa-prev-total').textContent='R$ '+total.toLocaleString('pt-BR',{minimumFractionDigits:2});
 }
