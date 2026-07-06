@@ -1,6 +1,6 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v39';
+const CACHE    = 'fav-v2-v40';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
@@ -34,13 +34,33 @@ self.addEventListener('activate', e => {
   );
 });
 
-// ── FETCH: Cache First → abertura offline garantida ───────────
+// ── SKIP_WAITING: ativar nova versão imediatamente quando pedido ──
+self.addEventListener('message', e => {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
+});
+
+// ── FETCH ─────────────────────────────────────────────────────
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
   if (req.url.includes('script.google.com')) return;
   if (req.url.includes('wa.me') || req.url.includes('mailto:')) return;
 
+  // HTML / navegação: NETWORK-FIRST → online sempre pega a versão nova
+  // (evita ficar preso em cache antigo). Offline: cai pro cache.
+  if (req.mode === 'navigate' || req.destination === 'document') {
+    e.respondWith(
+      fetch(req)
+        .then(res => {
+          if (res && res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put('./index.html', c)); }
+          return res;
+        })
+        .catch(() => caches.match(req, {ignoreSearch: true}).then(r => r || caches.match('./index.html')))
+    );
+    return;
+  }
+
+  // Demais assets (fontes, libs, ícones): Cache First → rápido e offline
   e.respondWith(
     caches.match(req, {ignoreSearch: true}).then(cached => {
       if (cached) {
