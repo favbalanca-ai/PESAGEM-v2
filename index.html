@@ -1128,6 +1128,16 @@ body.dark .card{background:#1a2d22}
     <button onclick="syncM()" style="margin-left:auto;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Sincronizar agora</button>
   </div>
 
+  <!-- Versão / atualização -->
+  <div class="card">
+    <div class="ct">📦 Versão do app</div>
+    <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+      <div style="font-size:16px;font-weight:800" id="diag-ver">—</div>
+      <button onclick="forcarAtualizacao()" style="margin-left:auto;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Buscar atualização</button>
+    </div>
+    <div style="font-size:11px;color:var(--ink3);margin-top:6px">Limpa o cache e recarrega para pegar a versão mais recente.</div>
+  </div>
+
   <!-- Status geral -->
   <div class="card">
     <div class="ct">📡 Status atual</div>
@@ -1308,7 +1318,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v39"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v40"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1432,6 +1442,7 @@ window.addEventListener('load',()=>{
       reg.update().catch(() => {});
     }).catch(err => console.warn('[App] SW não registrado:', err));
   }
+  var _dv=document.getElementById('diag-ver'); if(_dv) _dv.textContent=APP_VER;
   window.addEventListener('online', ()=>{
     document.getElementById('offb').style.display='none';
     // Reconectou: dá nova chance aos itens que tinham falhado
@@ -1450,6 +1461,20 @@ window.addEventListener('load',()=>{
   document.addEventListener('touchmove',e=>{if(document.body.getAttribute('data-sig')==='1')e.preventDefault();},{passive:false});
   checkSess(); calcPBT();
 });
+
+// Força buscar a versão mais recente: atualiza o SW, limpa TODO o cache e recarrega.
+async function forcarAtualizacao(){
+  toast('🔄 Buscando atualização...');
+  try{
+    if('serviceWorker' in navigator){
+      const reg=await navigator.serviceWorker.getRegistration();
+      if(reg){ try{ await reg.update(); }catch(e){} if(reg.waiting){ try{ reg.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} } }
+    }
+    if('caches' in window){ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }
+    toast('✅ Atualizando o app...');
+    setTimeout(()=>{ location.reload(); }, 700);
+  }catch(e){ location.reload(); }
+}
 
 /* ══ LOGIN ════════════════════════════════════════════════════ */
 function login(){
