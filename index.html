@@ -1308,7 +1308,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v38"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v39"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5772,18 +5772,28 @@ function _unidLabelNFA(u){u=String(u||'').toUpperCase();return (u==='T'||u==='TO
 function _prodEhTonelada(nome){
   return /\bT\s+(PRODUTOR|EXTRATOR|INDUSTRIA|ATACADO)/.test(' '+String(nome||'').toUpperCase()+' ');
 }
+// Detecta a variante em SACA (ex.: "... SC 60 KG UN ...") e o peso do saco.
+function _prodEhSaca(nome){ return /\bSC\s*\d{2,3}\s*KG/.test(String(nome||'').toUpperCase()); }
+function _pesoSacoProduto(nome){
+  var m=String(nome||'').toUpperCase().match(/\bSC\s*(\d{2,3})\s*KG/);
+  return m?parseInt(m[1],10):60;   // padrão: saca de 60 kg
+}
+// Converte a quantidade da NFA conforme a unidade selecionada (o peso vem SEMPRE
+// em kg do ticket). T → kg/1000; SC → kg/pesoSaco (60 kg, ou 40 se o produto for SC 40).
+// Sem zeros à toa, 3 casas. Total = quantidade × valor_unitário (R$/t ou R$/saca).
 function _ajustarQtdUnidadeNFA(nfa){
   if(!nfa||!nfa.produtos)return nfa;
   var liq=Number(nfa.peso_liquido_kg)||0;   // peso líquido SEMPRE em kg (vem do ticket)
   nfa.produtos.forEach(function(p){
+    if(liq<=0)return;
     var u=String(p.unidade||'').toUpperCase();
-    // Converte p/ toneladas se a unidade do contrato for T OU se o produto for a variante T
-    var ehTon=(u==='T'||u==='TON'||u==='TONELADA')||_prodEhTonelada(p.produto);
-    if(ehTon&&liq>0){
-      // kg → toneladas, sem zeros à toa: 55000→"55"; 45500→"45.5"; 45123→"45.123".
-      // Total = t × R$/t (valor unitário do contrato é R$/tonelada).
-      p.quantidade=String(Math.round(liq)/1000);
-      p.unidade='T';                    // normaliza p/ o rótulo e o envio ao SEFAZ
+    if((u==='T'||u==='TON'||u==='TONELADA')||_prodEhTonelada(p.produto)){
+      p.quantidade=String(Math.round(liq)/1000);              // kg → toneladas
+      p.unidade='T';
+    }else if(u==='SC'||u==='SACA'||_prodEhSaca(p.produto)){
+      var pk=_pesoSacoProduto(p.produto);                     // 60 (ou 40)
+      p.quantidade=String(Math.round(liq/pk*1000)/1000);      // kg → sacas (3 casas)
+      p.unidade='SC';
     }
   });
   return nfa;
