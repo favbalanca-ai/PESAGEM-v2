@@ -1825,6 +1825,13 @@ async function carregarMunicipios(uf){
   }
 }
 
+/* Retorna aviso se a CNH estiver vencida (validade dd/mm/aaaa) */
+function _cnhVencida(v){
+  if(!v)return'';
+  var m=String(v).match(/(\d{2})\/(\d{2})\/(\d{4})/); if(!m)return'';
+  var dt=new Date(+m[3],+m[2]-1,+m[1]); var hoje=new Date(); hoje.setHours(0,0,0,0);
+  return dt<hoje ? ('⚠️ CNH VENCIDA em '+v+' — confira!') : '';
+}
 /* ── IA: leitura de CNH na etapa 3 (motorista/CPF) ───────────── */
 async function wizLerCNH(input){
   if(!input.files||!input.files[0])return;
@@ -1839,11 +1846,14 @@ async function wizLerCNH(input){
     const dados={};
     if(res.motorista) dados['Nome do motorista'] = {campo:'f-mt',  valor:res.motorista};
     if(res.cpf)       dados['CPF']               = {campo:'f-cpf', valor:res.cpf};
+    if(res.categoria) dados['Categoria (CAT.HAB)'] = {campo:'', valor:res.categoria};
+    if(res.validade)  dados['Validade da CNH']     = {campo:'', valor:res.validade};
     if(Object.keys(dados).length===0){
       iaStatus('ia-status-cnh','err','⚠️ Não encontrei dados — tente foto mais nítida');
       return;
     }
-    iaStatus('ia-status-cnh','ok','✅ IA leu a CNH — confirme os dados');
+    const avisoV=_cnhVencida(res.validade);
+    iaStatus('ia-status-cnh', avisoV?'err':'ok', avisoV || '✅ IA leu a CNH — confirme os dados');
     mostrarModalIA(dados, 'CNH', 3);
   }catch(e){iaStatus('ia-status-cnh','err','❌ Erro de conexão — preencha manualmente');}
 }
