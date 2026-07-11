@@ -78,7 +78,7 @@ function doPost(e){
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
-    if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame));
+    if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame,d.tipo));
     if(d.acao==="lerTransportadora")  return resposta(lerTransportadora(d.frame));
     if(d.acao==="testarIA")           return resposta(testarIAapi());
     // NFA via app
@@ -936,11 +936,17 @@ function lerPlaca(frame){
   catch(e){return{ok:false,erro:"Erro ao interpretar resposta: "+e.message};}
 }
 
-function lerDocumento(frame){
+function lerDocumento(frame, tipo){
   if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
   if(!frame||!frame.base64)return{ok:false,erro:"Nenhuma imagem enviada"};
   if(frame.base64.length>3000000)return{ok:false,erro:"Imagem muito grande — reduza a resolução da foto"};
-  var prompt="Analise este documento de transporte agrícola (Nota Fiscal, CT-e, CRLV, Romaneio ou similar).\nExtraia as informações disponíveis e retorne APENAS JSON puro:\n{\"placa\": \"ABC1D23\", \"motorista\": \"NOME COMPLETO\", \"cpf\": \"000.000.000-00\", \"municipio\": \"Nome da cidade\", \"estado\": \"UF\", \"produto\": \"Soja\", \"peso_kg\": 25000, \"numero_doc\": \"000001\", \"emitente\": \"Nome da empresa\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Retorne null para campos não encontrados\n- Nome do motorista em MAIÚSCULAS\n- Município: cidade de origem ou destino do transporte\n- Estado: sigla de 2 letras (ex: GO, DF, MT)\n- Produto: nome genérico (Soja, Milho, etc)\n- Peso em kg como número inteiro\n- Não invente dados — null se não encontrar";
+  var prompt;
+  if(String(tipo||"").toUpperCase()==="CNH"){
+    // Prompt específico para CNH (Carteira Nacional de Habilitação)
+    prompt="Analise esta CNH brasileira (Carteira Nacional de Habilitacao) e extraia os dados do CONDUTOR.\nRetorne APENAS JSON puro:\n{\"motorista\": \"NOME COMPLETO\", \"cpf\": \"000.000.000-00\", \"categoria\": \"E\", \"validade\": \"dd/mm/aaaa\", \"nascimento\": \"dd/mm/aaaa\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS IMPORTANTES:\n- motorista = valor do campo \"NOME\" (o titular da CNH), em MAIUSCULAS. NUNCA use os nomes do campo \"FILIACAO\" (pai/mae).\n- cpf = campo \"CPF\", formato 000.000.000-00 (11 digitos). NAO confundir com \"Nº REGISTRO\" (11 digitos, geralmente em vermelho) nem com \"DOC. IDENTIDADE\" (RG).\n- categoria = campo \"CAT. HAB.\" (ex.: A, B, AB, C, D, E).\n- validade = campo \"VALIDADE\" (dd/mm/aaaa).\n- nascimento = \"DATA NASCIMENTO\" (dd/mm/aaaa).\n- Retorne null para o que nao encontrar. Nao invente dados.";
+  }else{
+    prompt="Analise este documento de transporte agrícola (Nota Fiscal, CT-e, CRLV, Romaneio ou similar).\nExtraia as informações disponíveis e retorne APENAS JSON puro:\n{\"placa\": \"ABC1D23\", \"motorista\": \"NOME COMPLETO\", \"cpf\": \"000.000.000-00\", \"municipio\": \"Nome da cidade\", \"estado\": \"UF\", \"produto\": \"Soja\", \"peso_kg\": 25000, \"numero_doc\": \"000001\", \"emitente\": \"Nome da empresa\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Retorne null para campos não encontrados\n- Nome do motorista em MAIÚSCULAS\n- Município: cidade de origem ou destino do transporte\n- Estado: sigla de 2 letras (ex: GO, DF, MT)\n- Produto: nome genérico (Soja, Milho, etc)\n- Peso em kg como número inteiro\n- Não invente dados — null se não encontrar";
+  }
   var payload={model:MODELO_IA,max_tokens:512,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}},{type:"text",text:prompt}]}]};
   var resp;
   try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});}
