@@ -87,9 +87,11 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .en{font-size:24px;font-weight:800;min-width:30px;text-align:center;color:var(--g1);font-family:'JetBrains Mono',monospace}
 
 /* MODELOS DE CAMINHÃO + DESENHO DOS EIXOS */
-.emodels{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;margin:0 0 10px;-webkit-overflow-scrolling:touch}
-.emodel{flex:0 0 auto;background:var(--g3);border:1px solid var(--brd);border-radius:10px;padding:7px 11px;font-weight:700;color:var(--ink);white-space:nowrap;display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2;cursor:pointer;font-family:'Inter',sans-serif;font-size:12px}
-.emodel small{font-size:10px;color:var(--ink3);font-weight:600;font-family:'JetBrains Mono',monospace}
+.emodels{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:0 0 10px}
+.emodel{background:var(--g3);border:1px solid var(--brd);border-radius:10px;padding:7px 4px;font-weight:700;color:var(--ink);display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.15;cursor:pointer;font-family:'Inter',sans-serif;font-size:12px;text-align:center}
+.emodel small{font-size:9px;color:var(--ink3);font-weight:600;font-family:'JetBrains Mono',monospace;letter-spacing:-.3px}
+.emodel.sel{border-color:var(--g1);background:var(--g1);color:#fff}
+.emodel.sel small{color:rgba(255,255,255,.85)}
 .emodel:active{transform:scale(.97)}
 .edesenho{background:var(--g3);border:1px solid var(--brd);border-radius:10px;height:120px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:9px;padding:6px 8px}
 .edesenho svg{width:100%;height:100%;display:block}
@@ -1372,7 +1374,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v46"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v47"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2245,6 +2247,9 @@ function desenharEixos(){
   var es=parseInt(document.getElementById('ns').textContent)||0;
   var dd=parseInt(document.getElementById('ndd').textContent)||0;
   var t=parseInt(document.getElementById('nt').textContent)||0;
+  // destaca o modelo correspondente à config atual
+  var mbox=document.getElementById('eixos-modelos');
+  if(mbox){var chips=mbox.querySelectorAll('.emodel');for(var ci=0;ci<chips.length;ci++){var mm=MODELOS_EIXOS[ci];chips[ci].classList.toggle('sel',!!mm&&mm[2]===es&&mm[3]===dd&&mm[4]===t);}}
   var grupos=[]; var i;
   for(i=0;i<es;i++)grupos.push('simples');
   for(i=0;i<dd;i++)grupos.push('duplo');
