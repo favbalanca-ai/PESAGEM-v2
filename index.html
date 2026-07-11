@@ -86,6 +86,14 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .eb.p{border-color:var(--g1);background:var(--g3);color:var(--g1)}
 .en{font-size:24px;font-weight:800;min-width:30px;text-align:center;color:var(--g1);font-family:'JetBrains Mono',monospace}
 
+/* MODELOS DE CAMINHÃO + DESENHO DOS EIXOS */
+.emodels{display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;margin:0 0 10px;-webkit-overflow-scrolling:touch}
+.emodel{flex:0 0 auto;background:var(--g3);border:1px solid var(--brd);border-radius:10px;padding:7px 11px;font-weight:700;color:var(--ink);white-space:nowrap;display:flex;flex-direction:column;align-items:center;gap:1px;line-height:1.2;cursor:pointer;font-family:'Inter',sans-serif;font-size:12px}
+.emodel small{font-size:10px;color:var(--ink3);font-weight:600;font-family:'JetBrains Mono',monospace}
+.emodel:active{transform:scale(.97)}
+.edesenho{background:var(--g3);border:1px solid var(--brd);border-radius:10px;height:120px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:9px;padding:6px 8px}
+.edesenho svg{width:100%;height:100%;display:block}
+
 /* PBT BOX */
 .pbt{background:var(--g4);border-radius:var(--r);padding:12px 14px;margin-top:7px;display:none}
 .pb-lbl{color:#6dbf9e;font-size:9px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:5px}
@@ -550,6 +558,8 @@ body.dark .card{background:#1a2d22}
         <span id="nd" style="display:none">1</span>
         <div class="f">
           <label>Configuração de Eixos (CONTRAN) *</label>
+          <div class="emodels" id="eixos-modelos"></div>
+          <div class="edesenho" id="eixos-desenho"></div>
           <div class="egrid" style="grid-template-columns:1fr 1fr 1fr">
             <div class="ec">
               <div class="et">⚫ SIMPLES</div><div class="ev">10 t / eixo</div>
@@ -1362,7 +1372,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v45"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v46"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1503,7 +1513,7 @@ window.addEventListener('load',()=>{
   });
   if(!navigator.onLine) document.getElementById('offb').style.display='block';
   document.addEventListener('touchmove',e=>{if(document.body.getAttribute('data-sig')==='1')e.preventDefault();},{passive:false});
-  checkSess(); calcPBT();
+  checkSess(); popularModelosEixos(); calcPBT();
 });
 
 // Força buscar a versão mais recente: atualiza o SW, limpa TODO o cache e recarrega.
@@ -2206,7 +2216,72 @@ function calcPBT(){
     document.getElementById('pb-kg').textContent='/ '+(pbt*1000)+'kg';
     document.getElementById('pb-tol').textContent=`${tot} eixos · Tolerância ${DB.cfg.tol||7}%: ${(pbt*(1+tol)).toFixed(1)}t / ${Math.round(pbt*(1+tol)*1000)}kg`;
   } else box.style.display='none';
+  desenharEixos();
   return {d, s:es, dd, t, tot, pbt};
+}
+
+/* ── Atalho de modelos de caminhão (define os contadores) ── */
+var MODELOS_EIXOS=[
+  ['Toco','6+10',1,0,0],['Trucado','6+17',0,1,0],
+  ['Carreta','6+17+25,5',0,1,1],['Carreta 3e','6+10+25,5',1,0,1],
+  ['Rodotrem','6+17+25,5+25,5',0,1,2],['Bitrem 9e','6+17+17+17+17',0,4,0]
+];
+function popularModelosEixos(){
+  var box=document.getElementById('eixos-modelos'); if(!box) return;
+  box.innerHTML=MODELOS_EIXOS.map(function(m){
+    return '<button type="button" class="emodel" onclick="usarModeloEixos('+m[2]+','+m[3]+','+m[4]+')">'+m[0]+'<small>'+m[1]+'</small></button>';
+  }).join('');
+}
+function usarModeloEixos(s,dd,t){
+  document.getElementById('ns').textContent=s;
+  document.getElementById('ndd').textContent=dd;
+  document.getElementById('nt').textContent=t;
+  document.getElementById('nd').textContent=1; // dianteiro sempre 1
+  calcPBT();
+}
+/* ── Desenho do caminhão (graneleiro) a partir dos contadores ── */
+function desenharEixos(){
+  var el=document.getElementById('eixos-desenho'); if(!el) return;
+  var es=parseInt(document.getElementById('ns').textContent)||0;
+  var dd=parseInt(document.getElementById('ndd').textContent)||0;
+  var t=parseInt(document.getElementById('nt').textContent)||0;
+  var grupos=[]; var i;
+  for(i=0;i<es;i++)grupos.push('simples');
+  for(i=0;i<dd;i++)grupos.push('duplo');
+  for(i=0;i<t;i++)grupos.push('triplo');
+  el.innerHTML=_svgCaminhao(grupos);
+}
+function _bogieSVG(w,y,R,T,HUB){
+  var g='';
+  if(w.length>1)g+='<rect x="'+(w[0]-5)+'" y="'+(y-6)+'" width="'+(w[w.length-1]-w[0]+10)+'" height="12" rx="6" fill="'+T+'"/>';
+  w.forEach(function(x){g+='<circle cx="'+x+'" cy="'+y+'" r="'+R+'" fill="'+T+'"/><circle cx="'+x+'" cy="'+y+'" r="'+(R*0.4)+'" fill="'+HUB+'"/>';});
+  return g;
+}
+function _svgCaminhao(grupos){
+  var EX={simples:1,duplo:2,triplo:3};
+  var R=12,GAPin=2*R+2,GAPgrp=54,cabW=52,y=94,groundY=y+R+3,chY=y-18;
+  var T='var(--g1)',HUB='var(--g3)';
+  var frontX=36, cx=frontX+cabW+20, groups=[];
+  grupos.forEach(function(g){var n=EX[g],w=[],k;for(k=0;k<n;k++){w.push(cx);cx+=GAPin;}cx-=GAPin;groups.push({x0:w[0],x1:w[n-1],mid:(w[0]+w[n-1])/2,w:w,g:g,n:n});cx+=GAPgrp;});
+  var lastX=groups.length?groups[groups.length-1].x1:frontX+cabW+20;
+  var bStart=frontX+cabW-2, bEnd=lastX+R+14, W=Math.max(bEnd+16,300);
+  var s='<svg viewBox="0 0 '+W+' 132" width="100%" height="100%" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Configuração de eixos do caminhão">';
+  s+='<line x1="0" y1="'+(groundY+1)+'" x2="'+W+'" y2="'+(groundY+1)+'" stroke="var(--brd)" stroke-width="2"/>';
+  s+='<rect x="'+(frontX-10)+'" y="'+chY+'" width="'+(bEnd-(frontX-10))+'" height="6" fill="'+T+'"/>';
+  if(groups.length){
+    var gx0=bStart,gx1=bEnd,gTop=chY-42,gBot=chY-1,nP=Math.max(3,Math.round((gx1-gx0)/15)),i2;
+    s+='<rect x="'+gx0+'" y="'+gTop+'" width="'+(gx1-gx0)+'" height="3.5" fill="'+T+'"/>';
+    s+='<rect x="'+gx0+'" y="'+(gBot-3)+'" width="'+(gx1-gx0)+'" height="3" fill="'+T+'"/>';
+    for(i2=0;i2<=nP;i2++){var px=gx0+(gx1-gx0)*i2/nP,pw=(i2===0||i2===nP)?3.5:2.2;s+='<rect x="'+(px-pw/2)+'" y="'+gTop+'" width="'+pw+'" height="'+(gBot-gTop)+'" fill="'+T+'"/>';}
+  }
+  var fx=frontX-14,bx=frontX+cabW-6,topCab=chY-48,topHood=chY-22;
+  s+='<path d="M '+fx+' '+chY+' L '+fx+' '+(topHood+4)+' Q '+fx+' '+topHood+' '+(fx+5)+' '+topHood+' L '+(frontX+8)+' '+topHood+' L '+(frontX+13)+' '+topCab+' L '+(bx-4)+' '+topCab+' Q '+bx+' '+topCab+' '+bx+' '+(topCab+6)+' L '+bx+' '+chY+' Z" fill="'+T+'"/>';
+  s+=_bogieSVG([frontX],y,R,T,HUB);
+  groups.forEach(function(gc){
+    s+=_bogieSVG(gc.w,y,R,T,HUB);
+    s+='<text x="'+gc.mid+'" y="'+(groundY+15)+'" text-anchor="middle" font-size="10" font-weight="800" fill="var(--ink3)">'+gc.g+(gc.n>1?' ·'+gc.n:'')+'</text>';
+  });
+  s+='</svg>';return s;
 }
 
 /* ══ UNIDADE — fixo em kg ══════════════════════════════════════ */
