@@ -1290,6 +1290,30 @@ body.dark .card{background:#1a2d22}
   </div>
 </div>
 
+<!-- CONFERÊNCIA DE PESO (balança mecânica) -->
+<div id="modal-conf-peso" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:700;align-items:center;justify-content:center;padding:16px">
+  <div style="background:#fff;border-radius:16px;max-width:360px;width:100%;padding:18px;box-shadow:0 10px 40px rgba(0,0,0,.3)">
+    <div style="font-size:15px;font-weight:800;color:#1a3a6c;margin-bottom:2px">⚖️ Confira a leitura</div>
+    <div style="font-size:12px;color:#666;margin-bottom:12px">Ajuste o cursor que a IA errou, se precisar.</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="flex:1">Janela (milhares) ×1000</span>
+        <input id="cp-janela" type="number" inputmode="numeric" oninput="recalcConfPeso()" style="width:96px;padding:8px;border:1.5px solid #cdd6e4;border-radius:8px;font-size:15px;text-align:right;font-family:'JetBrains Mono',monospace"></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="flex:1">Centenas</span>
+        <input id="cp-cent" type="number" inputmode="numeric" oninput="recalcConfPeso()" style="width:96px;padding:8px;border:1.5px solid #cdd6e4;border-radius:8px;font-size:15px;text-align:right;font-family:'JetBrains Mono',monospace"></label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px"><span style="flex:1">Dezenas</span>
+        <input id="cp-dez" type="number" inputmode="numeric" oninput="recalcConfPeso()" style="width:96px;padding:8px;border:1.5px solid #cdd6e4;border-radius:8px;font-size:15px;text-align:right;font-family:'JetBrains Mono',monospace"></label>
+    </div>
+    <div style="margin-top:12px;padding:10px;background:#eef4ff;border-radius:10px;text-align:center">
+      <div style="font-size:11px;color:#666">TOTAL</div>
+      <div id="cp-total" style="font-size:24px;font-weight:800;color:#1a3a6c;font-family:'JetBrains Mono',monospace">0 kg</div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:14px">
+      <button onclick="fecharConfPeso()" style="flex:1;background:#eef1f6;border:none;color:#444;padding:11px;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer">✕ Cancelar</button>
+      <button onclick="confirmarConfPeso()" style="flex:2;background:#1a6c3c;border:none;color:#fff;padding:11px;border-radius:10px;font-size:13px;font-weight:800;cursor:pointer">✅ Usar este peso</button>
+    </div>
+  </div>
+</div>
+
 <!-- PDF OVERLAY -->
 <div id="pdf-frame">
   <div id="pdf-header">
@@ -1318,7 +1342,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v43"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v44"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5364,7 +5388,35 @@ function iaStatus(id,tipo,msg){
 
 // Instrução p/ a IA ler tanto DISPLAY DIGITAL quanto BALANÇA MECÂNICA (romana).
 // Vai no "contexto" (o backend embute no prompt), então funciona sem redeploy.
-const IA_CTX_BALANCA = "A imagem pode ser um DISPLAY DIGITAL (leia o número direto) OU uma BALANCA MECANICA DE BRACO (romana) com 3 reguas/cursores. Se for MECANICA, some as tres leituras olhando a linha/seta indicadora de cada cursor (o valor onde o cursor esta parado, NAO os numeros vizinhos): (1) cursor da JANELA superior (numeros grandes, ex. 30..41) = MILHARES, multiplique por 1000; (2) cursor das CENTENAS (regua do meio, marcas 0,100,200,...,900) = use o numero apontado (ex. 600); (3) cursor das DEZENAS (regua de baixo, marcas 0,10,20,...,90) = use o numero apontado (ex. 30). Peso = janela*1000 + centenas + dezenas. Exemplos reais desta balanca: (a) 37 + 100 + 20 = 37120 kg; (b) 30 + 600 + 30 = 30630 kg; (c) 26 + 500 + 0 = 26500 kg.";
+const IA_CTX_BALANCA = "A imagem pode ser um DISPLAY DIGITAL (leia o número direto) OU uma BALANCA MECANICA DE BRACO (romana) com 3 reguas/cursores. Se for MECANICA, some as tres leituras olhando a linha/seta indicadora de cada cursor (o valor onde o cursor esta parado, NAO os numeros vizinhos): (1) cursor da JANELA superior (numeros grandes, ex. 30..41) = MILHARES, multiplique por 1000; (2) cursor das CENTENAS (regua do meio, marcas 0,100,200,...,900) = use o numero apontado (ex. 600); (3) cursor das DEZENAS (regua de baixo, marcas 0,10,20,...,90) = use o numero apontado (ex. 30). Peso = janela*1000 + centenas + dezenas. Exemplos reais desta balanca: (a) 37 + 100 + 20 = 37120 kg; (b) 30 + 600 + 30 = 30630 kg; (c) 26 + 500 + 0 = 26500 kg. IMPORTANTE: quando for MECANICA, inclua no JSON tambem os campos numericos \"janela\", \"centenas\" e \"dezenas\" (o valor lido de cada cursor) e \"tipo\":\"mecanica\".";
+// É leitura de balança mecânica? (a IA devolve os parciais janela/centenas/dezenas)
+function _ehLeituraMecanica(res){
+  return !!(res && (res.tipo==='mecanica' || res.janela!=null || res.centenas!=null || res.dezenas!=null));
+}
+// ── Conferência do peso (balança mecânica): mostra janela/centenas/dezenas ──
+let _cpAplicar=null;
+function recalcConfPeso(){
+  const j=parseInt(document.getElementById('cp-janela').value)||0;
+  const c=parseInt(document.getElementById('cp-cent').value)||0;
+  const d=parseInt(document.getElementById('cp-dez').value)||0;
+  const t=j*1000+c+d;
+  document.getElementById('cp-total').textContent=t.toLocaleString('pt-BR')+' kg';
+  return t;
+}
+function abrirConfPeso(res,aplicar){
+  _cpAplicar=aplicar;
+  const peso=Number(res.peso_kg)||0;
+  const j=(res.janela!=null)?res.janela:Math.floor(peso/1000);
+  const c=(res.centenas!=null)?res.centenas:Math.floor((peso%1000)/100)*100;
+  const d=(res.dezenas!=null)?res.dezenas:(peso%100);
+  document.getElementById('cp-janela').value=j;
+  document.getElementById('cp-cent').value=c;
+  document.getElementById('cp-dez').value=d;
+  recalcConfPeso();
+  document.getElementById('modal-conf-peso').style.display='flex';
+}
+function fecharConfPeso(){ document.getElementById('modal-conf-peso').style.display='none'; _cpAplicar=null; }
+function confirmarConfPeso(){ const t=recalcConfPeso(); const fn=_cpAplicar; fecharConfPeso(); if(fn) fn(t); }
 async function iaLerDisplay(campo,input){
   if(!input.files||!input.files[0])return;
   // Mapear campo → statusId e campoId
@@ -5383,13 +5435,19 @@ async function iaLerDisplay(campo,input){
     const j=await r.json();
     if(!j.ok){iaStatus(m.status,'err','❌ '+(j.erro||'Erro na IA'));return;}
     const res=j.resultado;
-    if(res.confianca==='baixa'){
+    const aplicar=(peso)=>{
+      const el=document.getElementById(m.campo);
+      if(el){el.value=peso;}
+      if(campo==='tara'||campo==='tara2') onTara(); else calcBr();
+      iaStatus(m.status,'ok',`✅ Peso: ${Number(peso).toLocaleString('pt-BR')} kg`);
+    };
+    if(_ehLeituraMecanica(res)){
+      iaStatus(m.status,'ok',`🤖 Leu ~${Number(res.peso_kg||0).toLocaleString('pt-BR')} kg — confira`);
+      abrirConfPeso(res,aplicar);
+    }else if(res.confianca==='baixa'){
       iaStatus(m.status,'err','⚠️ Leitura incerta — confirme o peso manualmente');
     }else{
-      const el=document.getElementById(m.campo);
-      if(el){el.value=res.peso_kg;}
-      if(campo==='tara'||campo==='tara2') onTara(); else calcBr();
-      iaStatus(m.status,'ok',`✅ IA leu: ${res.peso_kg.toLocaleString('pt-BR')} kg (${res.confianca})`);
+      aplicar(res.peso_kg);
     }
   }catch(e){iaStatus(m.status,'err','❌ Erro de conexão — digite o peso manualmente');}
 }
@@ -5407,22 +5465,28 @@ async function iaLerDisplayRec(campo,input){
     const j=await r.json();
     if(!j.ok){iaStatus(statusId,'err','❌ '+(j.erro||'Erro na IA'));return;}
     const res=j.resultado;
-    if(res.confianca==='baixa'){
-      iaStatus(statusId,'err','⚠️ Leitura incerta — confirme o peso manualmente');
-    }else{
+    const aplicar=(peso)=>{
       const el=document.getElementById(campoId);
-      if(el){el.value=res.peso_kg;calcDescRec();}
-      iaStatus(statusId,'ok',`✅ IA leu: ${res.peso_kg.toLocaleString('pt-BR')} kg (${res.confianca})`);
+      if(el){el.value=peso;calcDescRec();}
+      iaStatus(statusId,'ok',`✅ Peso: ${Number(peso).toLocaleString('pt-BR')} kg`);
       if(campo==='tara'&&recAtual?.tipo==='proprio'){
         const placa=document.getElementById('rec-placa')?.value?.trim().toUpperCase();
         if(placa){
           const taras=JSON.parse(localStorage.getItem('taras-rec-v2')||'{}');
           if(!taras[placa]){
-            taras[placa]={tara:res.peso_kg,motorista:document.getElementById('rec-motorista')?.value||'',cpf:document.getElementById('rec-cpf')?.value||'',atualizado:new Date().toLocaleString('pt-BR')};
+            taras[placa]={tara:peso,motorista:document.getElementById('rec-motorista')?.value||'',cpf:document.getElementById('rec-cpf')?.value||'',atualizado:new Date().toLocaleString('pt-BR')};
             localStorage.setItem('taras-rec-v2',JSON.stringify(taras));
           }
         }
       }
+    };
+    if(_ehLeituraMecanica(res)){
+      iaStatus(statusId,'ok',`🤖 Leu ~${Number(res.peso_kg||0).toLocaleString('pt-BR')} kg — confira`);
+      abrirConfPeso(res,aplicar);
+    }else if(res.confianca==='baixa'){
+      iaStatus(statusId,'err','⚠️ Leitura incerta — confirme o peso manualmente');
+    }else{
+      aplicar(res.peso_kg);
     }
   }catch(e){iaStatus(statusId,'err','❌ Erro de conexão — digite o peso manualmente');}
 }
