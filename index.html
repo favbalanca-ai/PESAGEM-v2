@@ -570,6 +570,26 @@ body.dark .card{background:#1a2d22}
             <div class="pb-row"><span class="pb-eq">=</span><span class="pb-val" id="pb-val"></span><span class="pb-kg" id="pb-kg"></span></div>
             <div class="pb-tol" id="pb-tol"></div>
           </div>
+          <details style="margin-top:10px;background:var(--g3);border-radius:10px;padding:0 12px">
+            <summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--g1);padding:10px 0">❔ Como identificar os eixos?</summary>
+            <div style="font-size:12px;color:var(--ink2);line-height:1.6;padding-bottom:11px">
+              Olhe o caminhão <b>de lado</b> e conte os conjuntos de eixos <b>traseiros</b> (o da frente/direção já entra automático):
+              <ul style="margin:7px 0 0;padding-left:17px">
+                <li><b>⚫ SIMPLES</b> — 1 eixo sozinho, afastado dos outros.</li>
+                <li><b>⚫⚫ DUPLO</b> — 2 eixos colados (juntinhos).</li>
+                <li><b>⚫⚫⚫ TRIPLO</b> — 3 eixos colados.</li>
+              </ul>
+              <div style="margin-top:9px;font-weight:700;color:var(--g1)">Exemplos comuns:</div>
+              <ul style="margin:4px 0 0;padding-left:17px">
+                <li>🚚 <b>Truck toco</b> (traseira 1 eixo): <b>1 simples</b></li>
+                <li>🚛 <b>Truck trucado</b> (traseira 2 eixos colados): <b>1 duplo</b></li>
+                <li>🚛 <b>Carreta 3 eixos</b> (cavalo 1 eixo + semi 3 colados): <b>1 simples + 1 triplo</b></li>
+                <li>🚛 <b>Carreta 6 eixos</b> (cavalo 2 colados + semi 3 colados): <b>1 duplo + 1 triplo</b></li>
+                <li>🚛 <b>Bitrem/rodotrem</b>: conte cada conjunto separadamente</li>
+              </ul>
+              <div style="margin-top:9px;font-size:11px;color:var(--ink3)">Regra rápida: cada grupo de rodas <b>coladas</b> conta como 1 (duplo/triplo); cada eixo <b>isolado</b> é 1 simples. O app calcula o PBT máximo sozinho.</div>
+            </div>
+          </details>
         </div>
 
         <!-- Caminhão longo -->
@@ -1342,7 +1362,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v44"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v45"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
