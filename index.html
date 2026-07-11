@@ -1318,7 +1318,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v40"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v41"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5362,6 +5362,9 @@ function iaStatus(id,tipo,msg){
   if(tipo==='ok')setTimeout(()=>{el.style.display='none';},5000);
 }
 
+// Instrução p/ a IA ler tanto DISPLAY DIGITAL quanto BALANÇA MECÂNICA (romana).
+// Vai no "contexto" (o backend embute no prompt), então funciona sem redeploy.
+const IA_CTX_BALANCA = "A imagem pode ser um DISPLAY DIGITAL (leia o número direto) OU uma BALANCA MECANICA DE BRACO (romana) com 3 reguas/cursores. Se for MECANICA, some as tres leituras olhando a linha indicadora de cada cursor: (1) cursor da JANELA superior (numeros grandes) = MILHARES, multiplique por 1000; (2) cursor das CENTENAS (marcas 0,100,...,900); (3) cursor das DEZENAS (marcas 0,10,20,...,90). Peso = janela*1000 + centenas + dezenas. Exemplo real desta balanca: 37 na janela + 100 + 20 = 37120 kg.";
 async function iaLerDisplay(campo,input){
   if(!input.files||!input.files[0])return;
   // Mapear campo → statusId e campoId
@@ -5376,7 +5379,7 @@ async function iaLerDisplay(campo,input){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-      body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],contexto:m.ctx})});
+      body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],contexto:m.ctx+' — '+IA_CTX_BALANCA})});
     const j=await r.json();
     if(!j.ok){iaStatus(m.status,'err','❌ '+(j.erro||'Erro na IA'));return;}
     const res=j.resultado;
@@ -5400,7 +5403,7 @@ async function iaLerDisplayRec(campo,input){
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
-        contexto:campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita'})});
+        contexto:(campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita')+' — '+IA_CTX_BALANCA})});
     const j=await r.json();
     if(!j.ok){iaStatus(statusId,'err','❌ '+(j.erro||'Erro na IA'));return;}
     const res=j.resultado;
