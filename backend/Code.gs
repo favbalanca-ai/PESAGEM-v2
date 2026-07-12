@@ -74,6 +74,7 @@ function doPost(e){
     if(d.acao==="listarTalhoes")      return resposta(listarTalhoes());
     if(d.acao==="delTalhao")          return resposta(delTalhao(d.cod));
     if(d.acao==="listarEstoque")      return resposta(listarEstoque());
+    if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
@@ -735,6 +736,44 @@ function delTalhao(cod){
 // ESTOQUE
 // ══════════════════════════════════════════════════════════════
 function _somarEstoqueRecepcao(safra,cultura,sacas){if(!safra||!cultura||!sacas)return;_upsertEstoque(safra,cultura,sacas,0);}
+
+// Reconstroi a aba Estoque a partir da aba Recepcao (entradas). Preserva as
+// saidas ja registradas. Use quando lancamentos forem feitos direto na planilha.
+function recalcularEstoque(){
+  try{
+    var ss=SpreadsheetApp.openById(PLANILHA_ID);
+    // 1) preserva as saidas atuais por safra|cultura
+    var saidas={};
+    var shE=ss.getSheetByName("Estoque");
+    if(shE&&shE.getLastRow()>1){
+      var E=shE.getRange(2,1,shE.getLastRow()-1,6).getValues();
+      for(var i=0;i<E.length;i++){ saidas[s(E[i][0])+"|"+s(E[i][1])]=n(E[i][3]); }
+    }
+    // 2) recomputa as entradas somando as sacas da aba Recepcao (col 4=safra, 7=cultura, 21=sacas)
+    var entradas={};
+    var shR=ss.getSheetByName("Recepcao");
+    if(shR&&shR.getLastRow()>1){
+      var nc=Math.max(21,shR.getLastColumn());
+      var R=shR.getRange(2,1,shR.getLastRow()-1,nc).getValues();
+      for(var j=0;j<R.length;j++){
+        var safra=s(R[j][3]), cultura=s(R[j][6]), sacas=n(R[j][20]);
+        if(!safra||!cultura||!sacas)continue;
+        var k=safra+"|"+cultura; entradas[k]=(entradas[k]||0)+sacas;
+      }
+    }
+    // 3) reescreve a aba Estoque com entradas recomputadas + saidas preservadas
+    if(!shE){configurarPlanilha();shE=ss.getSheetByName("Estoque");}
+    if(shE.getLastRow()>1) shE.getRange(2,1,shE.getLastRow()-1,6).clearContent();
+    var chaves={}; Object.keys(entradas).forEach(function(k){chaves[k]=1;}); Object.keys(saidas).forEach(function(k){chaves[k]=1;});
+    var linhas=[], now=agora();
+    Object.keys(chaves).forEach(function(k){
+      var p=k.split("|"), ent=entradas[k]||0, sai=saidas[k]||0;
+      linhas.push([p[0],p[1],ent,sai,Math.max(0,ent-sai),now]);
+    });
+    if(linhas.length) shE.getRange(2,1,linhas.length,6).setValues(linhas);
+    return {ok:true, produtos:linhas.length};
+  }catch(e){return {ok:false,erro:e.message};}
+}
 function _baixarEstoqueExpedicao(o){
   var ss=SpreadsheetApp.openById(PLANILHA_ID);var sh=ss.getSheetByName(ABA_CONTRATOS);
   if(!sh||sh.getLastRow()<2)return;

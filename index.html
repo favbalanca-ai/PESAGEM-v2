@@ -1123,7 +1123,10 @@ body.dark .card{background:#1a2d22}
 
     <!-- Estoque por cultura -->
     <div class="card">
-      <div class="ct">📦 Estoque &amp; vendas por produto</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="ct" style="margin:0">📦 Estoque &amp; vendas por produto</div>
+        <button onclick="recalcularEstoqueApp()" style="background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:5px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🔄 Recalcular</button>
+      </div>
       <div id="gc-estoque" style="font-size:12px">
         <div style="color:var(--ink3);font-size:12px">Carregando...</div>
       </div>
@@ -1374,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v51"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v52"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1959,6 +1962,19 @@ function _precoMedioPorGrupo(){
   });
   Object.keys(map).forEach(function(g){ map[g].precoSc=map[g].volSc>0?map[g].valorTotal/map[g].volSc:0; });
   return map;
+}
+// Recalcula a aba Estoque no backend a partir das recepções (útil quando
+// lançamentos foram feitos direto na planilha) e recarrega o dashboard.
+function recalcularEstoqueApp(){
+  if(!navigator.onLine){toast('📵 Sem conexão');return;}
+  toast('🔄 Recalculando estoque...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'recalcularEstoque',token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){ toast('✅ Estoque recalculado ('+(j.produtos||0)+' produtos)'); carregarEstoque().then(function(){renderDashGeral();}); }
+      else toast('❌ '+((j&&j.erro)||'Ação não encontrada — reimplante o backend'));
+    })
+    .catch(function(){toast('❌ Erro de conexão');});
 }
 function renderGcEstoque(){
   const el=document.getElementById('gc-estoque');if(!el)return;
