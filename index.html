@@ -1377,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v52"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v53"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1979,38 +1979,60 @@ function recalcularEstoqueApp(){
 function renderGcEstoque(){
   const el=document.getElementById('gc-estoque');if(!el)return;
   const est=estoqueCloud?.estoque||[];const comp=estoqueCloud?.comprometido||{};
-  if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado. Registre recepções primeiro.</div>';return;}
+  if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b> (após reimplantar o backend).</div>';return;}
   const precoMap=_precoMedioPorGrupo();
   const nSc=v=>Math.round(v||0).toLocaleString('pt-BR');
   const nR$=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
-  el.innerHTML=est.map(e=>{
-    const chave=e.safra+'|'+e.cultura;
-    const estoqueSc=e.saldo_sc||0;
-    const vendidoSc=e.saidas_sc||0;
-    const comprometido=comp[chave]?.comprometido_sc||0;
-    const disponivel=Math.max(0,estoqueSc-comprometido);
-    const preco=precoMap[_grupoKey(e.cultura)]?.precoSc||0;
-    const valorVendido=vendidoSc*preco;
-    const pct=estoqueSc>0?Math.round(comprometido/estoqueSc*100):0;
-    const mc=(lbl,val,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px"><div style="font-weight:800;color:${cor};font-size:12px">${val}</div><div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div></div>`;
+  // Consolida por PRODUTO (cultura), somando todas as safras
+  const prod={};
+  est.forEach(e=>{
+    const c=(e.cultura||'?');
+    if(!prod[c])prod[c]={cultura:c,estoque:0,vendido:0,entradas:0,comprometido:0,safras:{}};
+    prod[c].estoque+=e.saldo_sc||0; prod[c].vendido+=e.saidas_sc||0; prod[c].entradas+=e.entradas_sc||0;
+    if(e.safra)prod[c].safras[e.safra]=1;
+  });
+  Object.keys(comp).forEach(k=>{const c=k.split('|')[1]; if(prod[c])prod[c].comprometido+=comp[k]?.comprometido_sc||0;});
+  const lista=Object.values(prod).sort((a,b)=>b.estoque-a.estoque);
+  const mc=(lbl,val,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px"><div style="font-weight:800;color:${cor};font-size:12px">${val}</div><div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div></div>`;
+  let tE=0,tV=0,tC=0,tD=0,tVal=0;
+  let html=lista.map(p=>{
+    const disp=Math.max(0,p.estoque-p.comprometido);
+    const preco=precoMap[_grupoKey(p.cultura)]?.precoSc||0;
+    const valorV=p.vendido*preco;
+    const pct=p.estoque>0?Math.round(p.comprometido/p.estoque*100):0;
+    const safras=Object.keys(p.safras).sort().join(', ');
+    tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;
     return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:.5px solid var(--brd)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-weight:800;font-size:14px">${e.cultura} <span style="font-weight:400;color:var(--ink3);font-size:11px">· ${e.safra}</span></span>
+        <span style="font-weight:800;font-size:14px">${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
         <span style="font-size:11px;color:var(--ink3)">preço médio <b style="color:var(--g1)">${preco>0?nR$(preco)+'/sc':'—'}</b></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
-        ${mc('Em estoque (sc)',nSc(estoqueSc),'var(--g1)','var(--g3)')}
-        ${mc('Vendido (sc)',nSc(vendidoSc),'#1a5c9e','#e8f0fb')}
-        ${mc('Disponível (sc)',nSc(disponivel),'var(--g1)','var(--g3)')}
-        ${mc('Comprometido (sc)',nSc(comprometido),'#854F0B','#fff8e1')}
+        ${mc('Em estoque (sc)',nSc(p.estoque),'var(--g1)','var(--g3)')}
+        ${mc('Vendido (sc)',nSc(p.vendido),'#1a5c9e','#e8f0fb')}
+        ${mc('Disponível (sc)',nSc(disp),'var(--g1)','var(--g3)')}
+        ${mc('Comprometido (sc)',nSc(p.comprometido),'#854F0B','#fff8e1')}
       </div>
       <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden;margin-top:7px"><div style="height:100%;width:${pct}%;background:var(--a1);border-radius:4px" title="${pct}% comprometido"></div></div>
       <div style="font-size:10px;color:var(--ink3);margin-top:4px;display:flex;justify-content:space-between">
-        <span>Entradas: ${nSc(e.entradas_sc)} sc</span>
-        <span>${valorVendido>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorVendido)+'</b>':''}</span>
+        <span>Entradas: ${nSc(p.entradas)} sc</span>
+        <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':''}</span>
       </div>
     </div>`;
   }).join('');
+  if(lista.length>1){
+    html+=`<div style="background:var(--g3);border-radius:9px;padding:9px 11px;margin-top:2px">
+      <div style="font-size:11px;font-weight:800;color:var(--g1);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Σ Total (todos os produtos)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
+        ${mc('Estoque (sc)',nSc(tE),'var(--g1)','var(--card)')}
+        ${mc('Vendido (sc)',nSc(tV),'#1a5c9e','var(--card)')}
+        ${mc('Disponível (sc)',nSc(tD),'var(--g1)','var(--card)')}
+        ${mc('Comprometido (sc)',nSc(tC),'#854F0B','var(--card)')}
+      </div>
+      ${tVal>0?'<div style="text-align:center;margin-top:7px;font-size:12px;color:var(--ink2)">Valor vendido total: <b style="color:#1a5c9e">'+nR$(tVal)+'</b></div>':''}
+    </div>`;
+  }
+  el.innerHTML=html;
 }
 
 function renderGcProducao(){
