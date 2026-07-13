@@ -1069,6 +1069,13 @@ body.dark .card{background:#1a2d22}
       </div>
     </div>
     <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="ct" style="margin:0">📦 Estoque por produto</div>
+        <button onclick="recalcularEstoqueApp()" style="background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:5px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🔄 Recalcular</button>
+      </div>
+      <div id="exp-estoque" style="font-size:12px"></div>
+    </div>
+    <div class="card">
       <div class="ct">📊 Últimos 7 dias — expedição</div>
       <canvas id="dash-chart" height="140" style="width:100%;display:block"></canvas>
     </div>
@@ -1377,7 +1384,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v53"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v54"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1971,13 +1978,13 @@ function recalcularEstoqueApp(){
   fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'recalcularEstoque',token:TOKEN})})
     .then(function(r){return r.json();})
     .then(function(j){
-      if(j&&j.ok){ toast('✅ Estoque recalculado ('+(j.produtos||0)+' produtos)'); carregarEstoque().then(function(){renderDashGeral();}); }
+      if(j&&j.ok){ toast('✅ Estoque recalculado ('+(j.produtos||0)+' produtos)'); carregarEstoque().then(function(){renderEstoqueProdutos();if(_dashTab==='geral')renderDashGeral();}); }
       else toast('❌ '+((j&&j.erro)||'Ação não encontrada — reimplante o backend'));
     })
     .catch(function(){toast('❌ Erro de conexão');});
 }
-function renderGcEstoque(){
-  const el=document.getElementById('gc-estoque');if(!el)return;
+function renderGcEstoque(elId){
+  const el=document.getElementById(elId||'gc-estoque');if(!el)return;
   const est=estoqueCloud?.estoque||[];const comp=estoqueCloud?.comprometido||{};
   if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b> (após reimplantar o backend).</div>';return;}
   const precoMap=_precoMedioPorGrupo();
@@ -2034,6 +2041,8 @@ function renderGcEstoque(){
   }
   el.innerHTML=html;
 }
+// Renderiza o estoque por produto nos dois lugares (aba Expedição e Consolidado)
+function renderEstoqueProdutos(){ renderGcEstoque('gc-estoque'); renderGcEstoque('exp-estoque'); }
 
 function renderGcProducao(){
   const el=document.getElementById('gc-producao');if(!el)return;
@@ -2082,6 +2091,7 @@ function irDash(){
   // Carregar dados de recepção e estoque em paralelo (para aba consolidado)
   if(navigator.onLine){
     Promise.all([carregarRecepcoes(), carregarEstoque(), carregarContratosNFAP()]).then(()=>{
+      renderEstoqueProdutos();
       if(_dashTab==='geral') renderDashGeral();
     });
   }
@@ -2113,6 +2123,8 @@ function renderDash(){
   document.getElementById('dash-carga').textContent=cargaHj.toFixed(1)+'t';
   // Gráfico 7 dias
   renderGrafico7dias(todos);
+  // Estoque por produto (também na aba Expedição)
+  renderGcEstoque('exp-estoque');
   // Contratos
   renderDashContratos(todos);
   // Balanças
