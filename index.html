@@ -1069,13 +1069,6 @@ body.dark .card{background:#1a2d22}
       </div>
     </div>
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="ct" style="margin:0">📦 Estoque por produto</div>
-        <button onclick="recalcularEstoqueApp()" style="background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:5px 10px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🔄 Recalcular</button>
-      </div>
-      <div id="exp-estoque" style="font-size:12px"></div>
-    </div>
-    <div class="card">
       <div class="ct">📊 Últimos 7 dias — expedição</div>
       <canvas id="dash-chart" height="140" style="width:100%;display:block"></canvas>
     </div>
@@ -1384,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v55"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v56"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1970,6 +1963,14 @@ function _precoMedioPorGrupo(){
   Object.keys(map).forEach(function(g){ map[g].precoSc=map[g].volSc>0?map[g].valorTotal/map[g].volSc:0; });
   return map;
 }
+// Contrato conta como VENDIDO (atendido ou parcial) quando já tem qualquer entrega
+// ou status explícito Atendido/Parcial; senão é "a atender" → COMPROMETIDO.
+function _contratoAtendido(c){
+  var st=_normProd(c.status);
+  if(st.indexOf('ATENDER')>=0||st.indexOf('ABERTO')>=0||st.indexOf('AGUARD')>=0)return false;
+  if(st.indexOf('ATENDID')>=0||st.indexOf('PARCIAL')>=0)return true;
+  return (Number(c.volume_entregue)||0)>0; // deriva do volume já entregue
+}
 // Calcula o estoque por produto DIRETO das recepções (cloudRec) + contratos (contratosNFA),
 // sem depender da aba Estoque do backend. Usado como fallback quando o backend está vazio
 // (ex.: lançamentos feitos direto na planilha e ainda não recalculados).
@@ -1983,13 +1984,14 @@ function _estoqueLocal(){
     culturaTot[cultura]=(culturaTot[cultura]||0)+sc;
   });
   if(!Object.keys(rows).length) return null;
-  // Vendido (entregue) e comprometido (saldo) por grupo de produto, a partir dos contratos
+  // Vendido = contratos Atendido/Parcial (com entrega); Comprometido = contratos A atender (sem entrega)
   var vendGrupo={}, compGrupo={};
   (contratosNFA||[]).forEach(function(c){
+    if(_normProd(c.status).indexOf('INATIVO')>=0)return;     // ignora inativos
     var g=_grupoKey(c.grupo_produto||c.produto); if(!g)return;
-    var f=_kgPorUnidade(c.unidade)/60;
-    vendGrupo[g]=(vendGrupo[g]||0)+(Number(c.volume_entregue)||0)*f;
-    compGrupo[g]=(compGrupo[g]||0)+(Number(c.saldo)||0)*f;
+    var volSc=(Number(c.volume_total)||0)*_kgPorUnidade(c.unidade)/60;
+    if(_contratoAtendido(c)) vendGrupo[g]=(vendGrupo[g]||0)+volSc;   // atendido ou parcial → vendido
+    else compGrupo[g]=(compGrupo[g]||0)+volSc;                        // a atender → comprometido
   });
   // Distribui o vendido proporcional às entradas de cada safra; saldo = entradas - vendido
   Object.keys(rows).forEach(function(k){
@@ -2080,7 +2082,7 @@ function renderGcEstoque(elId){
   el.innerHTML=html;
 }
 // Renderiza o estoque por produto nos dois lugares (aba Expedição e Consolidado)
-function renderEstoqueProdutos(){ renderGcEstoque('gc-estoque'); renderGcEstoque('exp-estoque'); }
+function renderEstoqueProdutos(){ renderGcEstoque('gc-estoque'); }
 
 function renderGcProducao(){
   const el=document.getElementById('gc-producao');if(!el)return;
@@ -2161,8 +2163,6 @@ function renderDash(){
   document.getElementById('dash-carga').textContent=cargaHj.toFixed(1)+'t';
   // Gráfico 7 dias
   renderGrafico7dias(todos);
-  // Estoque por produto (também na aba Expedição)
-  renderGcEstoque('exp-estoque');
   // Contratos
   renderDashContratos(todos);
   // Balanças
