@@ -1377,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v57"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v58"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1985,15 +1985,18 @@ function _estoqueLocal(){
     culturaTot[cultura]=(culturaTot[cultura]||0)+sc;
   });
   if(!Object.keys(rows).length) return null;
-  // Vendido = contratos Atendido/Parcial (já têm expedição); Comprometido = A atender (sem expedição).
-  // Atendimento medido pelas pesagens finalizadas ligadas ao contrato (numOrdem).
+  // O volume de cada contrato de venda se DIVIDE entre Vendido (já expedido) e
+  // Comprometido (saldo a entregar). Ex.: contrato 10.000 sc, 50% atendido →
+  // 5.000 vendido + 5.000 comprometido. Expedido medido pelas pesagens (numOrdem).
   var vendGrupo={}, compGrupo={};
   (contratosCloud||[]).forEach(function(ct){
     var vol=parseFloat(ct.vol)||0; if(vol<=0)return;
     var g=_grupoKey(ct.p); if(!g)return;                 // produto do contrato → grupo
     var volSc=vol/60;                                    // contrato de venda em kg → sacas
-    if(_entregueContrato(ct.n)>0) vendGrupo[g]=(vendGrupo[g]||0)+volSc;  // atendido/parcial → vendido
-    else compGrupo[g]=(compGrupo[g]||0)+volSc;                            // a atender → comprometido
+    var entSc=_entregueContrato(ct.n)/60;                // já expedido em sacas
+    var vendSc=Math.min(entSc,volSc);                    // vendido = expedido (limitado ao contrato)
+    vendGrupo[g]=(vendGrupo[g]||0)+vendSc;
+    compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-vendSc); // comprometido = saldo restante
   });
   // Distribui o vendido proporcional às entradas de cada safra; saldo = entradas - vendido
   Object.keys(rows).forEach(function(k){
