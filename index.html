@@ -1384,7 +1384,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v54"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v55"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1970,6 +1970,41 @@ function _precoMedioPorGrupo(){
   Object.keys(map).forEach(function(g){ map[g].precoSc=map[g].volSc>0?map[g].valorTotal/map[g].volSc:0; });
   return map;
 }
+// Calcula o estoque por produto DIRETO das recepções (cloudRec) + contratos (contratosNFA),
+// sem depender da aba Estoque do backend. Usado como fallback quando o backend está vazio
+// (ex.: lançamentos feitos direto na planilha e ainda não recalculados).
+function _estoqueLocal(){
+  var rows={}, culturaTot={};
+  (cloudRec||[]).filter(function(r){return r.status==='Finalizado';}).forEach(function(r){
+    var cultura=(r.cultura||'?'), safra=(r.safra||''), k=safra+'|'+cultura;
+    if(!rows[k])rows[k]={safra:safra,cultura:cultura,entradas_sc:0,saidas_sc:0,saldo_sc:0};
+    var sc=Number(r.sacas)||0;
+    rows[k].entradas_sc+=sc;
+    culturaTot[cultura]=(culturaTot[cultura]||0)+sc;
+  });
+  if(!Object.keys(rows).length) return null;
+  // Vendido (entregue) e comprometido (saldo) por grupo de produto, a partir dos contratos
+  var vendGrupo={}, compGrupo={};
+  (contratosNFA||[]).forEach(function(c){
+    var g=_grupoKey(c.grupo_produto||c.produto); if(!g)return;
+    var f=_kgPorUnidade(c.unidade)/60;
+    vendGrupo[g]=(vendGrupo[g]||0)+(Number(c.volume_entregue)||0)*f;
+    compGrupo[g]=(compGrupo[g]||0)+(Number(c.saldo)||0)*f;
+  });
+  // Distribui o vendido proporcional às entradas de cada safra; saldo = entradas - vendido
+  Object.keys(rows).forEach(function(k){
+    var row=rows[k], g=_grupoKey(row.cultura), tot=culturaTot[row.cultura]||0;
+    var vend=(vendGrupo[g]||0)*(tot>0?row.entradas_sc/tot:0);
+    row.saidas_sc=vend; row.saldo_sc=Math.max(0,row.entradas_sc-vend);
+  });
+  // Comprometido por cultura (chave "safra|cultura" — usa 1ª ocorrência da cultura)
+  var comp={}, jaComp={};
+  Object.keys(rows).forEach(function(k){
+    var cultura=rows[k].cultura; if(jaComp[cultura])return; jaComp[cultura]=1;
+    comp[k]={comprometido_sc:compGrupo[_grupoKey(cultura)]||0};
+  });
+  return {estoque:Object.values(rows), comprometido:comp};
+}
 // Recalcula a aba Estoque no backend a partir das recepções (útil quando
 // lançamentos foram feitos direto na planilha) e recarrega o dashboard.
 function recalcularEstoqueApp(){
@@ -1985,8 +2020,10 @@ function recalcularEstoqueApp(){
 }
 function renderGcEstoque(elId){
   const el=document.getElementById(elId||'gc-estoque');if(!el)return;
-  const est=estoqueCloud?.estoque||[];const comp=estoqueCloud?.comprometido||{};
-  if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b> (após reimplantar o backend).</div>';return;}
+  let est=estoqueCloud?.estoque||[];let comp=estoqueCloud?.comprometido||{};
+  let local=false;
+  if(!est.length){const loc=_estoqueLocal();if(loc){est=loc.estoque;comp=loc.comprometido;local=true;}}
+  if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b>.</div>';return;}
   const precoMap=_precoMedioPorGrupo();
   const nSc=v=>Math.round(v||0).toLocaleString('pt-BR');
   const nR$=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -2039,6 +2076,7 @@ function renderGcEstoque(elId){
       ${tVal>0?'<div style="text-align:center;margin-top:7px;font-size:12px;color:var(--ink2)">Valor vendido total: <b style="color:#1a5c9e">'+nR$(tVal)+'</b></div>':''}
     </div>`;
   }
+  if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções · toque em 🔄 Recalcular para consolidar no servidor</div>';
   el.innerHTML=html;
 }
 // Renderiza o estoque por produto nos dois lugares (aba Expedição e Consolidado)
