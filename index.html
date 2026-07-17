@@ -1377,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v60"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v61"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5623,7 +5623,7 @@ function iaStatus(id,tipo,msg){
 
 // Instrução p/ a IA ler tanto DISPLAY DIGITAL quanto BALANÇA MECÂNICA (romana).
 // Vai no "contexto" (o backend embute no prompt), então funciona sem redeploy.
-const IA_CTX_BALANCA = "A imagem pode ser um DISPLAY DIGITAL (leia o número direto) OU uma BALANCA MECANICA DE BRACO (romana) com 3 reguas/cursores. Se for MECANICA, some as tres leituras olhando a linha/seta indicadora de cada cursor (o valor onde o cursor esta parado, NAO os numeros vizinhos): (1) cursor da JANELA superior (numeros grandes, ex. 30..41) = MILHARES, multiplique por 1000; (2) cursor das CENTENAS (regua do meio, marcas 0,100,200,...,900) = use o numero apontado (ex. 600); (3) cursor das DEZENAS (regua de baixo, marcas 0,10,20,...,90) = use o numero apontado (ex. 30). Peso = janela*1000 + centenas + dezenas. Exemplos reais desta balanca: (a) 37 + 100 + 20 = 37120 kg; (b) 30 + 600 + 30 = 30630 kg; (c) 26 + 500 + 0 = 26500 kg. IMPORTANTE: quando for MECANICA, inclua no JSON tambem os campos numericos \"janela\", \"centenas\" e \"dezenas\" (o valor lido de cada cursor) e \"tipo\":\"mecanica\".";
+const IA_CTX_BALANCA = "A imagem pode ser um DISPLAY DIGITAL (leia o número direto) OU uma BALANCA MECANICA DE BRACO (romana) com 3 reguas/cursores. Se for MECANICA, some as tres leituras olhando a linha/seta indicadora de cada cursor (o valor onde o cursor esta parado, NAO os numeros vizinhos): (1) cursor da JANELA superior (numeros grandes, ex. 20..41) = MILHARES, multiplique por 1000; (2) cursor das CENTENAS (regua do meio, marcas 0,100,200,...,900) = use o numero apontado (ex. 600); (3) cursor das DEZENAS (regua de baixo, marcas 0,10,20,...,90) = use o numero apontado (ex. 30). Peso = janela*1000 + centenas + dezenas. Exemplos reais desta balanca: (a) 37 + 100 + 20 = 37120 kg; (b) 30 + 600 + 30 = 30630 kg; (c) 26 + 500 + 0 = 26500 kg; (d) janela 20 + centenas 500 + dezenas 70 = 20570 kg. IMPORTANTE: quando for MECANICA, inclua no JSON tambem os campos numericos \"janela\", \"centenas\" e \"dezenas\" (o valor lido de cada cursor) e \"tipo\":\"mecanica\".";
 // É leitura de balança mecânica? (a IA devolve os parciais janela/centenas/dezenas)
 function _ehLeituraMecanica(res){
   return !!(res && (res.tipo==='mecanica' || res.janela!=null || res.centenas!=null || res.dezenas!=null));
