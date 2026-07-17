@@ -1377,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v59"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v60"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2069,16 +2069,10 @@ function renderGcEstoque(elId){
       </div>
     </div>`;
   }).join('');
-  if(lista.length>1){
-    html+=`<div style="background:var(--g3);border-radius:9px;padding:9px 11px;margin-top:2px">
-      <div style="font-size:11px;font-weight:800;color:var(--g1);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Σ Total (todos os produtos)</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
-        ${mc('Estoque (sc)',nSc(tE),'var(--g1)','var(--card)')}
-        ${mc('Vendido (sc)',nSc(tV),'#1a5c9e','var(--card)')}
-        ${mc('Disponível (sc)',nSc(tD),'var(--g1)','var(--card)')}
-        ${mc('Comprometido (sc)',nSc(tC),'#854F0B','var(--card)')}
-      </div>
-      ${tVal>0?'<div style="text-align:center;margin-top:7px;font-size:12px;color:var(--ink2)">Valor vendido total: <b style="color:#1a5c9e">'+nR$(tVal)+'</b></div>':''}
+  // Sacas de produtos diferentes não se somam — só totalizamos o VALOR (R$) vendido.
+  if(lista.length>1 && tVal>0){
+    html+=`<div style="background:var(--g3);border-radius:9px;padding:10px 12px;margin-top:2px;text-align:center">
+      <span style="font-size:12px;color:var(--ink2)">Valor vendido total (todos os produtos): <b style="color:#1a5c9e">${nR$(tVal)}</b></span>
     </div>`;
   }
   if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções · toque em 🔄 Recalcular para consolidar no servidor</div>';
