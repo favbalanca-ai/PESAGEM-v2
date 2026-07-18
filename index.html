@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v86"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v87"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5729,10 +5729,24 @@ function abrirEditarTalhao(i){
         </div>
         <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Mudar código/safra/variedade cria um novo registro e desativa o antigo automaticamente.</div>
         <button class="btn btnp" onclick="salvarEditarTalhao(${i})">💾 Salvar alterações</button>
+        <button class="btn" onclick="excluirTalhao(${i})" style="margin-top:6px;background:none;border:1.5px solid var(--r1);color:var(--r1)">🗑️ Excluir talhão</button>
         <button class="btn btns" onclick="this.closest('#pg-edit-talhao').remove()" style="margin-top:6px">Cancelar</button>
       </div>
     </div>`;
   document.body.appendChild(div);
+}
+function excluirTalhao(i){
+  const t=talhoes[i];
+  if(!t){ toast('Talhão não encontrado'); return; }
+  if(!confirm(`Excluir o talhão ${t.cod} · ${t.variedade}?\nEle sai da lista (fica desativado na planilha, o histórico é preservado).`)) return;
+  // desativa a linha exata (cod+safra+variedade) na planilha
+  enviarTalhao({cod:t.cod, nome:t.nome, safra:t.safra, cultura:t.cultura, variedade:t.variedade, areaTotal:t.areaTotal, areaVariedade:t.areaVariedade, ativo:'Nao'});
+  talhoes.splice(i,1);
+  localStorage.setItem('talhoes-v2', JSON.stringify(talhoes));
+  const pg=document.getElementById('pg-edit-talhao'); if(pg) pg.remove();
+  toast('🗑️ Talhão excluído');
+  irTalhoes();
+  if(typeof atualizarRecHome==='function') atualizarRecHome();
 }
 function salvarEditarTalhao(i){
   const orig = talhoes[i];
