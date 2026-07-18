@@ -363,6 +363,11 @@ body.dark .card{background:#1a2d22}
         <div class="mc"><div class="mv" id="rec-saldo">—</div><div class="ml">Estoque sc</div></div>
       </div>
     </div>
+    <div class="sbar" style="margin-top:10px">
+      <div class="stxt" id="stxt-rec">☁️ Sincronizado</div>
+      <button class="bsync adm-only" style="display:none;margin-right:6px" onclick="irDiag()">🔍 Diag</button>
+      <button class="bsync" onclick="syncRecManual()">Sincronizar</button>
+    </div>
     <div style="margin-top:10px" id="rec-estoque-cards"></div>
     <button class="btn btnp" onclick="irNovaRec()" style="margin-top:10px">+ Nova recepção</button>
   </div>
@@ -1195,6 +1200,16 @@ body.dark .card{background:#1a2d22}
     </div>
   </div>
 
+  <!-- Fila de recepção -->
+  <div class="card">
+    <div class="ct">🌾 Fila recepção (<span id="diag-rec-count">0</span>)</div>
+    <div id="diag-rec-list" style="font-size:12px"></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      <button onclick="syncRecManual()" style="background:var(--g1);border:none;color:#fff;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔄 Sincronizar recepção</button>
+      <button onclick="limparFilaRecInvalidos()" style="background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar inválidos</button>
+    </div>
+  </div>
+
   <!-- Histórico do servidor -->
   <div class="card">
     <div class="ct">📈 Histórico do servidor <span id="diag-ping-resumo" style="float:right;font-weight:600;text-transform:none;letter-spacing:0"></span></div>
@@ -1377,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v80"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v81"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4350,7 +4365,8 @@ function renderDiag(){
         <div>🕐 Último sync bem-sucedido: <b>${ult}</b></div>
         <div>⏳ Aguardando envio: <b>${pendOk.length}</b></div>
         <div style="color:${pendFalhos.length>0?'var(--r1)':'var(--ink3)'}">🔴 Com falha (${MAX_TENTATIVAS} tentativas): <b>${pendFalhos.length}</b>${pendFalhos.length>0?' — toque em "Reenviar"':''}</div>
-        <div>☁️ Registros na planilha: <b>${cloud.length}</b></div>
+        <div>☁️ Pesagens na planilha: <b>${cloud.length}</b></div>
+        <div>🌾 Recepções na planilha: <b>${(typeof cloudRec!=='undefined'?cloudRec.length:0)}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-rec-v2')||'[]').length}</b></div>
         <div>📄 Contratos carregados: <b>${(typeof contratosCloud!=='undefined'?contratosCloud.length:0)}</b></div>
         <div style="color:var(--ink3)">👤 ${usr?usr.nome:'—'} · ⚖️ ${nomeBal(usr?usr.bal:0)} · 📦 ${APP_VER}</div>
       </div>`;
@@ -4374,6 +4390,27 @@ function renderDiag(){
             <div style="color:var(--ink3);font-size:10px">${p.acao} · ${p.ordem.numOrdem||'—'} · há ${mins}min · tentativa ${p.tentativas||0}/${MAX_TENTATIVAS}</div>
           </div>
           ${p.falhou?`<button onclick="reenviarFalhou('${p.ordem.id}')" style="background:var(--r1);border:none;color:#fff;padding:5px 10px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩️ Reenviar</button>`:''}
+        </div>`;
+      }).join('');
+    }
+  }
+
+  // Fila de recepção (pend-rec-v2)
+  const pr=JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+  const rc=document.getElementById('diag-rec-count'); if(rc) rc.textContent=pr.length;
+  const rl=document.getElementById('diag-rec-list');
+  if(rl){
+    if(!pr.length){
+      rl.innerHTML='<div style="color:var(--ink3);padding:8px 0">Nenhuma recepção pendente. ✅</div>';
+    } else {
+      const agora=Date.now();
+      rl.innerHTML=pr.map(p=>{
+        const mins=p.ts?Math.round((agora-p.ts)/60000):0;
+        const cor=mins>30?'var(--a1)':'var(--g1)';
+        const rec=p.rec||{};
+        return `<div style="padding:8px 0;border-bottom:.5px solid var(--brd)">
+          <div style="font-weight:700;color:${cor}">${rec.placa||rec.id||'—'}</div>
+          <div style="color:var(--ink3);font-size:10px">${rec.talhaoCod||'—'} · ${rec.cultura||''} · ${rec.sacas||0} sc · há ${mins}min</div>
         </div>`;
       }).join('');
     }
@@ -5005,6 +5042,7 @@ function atualizarRecHome() {
         <div style="font-size:16px;font-weight:800;color:var(--g1)">${Math.round(culturas[c]).toLocaleString('pt-BR')} sc</div>
       </div>
     </div>`).join('') || '<div class="card"><div style="font-size:12px;color:var(--ink3)">Nenhum estoque registrado</div></div>';
+  updSRec();
 }
 
 function irRecHome() { carregarRecHome(); }
@@ -5484,8 +5522,41 @@ async function syncRec() {
   if (enviados.length) {
     const restante = pendRec.filter(p => !enviados.includes(p.id));
     localStorage.setItem('pend-rec-v2', JSON.stringify(restante));
+    localStorage.setItem('syncUltRec-v2', new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
     toast(`☁️ ${enviados.length} recepção(ões) sincronizada(s)!`);
+    addLog(`☁️ ${enviados.length} recepção(ões) sincronizada(s)`,'ok');
   }
+  updSRec();
+}
+
+/* ── Status de sincronização da recepção (home) ── */
+function updSRec(){
+  const el=document.getElementById('stxt-rec'); if(!el) return;
+  const pr=JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+  if(pr.length>0) el.textContent=`⚠️ ${pr.length} recepção(ões) pendente(s)`;
+  else if(!navigator.onLine) el.textContent='📵 Offline — salvo localmente';
+  else { const ult=localStorage.getItem('syncUltRec-v2'); el.textContent=ult?`☁️ Sincronizado às ${ult}`:'☁️ Sincronizado'; }
+}
+
+/* ── Sincronizar recepção manualmente (botão da home) ── */
+async function syncRecManual(){
+  if(!navigator.onLine){ toast('📵 Sem conexão'); updSRec(); return; }
+  toast('🔄 Sincronizando recepção...');
+  await syncRec();
+  await carregarRecepcoes();
+  if(typeof atualizarRecHome==='function') atualizarRecHome();
+  if(typeof renderDiag==='function') renderDiag();
+  updSRec();
+}
+
+/* ── Limpar itens inválidos da fila de recepção (sem rec/id) ── */
+function limparFilaRecInvalidos(){
+  const pr=JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+  const bons=pr.filter(p=>p&&p.id&&p.rec);
+  const removidos=pr.length-bons.length;
+  localStorage.setItem('pend-rec-v2', JSON.stringify(bons));
+  toast(removidos>0?`🧹 ${removidos} item(ns) inválido(s) removido(s)`:'Fila de recepção OK');
+  updSRec(); if(typeof renderDiag==='function') renderDiag();
 }
 
 function novoTalhaoForm() {
@@ -5545,6 +5616,7 @@ async function carregarRecepcoes() {
       if (j.ok && j.recepcoes) {
         cloudRec = j.recepcoes;
         localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
+        localStorage.setItem('syncUltRec-v2', new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
       }
     } catch(_) {}
   }
