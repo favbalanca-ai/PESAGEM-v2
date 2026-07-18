@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v87"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v88"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5515,10 +5515,10 @@ function irProd() {
     const scHa = g.area > 0 ? (g.sacas/g.area).toFixed(1) : '—';
     const umMed = g.cargas > 0 ? (g.umTotal/g.cargas).toFixed(1) : '—';
     return `<div class="tl-item" style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:.5px solid var(--brd)">
-      <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">🌿</div>
+      <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">${_culturaIcon(g.cultura)}</div>
       <div style="flex:1">
         <div style="font-size:12px;font-weight:700">${g.cod} · ${g.variedade}</div>
-        <div style="font-size:10px;color:var(--ink3);margin-top:1px">${g.area||'?'} ha · U: ${umMed}% · ${g.cargas} cargas</div>
+        <div style="font-size:10px;color:var(--ink3);margin-top:1px">${g.nome?g.nome+' · ':''}${g.cultura||''} · ${g.area||'?'} ha · U: ${umMed}% · ${g.cargas} cargas</div>
       </div>
       <div style="text-align:right"><div style="font-size:15px;font-weight:800;color:var(--g1)">${scHa}</div><div style="font-size:9px;color:var(--ink3)">sc/ha</div></div>
     </div>`;
@@ -5541,8 +5541,8 @@ function irTalhoes() {
   if (existente) existente.remove();
   const lista = talhoes.map((t,i) => `
     <div onclick="abrirEditarTalhao(${i})" style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:.5px solid var(--brd);cursor:pointer">
-      <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">🌿</div>
-      <div style="flex:1"><div style="font-size:12px;font-weight:700">${t.cod} · ${t.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${_areaT(t)} ha · ${t.cultura} · ${t.safra}</div></div>
+      <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">${_culturaIcon(t.cultura)}</div>
+      <div style="flex:1"><div style="font-size:12px;font-weight:700">${t.cod} · ${t.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${t.nome?t.nome+' · ':''}${_areaT(t)} ha · ${t.cultura} · ${t.safra}</div></div>
       <span style="font-size:12px;color:var(--g1)">✏️</span>
     </div>`).join('') || '<div class="emp"><div class="ei">🌾</div><p>Nenhum talhão cadastrado</p></div>';
   const div = document.createElement('div');
@@ -5801,6 +5801,19 @@ function novoTalhaoForm() {
 /* ── Carregar dados recepção do GAS ── */
 // Área efetiva do talhão: usa a área da variedade; se estiver 0/vazia, cai na área total
 function _areaT(t){ if(!t) return 0; return Number(t.areaVariedade)||Number(t.areaTotal)||0; }
+
+// Símbolo por cultura
+function _culturaIcon(c){
+  c=String(c||'').toUpperCase();
+  if(c.indexOf('MILHO')>=0) return '🌽';
+  if(c.indexOf('SOJA')>=0)  return '🌱';
+  if(c.indexOf('SORGO')>=0) return '🌾';
+  if(c.indexOf('FEIJ')>=0)  return '🫘';
+  if(c.indexOf('TRIGO')>=0) return '🌾';
+  if(c.indexOf('ALGOD')>=0) return '☁️';
+  if(c.indexOf('GIRASSOL')>=0) return '🌻';
+  return '🌿';
+}
 
 async function carregarTalhoes() {
   // Tentar do localStorage primeiro
