@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v85"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v86"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5539,11 +5539,11 @@ function irProd() {
 function irTalhoes() {
   const existente = document.getElementById('pg-talhoes');
   if (existente) existente.remove();
-  const lista = talhoes.map(t => `
-    <div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:.5px solid var(--brd)">
+  const lista = talhoes.map((t,i) => `
+    <div onclick="abrirEditarTalhao(${i})" style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:.5px solid var(--brd);cursor:pointer">
       <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">🌿</div>
       <div style="flex:1"><div style="font-size:12px;font-weight:700">${t.cod} · ${t.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${_areaT(t)} ha · ${t.cultura} · ${t.safra}</div></div>
-      <span style="background:var(--g3);color:var(--g2);border-radius:6px;padding:2px 7px;font-size:10px;font-weight:600">ativo</span>
+      <span style="font-size:12px;color:var(--g1)">✏️</span>
     </div>`).join('') || '<div class="emp"><div class="ei">🌾</div><p>Nenhum talhão cadastrado</p></div>';
   const div = document.createElement('div');
   div.id = 'pg-talhoes';
@@ -5695,6 +5695,73 @@ async function syncTalhoes(){
     localStorage.setItem('pend-talhao-v2', JSON.stringify(q.filter(p=>!enviados.includes(p.id))));
     addLog(`☁️ ${enviados.length} talhão(ões) sincronizado(s)`,'ok');
   }
+}
+
+/* ── Editar talhão (abre form preenchido) ── */
+function abrirEditarTalhao(i){
+  const t = talhoes[i];
+  if(!t){ toast('Talhão não encontrado'); return; }
+  const ex=document.getElementById('pg-edit-talhao'); if(ex) ex.remove();
+  const esc=v=>String(v==null?'':v).replace(/"/g,'&quot;');
+  const ativoSim=(String(t.ativo||'Sim').toLowerCase()!=='nao');
+  const div=document.createElement('div');
+  div.id='pg-edit-talhao';
+  div.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:160;overflow-y:auto;padding-bottom:40px';
+  div.innerHTML=`
+    <div class="top"><div class="top-in">
+      <button class="bk" onclick="this.closest('#pg-edit-talhao').remove()">‹</button>
+      <h1 class="top-title">✏️ Editar Talhão</h1>
+    </div></div>
+    <div style="padding:12px">
+      <div class="card">
+        <div class="f"><label>Código</label><input id="et-cod" value="${esc(t.cod)}"></div>
+        <div class="f"><label>Nome</label><input id="et-nome" value="${esc(t.nome)}"></div>
+        <div class="f"><label>Safra</label><input id="et-safra" value="${esc(t.safra)}"></div>
+        <div class="f"><label>Cultura</label><input id="et-cultura" value="${esc(t.cultura)}"></div>
+        <div class="f"><label>Variedade</label><input id="et-variedade" value="${esc(t.variedade)}"></div>
+        <div class="f"><label>Área total (ha)</label><input id="et-areaT" type="number" step="0.01" value="${t.areaTotal||0}"></div>
+        <div class="f"><label>Área da variedade (ha)</label><input id="et-areaV" type="number" step="0.01" value="${t.areaVariedade||0}"></div>
+        <div class="f"><label>Ativo</label>
+          <select id="et-ativo" style="width:100%;padding:10px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-family:'Inter',sans-serif;font-size:14px;-webkit-appearance:none">
+            <option value="Sim"${ativoSim?' selected':''}>Sim</option>
+            <option value="Nao"${!ativoSim?' selected':''}>Não (desativar)</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Mudar código/safra/variedade cria um novo registro e desativa o antigo automaticamente.</div>
+        <button class="btn btnp" onclick="salvarEditarTalhao(${i})">💾 Salvar alterações</button>
+        <button class="btn btns" onclick="this.closest('#pg-edit-talhao').remove()" style="margin-top:6px">Cancelar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(div);
+}
+function salvarEditarTalhao(i){
+  const orig = talhoes[i];
+  if(!orig){ toast('Talhão não encontrado'); return; }
+  const cod=document.getElementById('et-cod').value.trim();
+  const variedade=document.getElementById('et-variedade').value.trim();
+  const safra=document.getElementById('et-safra').value.trim();
+  if(!cod||!variedade){ toast('⚠️ Código e variedade são obrigatórios'); return; }
+  const edit={
+    cod, nome:document.getElementById('et-nome').value.trim(), safra,
+    cultura:document.getElementById('et-cultura').value.trim(), variedade,
+    areaTotal:parseFloat(document.getElementById('et-areaT').value)||0,
+    areaVariedade:parseFloat(document.getElementById('et-areaV').value)||0,
+    ativo:document.getElementById('et-ativo').value
+  };
+  const keyChanged = (String(orig.cod)!==edit.cod || String(orig.safra)!==edit.safra || String(orig.variedade)!==edit.variedade);
+  if(keyChanged){
+    // desativa o registro antigo (pela chave original) antes de criar o novo
+    enviarTalhao({cod:orig.cod, nome:orig.nome, safra:orig.safra, cultura:orig.cultura, variedade:orig.variedade, areaTotal:orig.areaTotal, areaVariedade:orig.areaVariedade, ativo:'Nao'});
+  }
+  // atualiza local: desativado some da lista; senão substitui pelo editado
+  if(edit.ativo==='Nao') talhoes.splice(i,1);
+  else talhoes[i]=edit;
+  localStorage.setItem('talhoes-v2', JSON.stringify(talhoes));
+  enviarTalhao(edit);
+  const pg=document.getElementById('pg-edit-talhao'); if(pg) pg.remove();
+  toast(edit.ativo==='Nao'?'✅ Talhão desativado!':'✅ Talhão atualizado!');
+  irTalhoes();
+  if(typeof atualizarRecHome==='function') atualizarRecHome();
 }
 
 function novoTalhaoForm() {
