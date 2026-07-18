@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v83"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v84"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2118,7 +2118,7 @@ function renderGcProducao(){
     if(!grupos[k])grupos[k]={cod:r.talhaoCod,nome:r.talhaoNome,cultura:r.cultura,variedade:r.variedade,sacas:0,cargas:0,umTotal:0,area:0};
     grupos[k].sacas+=r.sacas||0;grupos[k].cargas++;grupos[k].umTotal+=r.umidade||0;
     const t=talhoes.find(x=>x.cod===r.talhaoCod&&x.variedade===r.variedade);
-    if(t)grupos[k].area=t.areaVariedade;
+    if(t)grupos[k].area=_areaT(t);
   });
   const lista=Object.values(grupos).sort((a,b)=>b.sacas-a.sacas);
   if(!lista.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado. Registre recepções com talhão.</div>';return;}
@@ -5201,7 +5201,7 @@ function filtrarVariedadesRec() {
   if (!sel) return;
   const vars = talhoes.filter(t => t.cod === cod && t.safra === safra);
   if (vars.length) {
-    sel.innerHTML = vars.map(t => `<option value="${t.variedade}">${t.variedade} (${t.areaVariedade} ha)</option>`).join('');
+    sel.innerHTML = vars.map(t => `<option value="${t.variedade}">${t.variedade} (${_areaT(t)} ha)</option>`).join('');
     // Auto-preencher cultura
     document.getElementById('rec-cultura').value = vars[0].cultura || 'Soja';
   } else {
@@ -5311,7 +5311,7 @@ function calcDescRec() {
   const variedade = document.getElementById('rec-variedade')?.value;
   const safra = document.getElementById('rec-safra')?.value;
   const talhao = talhoes.find(t => t.cod===cod && t.safra===safra && t.variedade===variedade);
-  const area = talhao?.areaVariedade || 0;
+  const area = _areaT(talhao);
   const scHa = area > 0 ? (sacas / area).toFixed(1) : '—';
   // Salvar para registro
   recAtual.descUmidadeKg = Math.round(du);
@@ -5425,7 +5425,7 @@ function irProd() {
     grupos[k].cargas++;
     grupos[k].umTotal += r.umidade||0;
     const t = talhoes.find(x => x.cod===r.talhaoCod && x.variedade===r.variedade);
-    if (t) grupos[k].area = t.areaVariedade;
+    if (t) grupos[k].area = _areaT(t);
   });
   const itens = Object.values(grupos).sort((a,b) => b.sacas-a.sacas).map(g => {
     const scHa = g.area > 0 ? (g.sacas/g.area).toFixed(1) : '—';
@@ -5458,7 +5458,7 @@ function irTalhoes() {
   const lista = talhoes.map(t => `
     <div style="display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:.5px solid var(--brd)">
       <div style="width:34px;height:34px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0">🌿</div>
-      <div style="flex:1"><div style="font-size:12px;font-weight:700">${t.cod} · ${t.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${t.areaVariedade||0} ha · ${t.cultura} · ${t.safra}</div></div>
+      <div style="flex:1"><div style="font-size:12px;font-weight:700">${t.cod} · ${t.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${_areaT(t)} ha · ${t.cultura} · ${t.safra}</div></div>
       <span style="background:var(--g3);color:var(--g2);border-radius:6px;padding:2px 7px;font-size:10px;font-weight:600">ativo</span>
     </div>`).join('') || '<div class="emp"><div class="ei">🌾</div><p>Nenhum talhão cadastrado</p></div>';
   const div = document.createElement('div');
@@ -5634,6 +5634,9 @@ function novoTalhaoForm() {
 }
 
 /* ── Carregar dados recepção do GAS ── */
+// Área efetiva do talhão: usa a área da variedade; se estiver 0/vazia, cai na área total
+function _areaT(t){ if(!t) return 0; return Number(t.areaVariedade)||Number(t.areaTotal)||0; }
+
 async function carregarTalhoes() {
   // Tentar do localStorage primeiro
   const local = localStorage.getItem('talhoes-v2');
