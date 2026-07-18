@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v88"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v89"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2082,7 +2082,7 @@ function renderGcEstoque(elId){
     tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;
     return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:.5px solid var(--brd)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-weight:800;font-size:14px">${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
+        <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
         <span style="font-size:11px;color:var(--ink3)">preço médio <b style="color:var(--g1)">${preco>0?nR$(preco)+'/sc':'—'}</b></span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
@@ -2126,8 +2126,8 @@ function renderGcProducao(){
     const scHa=g.area>0?(g.sacas/g.area).toFixed(1):'—';
     const umMed=g.cargas>0?(g.umTotal/g.cargas).toFixed(1):'—';
     return `<div style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:.5px solid var(--brd)">
-      <div style="width:32px;height:32px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">🌿</div>
-      <div style="flex:1"><div style="font-size:12px;font-weight:700">${g.cod} · ${g.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${g.area||'?'} ha · U: ${umMed}% · ${Math.round(g.sacas)} sc · ${g.cargas} cargas</div></div>
+      <div style="width:32px;height:32px;border-radius:8px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0">${_culturaIcon(g.cultura)}</div>
+      <div style="flex:1"><div style="font-size:12px;font-weight:700">${g.cod} · ${g.variedade}</div><div style="font-size:10px;color:var(--ink3);margin-top:1px">${g.nome?g.nome+' · ':''}${g.cultura||''} · ${g.area||'?'} ha · U: ${umMed}% · ${Math.round(g.sacas)} sc · ${g.cargas} cargas</div></div>
       <div style="text-align:right;flex-shrink:0"><div style="font-size:15px;font-weight:800;color:var(--g1)">${scHa}</div><div style="font-size:9px;color:var(--ink3)">sc/ha</div></div>
     </div>`;
   }).join('');
