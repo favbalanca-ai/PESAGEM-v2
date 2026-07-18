@@ -1377,7 +1377,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v79"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v80"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1835,6 +1835,15 @@ function _cnhVencida(v){
   var dt=new Date(+m[3],+m[2]-1,+m[1]); var hoje=new Date(); hoje.setHours(0,0,0,0);
   return dt<hoje ? ('⚠️ CNH VENCIDA em '+v+' — confira!') : '';
 }
+/* ── Validação de CPF (dígitos verificadores) — pega erro de leitura da IA ── */
+function _cpfValido(cpf){
+  cpf=String(cpf||'').replace(/\D/g,'');
+  if(cpf.length!==11 || /^(\d)\1{10}$/.test(cpf)) return false;
+  let s=0; for(let i=0;i<9;i++) s+=parseInt(cpf[i],10)*(10-i);
+  let d1=(s*10)%11; if(d1===10) d1=0; if(d1!==parseInt(cpf[9],10)) return false;
+  s=0; for(let i=0;i<10;i++) s+=parseInt(cpf[i],10)*(11-i);
+  let d2=(s*10)%11; if(d2===10) d2=0; return d2===parseInt(cpf[10],10);
+}
 /* ── IA: leitura de CNH na etapa 3 (motorista/CPF) ───────────── */
 async function wizLerCNH(input){
   if(!input.files||!input.files[0])return;
@@ -1848,7 +1857,11 @@ async function wizLerCNH(input){
     const res=j.resultado;
     const dados={};
     if(res.motorista) dados['Nome do motorista'] = {campo:'f-mt',  valor:res.motorista};
-    if(res.cpf)       dados['CPF']               = {campo:'f-cpf', valor:res.cpf};
+    let cpfInvalido=false;
+    if(res.cpf){
+      cpfInvalido = !_cpfValido(res.cpf);
+      dados[cpfInvalido?'CPF ⚠️ confira (dígito pode estar errado)':'CPF'] = {campo:'f-cpf', valor:res.cpf};
+    }
     if(res.categoria) dados['Categoria (CAT.HAB)'] = {campo:'', valor:res.categoria};
     if(res.validade)  dados['Validade da CNH']     = {campo:'', valor:res.validade};
     if(Object.keys(dados).length===0){
@@ -1856,7 +1869,8 @@ async function wizLerCNH(input){
       return;
     }
     const avisoV=_cnhVencida(res.validade);
-    iaStatus('ia-status-cnh', avisoV?'err':'ok', avisoV || '✅ IA leu a CNH — confirme os dados');
+    const avisoCpf=cpfInvalido?'⚠️ CPF lido parece inválido — confira os dígitos':'';
+    iaStatus('ia-status-cnh', (avisoV||avisoCpf)?'err':'ok', avisoV || avisoCpf || '✅ IA leu a CNH — confirme os dados');
     mostrarModalIA(dados, 'CNH', 3);
   }catch(e){iaStatus('ia-status-cnh','err','❌ Erro de conexão — preencha manualmente');}
 }
