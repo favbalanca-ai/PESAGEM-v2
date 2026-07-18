@@ -852,14 +852,20 @@ function salvarFoto(dados,pasta){
   var ref=s(dados.contrato||dados.ref)||"SEM-REF";var data=s(dados.data).replace(/\//g,"-")||"SEM-DATA";
   var placa=s(dados.placa)||"SEM-PLACA";var tipo=s(dados.tipo)||"foto";
   var base64=s(dados.base64);var mime=s(dados.mime)||"image/jpeg";
-  var ext=mime.indexOf("png")>=0?".png":".jpg";
-  var nome=ref+"."+data+"."+placa+"."+tipo+ext;
+  var ext=mime.indexOf("pdf")>=0?".pdf":(mime.indexOf("png")>=0?".png":".jpg");
+  // Nome do arquivo dentro da pasta da pesagem: só o tipo (ex.: PLACA.jpg, TICKET.pdf)
+  var nome=tipo+ext;
   var raiz=DriveApp.getFolderById(DRIVE_ID);var pastaNome=pasta||"Fotos";var pastaObj;
   var it=raiz.getFoldersByName(pastaNome);pastaObj=it.hasNext()?it.next():raiz.createFolder(pastaNome);
+  // Nível 1 — pasta do contrato/referência
   var sub;var it2=pastaObj.getFoldersByName(ref);sub=it2.hasNext()?it2.next():pastaObj.createFolder(ref);
+  // Nível 2 — pasta da pesagem (Data_Placa): agrupa fotos + ticket da mesma pesagem
+  var chave=s(dados.pesagem)||(data+"_"+placa);
+  chave=chave.replace(/[\/\\:*?"<>|]/g,"-");
+  var ped;var it3=sub.getFoldersByName(chave);ped=it3.hasNext()?it3.next():sub.createFolder(chave);
   var bytes=Utilities.base64Decode(base64);var blob=Utilities.newBlob(bytes,mime,nome);
-  var arq=sub.createFile(blob);arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
-  return{ok:true,nome:nome,url:arq.getUrl()};
+  var arq=ped.createFile(blob);arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
+  return{ok:true,nome:nome,url:arq.getUrl(),pasta_url:ped.getUrl()};
 }
 
 // ══════════════════════════════════════════════════════════════
