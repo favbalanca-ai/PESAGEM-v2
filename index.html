@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v90"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v91"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2005,8 +2005,9 @@ function _entregueContrato(ctN){
 // Calcula o estoque por produto DIRETO das recepções (cloudRec) + contratos de venda
 // (contratosCloud) + expedições (cloud), sem depender da aba Estoque do backend.
 function _estoqueLocal(){
-  var rows={}, culturaTot={};
+  var rows={}, culturaTot={}, vistos={};
   (cloudRec||[]).filter(function(r){return r.status==='Finalizado';}).forEach(function(r){
+    var id=String(r.id||''); if(id){ if(vistos[id])return; vistos[id]=1; } // dedupe por ID (não conta 2x)
     var cultura=(r.cultura||'?'), safra=(r.safra||''), k=safra+'|'+cultura;
     if(!rows[k])rows[k]={safra:safra,cultura:cultura,entradas_sc:0,saidas_sc:0,saldo_sc:0};
     var sc=Number(r.sacas)||0;
@@ -2039,6 +2040,22 @@ function _estoqueLocal(){
   });
   return {estoque:Object.values(rows), comprometido:comp};
 }
+// Reconciliação: soma REAL das recepções (por cultura, deduplicada) vs aba Estoque
+// do backend. Serve pra achar divergências (duplicatas, drift do estoque incremental).
+function _reconRec(){
+  var porCult={}, vistos={}, dupIds=[], tot=0;
+  (cloudRec||[]).filter(function(r){return r.status==='Finalizado';}).forEach(function(r){
+    tot++;
+    var id=String(r.id||'');
+    if(id){ if(vistos[id]){ dupIds.push(id); return; } vistos[id]=1; }
+    var c=(r.cultura||'?'); porCult[c]=(porCult[c]||0)+(Number(r.sacas)||0);
+  });
+  var estCult={};
+  ((estoqueCloud&&estoqueCloud.estoque)||[]).forEach(function(e){
+    var c=(e.cultura||'?'); estCult[c]=(estCult[c]||0)+(Number(e.entradas_sc)||0);
+  });
+  return {porCult:porCult, estCult:estCult, dupIds:dupIds, total:tot, unicas:Object.keys(vistos).length};
+}
 // Recalcula a aba Estoque no backend a partir das recepções (útil quando
 // lançamentos foram feitos direto na planilha) e recarrega o dashboard.
 function recalcularEstoqueApp(){
@@ -2054,9 +2071,12 @@ function recalcularEstoqueApp(){
 }
 function renderGcEstoque(elId){
   const el=document.getElementById(elId||'gc-estoque');if(!el)return;
-  let est=estoqueCloud?.estoque||[];let comp=estoqueCloud?.comprometido||{};
-  let local=false;
-  if(!est.length){const loc=_estoqueLocal();if(loc){est=loc.estoque;comp=loc.comprometido;local=true;}}
+  // Fonte da verdade = as recepções reais (cloudRec), que batem com a soma da planilha.
+  // A aba Estoque do backend é incremental e pode divergir (edições/re-sync), então é só fallback.
+  let est=[],comp={},local=false;
+  const loc=_estoqueLocal();
+  if(loc){est=loc.estoque;comp=loc.comprometido;local=true;}
+  if(!est.length){est=estoqueCloud?.estoque||[];comp=estoqueCloud?.comprometido||{};}
   if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b>.</div>';return;}
   const precoMap=_precoMedioPorGrupo();
   const nSc=v=>Math.round(v||0).toLocaleString('pt-BR');
@@ -4396,6 +4416,27 @@ function renderDiag(){
     const ult=localStorage.getItem('syncUlt-v2')||'nunca';
     const pendOk=pend.filter(p=>!p.falhou);
     const pendFalhos=pend.filter(p=>p.falhou);
+    // ── Reconciliação da recepção (soma real vs aba Estoque) ──
+    let reconHtml='';
+    try{
+      const rec=_reconRec();
+      const nS=v=>Math.round(v||0).toLocaleString('pt-BR');
+      const culturas=Object.keys(rec.porCult).sort();
+      let linhas=culturas.map(c=>{
+        const real=rec.porCult[c]||0, est=rec.estCult[c]||0, dif=est-real;
+        const cor=Math.abs(dif)<1?'var(--g1)':'var(--r1)';
+        return `<div style="display:flex;justify-content:space-between;font-size:11px;padding:1px 0">
+          <span>${_culturaIcon(c)} ${c}</span>
+          <span>recepções <b>${nS(real)}</b> · aba Estoque <b>${nS(est)}</b> · <b style="color:${cor}">${dif>0?'+':''}${nS(dif)}</b></span></div>`;
+      }).join('');
+      const dup=rec.dupIds.length;
+      reconHtml=`<div style="margin-top:4px;padding-top:6px;border-top:1px dashed var(--brd)">
+        <div style="font-weight:700;font-size:11px;margin-bottom:3px">🧮 Reconciliação de sacas</div>
+        ${linhas||'<div style="color:var(--ink3);font-size:11px">Sem recepções finalizadas.</div>'}
+        <div style="font-size:10px;color:${dup>0?'var(--r1)':'var(--ink3)'};margin-top:3px">${dup>0?('⚠️ '+dup+' recepção(ões) DUPLICADA(s) por ID — não contadas em dobro'):'✅ Sem IDs duplicados ('+rec.unicas+' recepções únicas)'}</div>
+        <div style="font-size:10px;color:var(--ink3)">O card do dashboard usa a coluna <b>recepções</b> (soma real da planilha). Se a <b>aba Estoque</b> divergir, toque em <b>🔄 Recalcular</b> no dashboard.</div>
+      </div>`;
+    }catch(e){}
     st.innerHTML=`
       <div style="display:flex;flex-direction:column;gap:6px">
         <div>🌐 Rede: <b style="color:${online?'var(--g1)':'var(--r1)'}">${online?'Online':'Offline'}</b></div>
@@ -4406,6 +4447,7 @@ function renderDiag(){
         <div>🌾 Recepções na planilha: <b>${(typeof cloudRec!=='undefined'?cloudRec.length:0)}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-rec-v2')||'[]').length}</b></div>
         <div>🌱 Talhões: <b>${(typeof talhoes!=='undefined'?talhoes.length:0)}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-talhao-v2')||'[]').length}</b></div>
         <div>📄 Contratos carregados: <b>${(typeof contratosCloud!=='undefined'?contratosCloud.length:0)}</b></div>
+        ${reconHtml}
         <div style="color:var(--ink3)">👤 ${usr?usr.nome:'—'} · ⚖️ ${nomeBal(usr?usr.bal:0)} · 📦 ${APP_VER}</div>
       </div>`;
   }

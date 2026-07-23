@@ -681,11 +681,13 @@ function atualizarRecepcao(o){
 function listarRecepcoes(){
   var ss=SpreadsheetApp.openById(PLANILHA_ID);var sh=ss.getSheetByName("Recepcao");
   if(!sh||sh.getLastRow()<2)return{ok:true,recepcoes:[]};
-  var dados=sh.getRange(2,1,sh.getLastRow()-1,25).getValues();
+  var dados=sh.getRange(2,1,sh.getLastRow()-1,26).getValues();
   var lista=[];
   for(var i=0;i<dados.length;i++){
     var r=dados[i];if(!s(r[0]))continue;
-    lista.push({id:s(r[0]),data:fmtD(r[1]),hora:fmtH(r[2]),safra:s(r[3]),talhaoCod:s(r[4]),talhaoNome:s(r[5]),cultura:s(r[6]),variedade:s(r[7]),placa:s(r[8]),motorista:s(r[9]),cpf:s(r[10]),tipoCaminhao:s(r[11]),balanca:n(r[12]),tara:n(r[13]),bruto:n(r[13]),umidade:n(r[14]),impureza:n(r[15]),descUmidadeKg:n(r[16]),descImpurezaKg:n(r[17]),pesoLiquidoKg:n(r[18]),sacas:n(r[19]),scHa:n(r[20]),status:s(r[21]),funcionario:s(r[22]),dataHoraFim:fmtDH(r[23]),obs:s(r[24])});
+    // Colunas alinhadas ao cabeçalho: 13 Tara,14 Bruto,15 Umid,16 Impur,17 DescU,18 DescI,
+    // 19 PesoLiq,20 Sacas,21 sc_ha,22 Status,23 Funcionario,24 DataHora_Fim,25 Obs
+    lista.push({id:s(r[0]),data:fmtD(r[1]),hora:fmtH(r[2]),safra:s(r[3]),talhaoCod:s(r[4]),talhaoNome:s(r[5]),cultura:s(r[6]),variedade:s(r[7]),placa:s(r[8]),motorista:s(r[9]),cpf:s(r[10]),tipoCaminhao:s(r[11]),balanca:n(r[12]),tara:n(r[13]),bruto:n(r[14]),umidade:n(r[15]),impureza:n(r[16]),descUmidadeKg:n(r[17]),descImpurezaKg:n(r[18]),pesoLiquidoKg:n(r[19]),sacas:n(r[20]),scHa:n(r[21]),status:s(r[22]),funcionario:s(r[23]),dataHoraFim:fmtDH(r[24]),obs:s(r[25])});
   }
   return{ok:true,recepcoes:lista};
 }
