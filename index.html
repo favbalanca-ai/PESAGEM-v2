@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v92"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v93"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1536,18 +1536,34 @@ window.addEventListener('load',()=>{
   checkSess(); popularModelosEixos(); calcPBT();
 });
 
-// Força buscar a versão mais recente: atualiza o SW, limpa TODO o cache e recarrega.
+// Força buscar a versão mais recente: limpa TODO o cache, desregistra o
+// Service Worker antigo (para reinstalar limpo) e recarrega furando o cache HTTP.
 async function forcarAtualizacao(){
   toast('🔄 Buscando atualização...');
   try{
-    if('serviceWorker' in navigator){
-      const reg=await navigator.serviceWorker.getRegistration();
-      if(reg){ try{ await reg.update(); }catch(e){} if(reg.waiting){ try{ reg.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} } }
+    // 1) Apagar todos os caches do app (shell + assets)
+    if('caches' in window){
+      const ks=await caches.keys();
+      await Promise.all(ks.map(k=>caches.delete(k)));
     }
-    if('caches' in window){ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }
+    // 2) Desregistrar o(s) Service Worker(s) — garante que o antigo pare de
+    //    servir a versão em cache. Ao recarregar, a página registra o SW de novo.
+    if('serviceWorker' in navigator){
+      try{
+        const regs=await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r=>{
+          if(r.waiting){ try{ r.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} }
+          return r.unregister();
+        }));
+      }catch(e){}
+    }
     toast('✅ Atualizando o app...');
-    setTimeout(()=>{ location.reload(); }, 700);
-  }catch(e){ location.reload(); }
+    // 3) Recarregar com querystring nova = fura o cache HTTP do navegador
+    setTimeout(()=>{
+      try{ location.replace(location.pathname + '?u=' + Date.now()); }
+      catch(e){ location.reload(); }
+    }, 600);
+  }catch(e){ try{ location.reload(); }catch(_){ } }
 }
 
 /* ══ LOGIN ════════════════════════════════════════════════════ */
@@ -5143,17 +5159,16 @@ function irRecHome() { carregarRecHome(); }
 /* ── RECEPÇÃO: Nova ── */
 function irNovaRec() {
   // Montar tela de nova recepção dinâmica
-  const safraOpts = [...new Set(talhoes.map(t => t.safra))].map(s => `<option>${s}</option>`).join('');
-  const talhaoOpts = [...new Set(talhoes.map(t => t.cod))].map(c => {
-    const t = talhoes.find(x => x.cod === c);
-    return `<option value="${c}">${c} — ${t?.nome||''}</option>`;
-  }).join('');
+  const safras = [...new Set(talhoes.map(t => t.safra).filter(Boolean))];
+  const safraOpts = safras.map(s => `<option>${s}</option>`).join('');
+  const primeiraSafra = safras[0] || '';
+  const talhaoOpts = _talhoesSafraOpts(primeiraSafra);
 
   const conteudo = `
     <div class="card">
       <div class="ct">Safra e origem</div>
       <div class="f"><label>Safra</label>
-        <select id="rec-safra" class="finput" onchange="filtrarVariedadesRec()">${safraOpts||'<option>2025/26</option>'}</select>
+        <select id="rec-safra" class="finput" onchange="filtrarTalhoesRec()">${safraOpts||'<option>2025/26</option>'}</select>
       </div>
       <div class="f"><label>Talhão</label>
         <select id="rec-talhao" class="finput" onchange="filtrarVariedadesRec()">
@@ -5161,10 +5176,10 @@ function irNovaRec() {
         </select>
       </div>
       <div class="f"><label>Cultura</label>
-        <select id="rec-cultura" class="finput"><option>Soja</option><option>Milho</option><option>Sorgo</option><option>Feijão</option><option>Outra</option></select>
+        <select id="rec-cultura" class="finput" disabled style="background:var(--g5,#f2f6f2);color:var(--ink2);cursor:not-allowed"><option value="">Selecione o talhão</option></select>
       </div>
       <div class="f"><label>Variedade</label>
-        <select id="rec-variedade" class="finput"><option value="">Selecione o talhão primeiro</option></select>
+        <select id="rec-variedade" class="finput" onchange="atualizarCulturaRec()"><option value="">Selecione o talhão primeiro</option></select>
       </div>
     </div>
     <div class="card">
@@ -5276,19 +5291,53 @@ function gerarId(prefix) {
   return prefix + new Date().toISOString().replace(/[-:.TZ]/g,'').substring(0,14);
 }
 
+// Opções de talhão (cod únicos) cadastrados na safra informada
+function _talhoesSafraOpts(safra) {
+  const cods = [...new Set(talhoes.filter(t => t.safra === safra).map(t => t.cod))];
+  return cods.map(c => {
+    const t = talhoes.find(x => x.cod === c && x.safra === safra);
+    return `<option value="${c}">${c} — ${t?.nome||''}</option>`;
+  }).join('');
+}
+
+// Safra mudou → recarrega os talhões daquela safra e limpa cultura/variedade
+function filtrarTalhoesRec() {
+  const safra = document.getElementById('rec-safra')?.value;
+  const selT = document.getElementById('rec-talhao');
+  if (selT) selT.innerHTML = '<option value="">Selecione...</option>' + _talhoesSafraOpts(safra);
+  const selV = document.getElementById('rec-variedade');
+  if (selV) selV.innerHTML = '<option value="">Selecione o talhão primeiro</option>';
+  const selC = document.getElementById('rec-cultura');
+  if (selC) selC.innerHTML = '<option value="">Selecione o talhão</option>';
+}
+
+// Talhão mudou → lista as variedades cadastradas (cod + safra) e preenche cultura
 function filtrarVariedadesRec() {
   const cod = document.getElementById('rec-talhao')?.value;
   const safra = document.getElementById('rec-safra')?.value;
   const sel = document.getElementById('rec-variedade');
+  const selC = document.getElementById('rec-cultura');
   if (!sel) return;
   const vars = talhoes.filter(t => t.cod === cod && t.safra === safra);
   if (vars.length) {
     sel.innerHTML = vars.map(t => `<option value="${t.variedade}">${t.variedade} (${_areaT(t)} ha)</option>`).join('');
-    // Auto-preencher cultura
-    document.getElementById('rec-cultura').value = vars[0].cultura || 'Soja';
+    atualizarCulturaRec();
   } else {
-    sel.innerHTML = '<option>Selecione o talhão</option>';
+    sel.innerHTML = '<option value="">Selecione o talhão</option>';
+    if (selC) selC.innerHTML = '<option value="">Selecione o talhão</option>';
   }
+}
+
+// Variedade selecionada → cultura vem do cadastro do talhão
+function atualizarCulturaRec() {
+  const cod = document.getElementById('rec-talhao')?.value;
+  const safra = document.getElementById('rec-safra')?.value;
+  const variedade = document.getElementById('rec-variedade')?.value;
+  const selC = document.getElementById('rec-cultura');
+  if (!selC) return;
+  const t = talhoes.find(x => x.cod === cod && x.safra === safra && x.variedade === variedade);
+  const cult = t?.cultura || '';
+  selC.innerHTML = `<option value="${cult}">${cult || 'Selecione o talhão'}</option>`;
 }
 
 function selTipoCaminhao(tipo) {
@@ -5422,7 +5471,11 @@ function registrarRecepcao() {
     return;
   }
   const cod = document.getElementById('rec-talhao')?.value;
-  const tObj = talhoes.find(t => t.cod === cod);
+  const safraSel = document.getElementById('rec-safra')?.value;
+  const varSel = document.getElementById('rec-variedade')?.value;
+  const tObj = talhoes.find(t => t.cod === cod && t.safra === safraSel && t.variedade === varSel)
+            || talhoes.find(t => t.cod === cod && t.safra === safraSel)
+            || talhoes.find(t => t.cod === cod);
   const agora = new Date();
   const rec = {
     ...recAtual,
