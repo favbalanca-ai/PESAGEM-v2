@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v93"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v94"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5156,6 +5156,14 @@ function atualizarRecHome() {
 
 function irRecHome() { carregarRecHome(); }
 
+/* ── RECEPÇÃO: caminhões próprios (seleção rápida) ── */
+const CAMINHOES_PROPRIOS = [
+  { id: 'VM260', desc: 'Imavi'   },
+  { id: 'NH380', desc: 'Carreta' },
+  { id: 'FH540', desc: 'RODO'    },
+];
+const _CP_STYLE = 'margin:0;font-size:12px;padding:9px 4px;line-height:1.2';
+
 /* ── RECEPÇÃO: Nova ── */
 function irNovaRec() {
   // Montar tela de nova recepção dinâmica
@@ -5184,6 +5192,14 @@ function irNovaRec() {
     </div>
     <div class="card">
       <div class="ct">Caminhão</div>
+      <div class="f"><label>Caminhões próprios</label>
+        <div style="display:grid;grid-template-columns:repeat(${CAMINHOES_PROPRIOS.length},1fr);gap:6px">
+          ${CAMINHOES_PROPRIOS.map(c => `
+            <button type="button" id="cp-${c.id}" onclick="selCaminhaoProprio('${c.id}')" class="btn btns" style="${_CP_STYLE}">
+              <span style="font-weight:800">${c.id}</span><br><span style="font-size:9px;opacity:.75">${c.desc}</span>
+            </button>`).join('')}
+        </div>
+      </div>
       <div class="f"><label>Placa</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="text" id="rec-placa" class="finput" placeholder="AAA-0000" oninput="autocompletePlacaRec(this.value)" style="text-transform:uppercase;font-family:'JetBrains Mono',monospace;font-weight:700;flex:1">
@@ -5348,6 +5364,26 @@ function selTipoCaminhao(tipo) {
   document.getElementById('btn-terceiro').style.cssText = 'margin:0;font-size:12px;padding:9px';
 }
 
+// Realça (ou limpa) o botão do caminhão próprio selecionado
+function _realcaCaminhaoProprio(id) {
+  CAMINHOES_PROPRIOS.forEach(c => {
+    const b = document.getElementById('cp-' + c.id);
+    if (!b) return;
+    b.className = 'btn ' + (c.id === id ? 'btnp' : 'btns');
+    b.style.cssText = _CP_STYLE;
+  });
+}
+
+// Seleção rápida de caminhão próprio: preenche placa, marca "próprio" e busca tara salva
+function selCaminhaoProprio(id) {
+  const inp = document.getElementById('rec-placa');
+  if (inp) inp.value = id;
+  selTipoCaminhao('proprio');
+  _realcaCaminhaoProprio(id);
+  autocompletePlacaRec(id);
+  toast('🚛 ' + id + ' selecionado');
+}
+
 function cloudRecFiltrado() {
   // Admin (bal:0) vê tudo — operador vê só sua balança
   const bal = usr?.bal || 0;
@@ -5357,6 +5393,8 @@ function cloudRecFiltrado() {
 
 function autocompletePlacaRec(val) {
   const v = val.toUpperCase().trim();
+  // Mantém os botões de caminhão próprio em sincronia com a placa
+  _realcaCaminhaoProprio(CAMINHOES_PROPRIOS.some(c => c.id === v) ? v : null);
   if (v.length < 3) return;
 
   // Mostrar hint de tara (sempre, independente de ter salvo ou não)
