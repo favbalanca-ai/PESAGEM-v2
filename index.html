@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v94"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v95"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5192,7 +5192,13 @@ function irNovaRec() {
     </div>
     <div class="card">
       <div class="ct">Caminhão</div>
-      <div class="f"><label>Caminhões próprios</label>
+      <div class="f" style="margin-bottom:6px"><label>Tipo de caminhão</label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <button type="button" id="btn-proprio" onclick="selTipoCaminhao('proprio')" class="btn btnp" style="margin:0;font-size:12px;padding:9px">✓ Próprio</button>
+          <button type="button" id="btn-terceiro" onclick="selTipoCaminhao('terceiro')" class="btn btns" style="margin:0;font-size:12px;padding:9px">Terceiro</button>
+        </div>
+      </div>
+      <div class="f" id="rec-proprios-wrap"><label>Caminhões próprios</label>
         <div style="display:grid;grid-template-columns:repeat(${CAMINHOES_PROPRIOS.length},1fr);gap:6px">
           ${CAMINHOES_PROPRIOS.map(c => `
             <button type="button" id="cp-${c.id}" onclick="selCaminhaoProprio('${c.id}')" class="btn btns" style="${_CP_STYLE}">
@@ -5212,12 +5218,6 @@ function irNovaRec() {
       </div>
       <div class="f"><label>Motorista</label><input type="text" id="rec-motorista" class="finput" placeholder="Nome completo" style="text-transform:uppercase"></div>
       <div class="f"><label>CPF</label><input type="text" id="rec-cpf" class="finput" placeholder="000.000.000-00"></div>
-      <div class="f"><label>Tipo de caminhão</label>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-          <button type="button" id="btn-proprio" onclick="selTipoCaminhao('proprio')" class="btn btnp" style="margin:0;font-size:12px;padding:9px">✓ Próprio</button>
-          <button type="button" id="btn-terceiro" onclick="selTipoCaminhao('terceiro')" class="btn btns" style="margin:0;font-size:12px;padding:9px">Terceiro</button>
-        </div>
-      </div>
       <!-- Leitura de NF / CT-e com IA -->
       <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-top:6px;cursor:pointer">
         <span style="font-size:18px">📄</span>
@@ -5362,6 +5362,10 @@ function selTipoCaminhao(tipo) {
   document.getElementById('btn-proprio').style.cssText = 'margin:0;font-size:12px;padding:9px';
   document.getElementById('btn-terceiro').className = tipo === 'terceiro' ? 'btn btnp' : 'btn btns';
   document.getElementById('btn-terceiro').style.cssText = 'margin:0;font-size:12px;padding:9px';
+  // Só libera os caminhões próprios quando o tipo é "próprio"
+  const wrap = document.getElementById('rec-proprios-wrap');
+  if (wrap) wrap.style.display = tipo === 'proprio' ? '' : 'none';
+  if (tipo !== 'proprio') _realcaCaminhaoProprio(null);
 }
 
 // Realça (ou limpa) o botão do caminhão próprio selecionado
