@@ -1536,18 +1536,34 @@ window.addEventListener('load',()=>{
   checkSess(); popularModelosEixos(); calcPBT();
 });
 
-// Força buscar a versão mais recente: atualiza o SW, limpa TODO o cache e recarrega.
+// Força buscar a versão mais recente: limpa TODO o cache, desregistra o
+// Service Worker antigo (para reinstalar limpo) e recarrega furando o cache HTTP.
 async function forcarAtualizacao(){
   toast('🔄 Buscando atualização...');
   try{
-    if('serviceWorker' in navigator){
-      const reg=await navigator.serviceWorker.getRegistration();
-      if(reg){ try{ await reg.update(); }catch(e){} if(reg.waiting){ try{ reg.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} } }
+    // 1) Apagar todos os caches do app (shell + assets)
+    if('caches' in window){
+      const ks=await caches.keys();
+      await Promise.all(ks.map(k=>caches.delete(k)));
     }
-    if('caches' in window){ const ks=await caches.keys(); await Promise.all(ks.map(k=>caches.delete(k))); }
+    // 2) Desregistrar o(s) Service Worker(s) — garante que o antigo pare de
+    //    servir a versão em cache. Ao recarregar, a página registra o SW de novo.
+    if('serviceWorker' in navigator){
+      try{
+        const regs=await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.map(r=>{
+          if(r.waiting){ try{ r.waiting.postMessage({type:'SKIP_WAITING'}); }catch(e){} }
+          return r.unregister();
+        }));
+      }catch(e){}
+    }
     toast('✅ Atualizando o app...');
-    setTimeout(()=>{ location.reload(); }, 700);
-  }catch(e){ location.reload(); }
+    // 3) Recarregar com querystring nova = fura o cache HTTP do navegador
+    setTimeout(()=>{
+      try{ location.replace(location.pathname + '?u=' + Date.now()); }
+      catch(e){ location.reload(); }
+    }, 600);
+  }catch(e){ try{ location.reload(); }catch(_){ } }
 }
 
 /* ══ LOGIN ════════════════════════════════════════════════════ */
