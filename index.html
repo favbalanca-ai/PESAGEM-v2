@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v96"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v97"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5284,7 +5284,7 @@ function irNovaRec() {
       <!-- 3º PASSO: TARA (caminhão vazio após descarregar) -->
       <div style="font-size:11px;font-weight:700;color:var(--g1);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">3. Tara — caminhão vazio (após descarregar)</div>
       <div class="f">
-        <div class="pw"><input type="number" id="rec-tara" placeholder="0" step="1" min="0" max="50000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
+        <div class="pw"><input type="number" id="rec-tara" placeholder="0" step="1" min="0" max="50000" oninput="calcDescRec();this.removeAttribute('data-prefill')" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
       </div>
       <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
         <span style="font-size:18px">📊</span>
@@ -5320,6 +5320,39 @@ function irNovaRec() {
     <div style="padding:12px">${conteudo}</div>`;
   document.body.appendChild(div);
   recAtual = {tipo: 'proprio', id: gerarId('REC')};
+  prefillUltimaRec();
+}
+
+// Preenche safra/talhão/variedade/umidade/impureza/tara com o último registro
+function prefillUltimaRec() {
+  let u = null;
+  try { u = JSON.parse(localStorage.getItem('ultima-rec-v2') || 'null'); } catch(_) {}
+  if (!u) return;
+  const setSelIf = (id, val) => {
+    const sel = document.getElementById(id);
+    if (!sel || val == null || val === '') return false;
+    if (![...sel.options].some(o => o.value === val)) return false;
+    sel.value = val;
+    return true;
+  };
+  // Safra → talhão → variedade → cultura (respeitando a cascata dos selects)
+  if (setSelIf('rec-safra', u.safra)) {
+    filtrarTalhoesRec();
+    if (setSelIf('rec-talhao', u.talhaoCod)) {
+      filtrarVariedadesRec();
+      setSelIf('rec-variedade', u.variedade);
+      atualizarCulturaRec();
+    }
+  }
+  // Qualidade
+  const um = document.getElementById('rec-umidade');
+  const im = document.getElementById('rec-impureza');
+  if (um && u.umidade) um.value = u.umidade;
+  if (im && u.impureza) im.value = u.impureza;
+  // Tara sugerida (marcada como prefill — a tara real do caminhão/placa sobrescreve)
+  const ta = document.getElementById('rec-tara');
+  if (ta && u.taraKg > 0) { ta.value = u.taraKg; ta.dataset.prefill = '1'; }
+  if (typeof calcDescRec === 'function') calcDescRec();
 }
 
 function fecharNovaRec() {
@@ -5419,6 +5452,19 @@ function cloudRecFiltrado() {
   return cloudRec.filter(r => !r.balanca || r.balanca === bal || r.balanca === 0);
 }
 
+// Tara pode ser substituída se estiver vazia OU se veio do prefill do último registro
+// (assim a tara real do caminhão/placa sempre vence o valor sugerido)
+function _taraSubstituivel() {
+  const ta = document.getElementById('rec-tara');
+  return !!ta && (!ta.value || ta.dataset.prefill === '1');
+}
+function _setTaraRec(kg) {
+  const ta = document.getElementById('rec-tara');
+  if (!ta) return;
+  ta.value = kg;
+  ta.removeAttribute('data-prefill');
+}
+
 function autocompletePlacaRec(val) {
   const v = val.toUpperCase().trim();
   // Mantém os botões de caminhão próprio em sincronia com a placa
@@ -5443,8 +5489,8 @@ function autocompletePlacaRec(val) {
       document.getElementById('rec-motorista').value = t.motorista || '';
     if (!document.getElementById('rec-cpf').value)
       document.getElementById('rec-cpf').value = t.cpf || '';
-    if (!document.getElementById('rec-tara').value && t.tara > 0) {
-      document.getElementById('rec-tara').value = t.tara;
+    if (_taraSubstituivel() && t.tara > 0) {
+      _setTaraRec(t.tara);
       selTipoCaminhao('proprio');
       calcDescRec();
       toast(`⚖️ Tara ${v}: ${t.tara.toLocaleString('pt-BR')} kg (salva)`);
@@ -5460,10 +5506,10 @@ function autocompletePlacaRec(val) {
       document.getElementById('rec-motorista').value = ultimo.motorista || '';
     if (!document.getElementById('rec-cpf').value)
       document.getElementById('rec-cpf').value = ultimo.cpf || '';
-    if (ultimo.tipoCaminhao === 'proprio' && !document.getElementById('rec-tara').value) {
+    if (ultimo.tipoCaminhao === 'proprio' && _taraSubstituivel()) {
       const taraKg = Math.round((ultimo.tara||0)*1000);
       if (taraKg > 0) {
-        document.getElementById('rec-tara').value = taraKg;
+        _setTaraRec(taraKg);
         selTipoCaminhao('proprio');
         calcDescRec();
         toast(`⚖️ Tara ${v}: ${taraKg.toLocaleString('pt-BR')} kg (histórico)`);
@@ -5474,11 +5520,11 @@ function autocompletePlacaRec(val) {
 
   // 3. Histórico de expedição
   const histExp = cloud.filter(o => o.placa === v && (o.tara||0) > 0);
-  if (histExp.length && !document.getElementById('rec-tara').value) {
+  if (histExp.length && _taraSubstituivel()) {
     const ultimo = histExp[histExp.length - 1];
     const taraKg = Math.round((ultimo.tara||0)*1000);
     if (taraKg > 0) {
-      document.getElementById('rec-tara').value = taraKg;
+      _setTaraRec(taraKg);
       if (!document.getElementById('rec-motorista').value)
         document.getElementById('rec-motorista').value = ultimo.motorista || '';
       selTipoCaminhao('proprio');
@@ -5578,6 +5624,13 @@ function registrarRecepcao() {
     taras[placa] = { tara, motorista, cpf: document.getElementById('rec-cpf')?.value||'', atualizado: agora.toLocaleString('pt-BR') };
     localStorage.setItem('taras-rec-v2', JSON.stringify(taras));
   }
+  // Guarda o último preenchimento para agilizar o próximo registro
+  try {
+    localStorage.setItem('ultima-rec-v2', JSON.stringify({
+      safra: rec.safra, talhaoCod: rec.talhaoCod, variedade: rec.variedade,
+      umidade: rec.umidade, impureza: rec.impureza, taraKg: tara
+    }));
+  } catch(_) {}
   cloudRec.unshift(rec);
   localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
   // Enviar para GAS — usar enviarRec separado do enviar de expedição
