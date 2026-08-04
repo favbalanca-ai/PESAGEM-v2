@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v97"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v98"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2123,9 +2123,9 @@ function renderGcEstoque(elId){
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
         ${mc('Em estoque (sc)',nSc(p.estoque),'var(--g1)','var(--g3)')}
-        ${mc('Vendido (sc)',nSc(p.vendido),'#1a5c9e','#e8f0fb')}
-        ${mc('Disponível (sc)',nSc(disp),'var(--g1)','var(--g3)')}
         ${mc('Comprometido (sc)',nSc(p.comprometido),'#854F0B','#fff8e1')}
+        ${mc('Disponível (sc)',nSc(disp),'var(--g1)','var(--g3)')}
+        ${mc('Vendido (sc)',nSc(p.vendido),'#1a5c9e','#e8f0fb')}
       </div>
       <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden;margin-top:7px"><div style="height:100%;width:${pct}%;background:var(--a1);border-radius:4px" title="${pct}% comprometido"></div></div>
       <div style="font-size:10px;color:var(--ink3);margin-top:4px;display:flex;justify-content:space-between">
