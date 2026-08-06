@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v100"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v101"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1976,7 +1976,7 @@ async function syncGeral(){
 
 function renderDashGeral(){
   const hoje=new Date().toLocaleDateString('pt-BR');
-  const recHoje=cloudRec.filter(r=>r.data===hoje);
+  const recHoje=cloudRec.filter(r=>r.data===hoje && r.status!=='Excluido');
   const sacasRecHoje=recHoje.reduce((s,r)=>s+(r.sacas||0),0);
   document.getElementById('gc-rec-hoje').textContent=recHoje.length;
   document.getElementById('gc-sacas-rec').textContent=Math.round(sacasRecHoje).toLocaleString('pt-BR');
@@ -2172,7 +2172,7 @@ function renderGcProducao(){
 function renderGraficoRec7dias(){
   const canvas=document.getElementById('dash-chart-rec');if(!canvas)return;
   const ctx=canvas.getContext('2d');const dias=[],vals=[];
-  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toLocaleDateString('pt-BR');dias.push(ds.slice(0,5));vals.push(cloudRec.filter(r=>r.data===ds).length);}
+  for(let i=6;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=d.toLocaleDateString('pt-BR');dias.push(ds.slice(0,5));vals.push(cloudRec.filter(r=>r.data===ds && r.status!=='Excluido').length);}
   const W=canvas.parentElement?.offsetWidth||window.innerWidth-40;canvas.width=W;canvas.height=140;ctx.clearRect(0,0,W,140);
   const max=Math.max(...vals,1);const bw=Math.floor((W-20)/7)-4;const isDark=document.body.classList.contains('dark');const barC=isDark?'#2dd4a0':'#1a5c45';const txtC=isDark?'#888':'#666';
   vals.forEach((v,i)=>{
@@ -5453,10 +5453,11 @@ function selCaminhaoProprio(id) {
 }
 
 function cloudRecFiltrado() {
-  // Admin (bal:0) vê tudo — operador vê só sua balança
+  // Exclui pesagens marcadas como Excluido; admin (bal:0) vê o resto, operador só sua balança
   const bal = usr?.bal || 0;
-  if (bal === 0) return cloudRec;
-  return cloudRec.filter(r => !r.balanca || r.balanca === bal || r.balanca === 0);
+  const base = cloudRec.filter(r => r.status !== 'Excluido');
+  if (bal === 0) return base;
+  return base.filter(r => !r.balanca || r.balanca === bal || r.balanca === 0);
 }
 
 // Tara pode ser substituída se estiver vazia OU se veio do prefill do último registro
@@ -5715,6 +5716,7 @@ function abrirEditarRec(id){
         <div class="f"><label>Observações</label><input id="er-obs" value="${esc(r.obs)}"></div>
         <div id="er-res" style="padding:9px 11px;background:var(--g3);border-radius:8px;font-size:13px;color:var(--g1);margin-bottom:8px"></div>
         <button class="btn btnp" onclick="salvarEditarRec('${id}')">💾 Salvar alterações</button>
+        <button class="btn" onclick="excluirRec('${id}')" style="margin-top:6px;background:none;border:1.5px solid var(--r1);color:var(--r1)">🗑️ Excluir pesagem</button>
         <button class="btn btns" onclick="this.closest('#pg-edit-rec').remove()" style="margin-top:6px">Cancelar</button>
       </div>
     </div>`;
@@ -5730,6 +5732,21 @@ function _erCalc(){
   if(bruto<=0||tara<=0||bruto<=tara){ el.textContent='Informe tara e bruto válidos (bruto > tara)'; return; }
   const c=_recCalc(bruto,tara,u,imp);
   el.innerHTML=`Líquido: <b>${c.liquido.toLocaleString('pt-BR')} kg</b> · <b>${c.sacas} sc</b> · desconto ${(c.du+c.di).toLocaleString('pt-BR')} kg`;
+}
+// Admin: exclui (soft-delete) uma pesagem/recepção — marca status Excluido,
+// sai de todas as listas/estoque; a linha fica marcada na planilha (histórico preservado).
+function excluirRec(id){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Só admin pode excluir'); return; }
+  const r=cloudRec.find(x=>x.id===id); if(!r){ toast('Recepção não encontrada'); return; }
+  if(!confirm(`Excluir a pesagem da placa ${r.placa||'—'} (${r.sacas||0} sc)?\nEla sai das listas e do estoque. A linha fica marcada como Excluída na planilha (histórico preservado).`)) return;
+  r.status='Excluido';
+  r.editadoPor=usr?.nome||''; r.editadoEm=new Date().toLocaleString('pt-BR');
+  localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
+  enviarRec(r); // backend grava status=Excluido na mesma linha (pelo id)
+  const pg=document.getElementById('pg-edit-rec'); if(pg) pg.remove();
+  toast('🗑️ Pesagem excluída');
+  irHistRec();
+  if(typeof atualizarRecHome==='function') atualizarRecHome();
 }
 function salvarEditarRec(id){
   const r=cloudRec.find(x=>x.id===id); if(!r){ toast('Recepção não encontrada'); return; }
