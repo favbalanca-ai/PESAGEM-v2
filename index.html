@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v98"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v99"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5136,9 +5136,16 @@ function atualizarRecHome() {
   // Estoque total
   const saldoTotal = Object.values(estoqueCloud).reduce((s,e) => s + (e.saldo_sc||0), 0);
   document.getElementById('rec-saldo').textContent = Math.round(saldoTotal).toLocaleString('pt-BR');
-  // Cards de estoque
+  // Cards de estoque — painel visível somente para admin
   const el = document.getElementById('rec-estoque-cards');
   if (!el) return;
+  if (!(usr && usr.nivel === 'admin')) {
+    el.style.display = 'none';
+    el.innerHTML = '';
+    updSRec();
+    return;
+  }
+  el.style.display = '';
   const culturas = {};
   (estoqueCloud.estoque||[]).forEach(e => {
     if (!culturas[e.cultura]) culturas[e.cultura] = 0;
