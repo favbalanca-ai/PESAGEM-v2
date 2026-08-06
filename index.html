@@ -1392,7 +1392,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v101"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v102"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5655,8 +5655,57 @@ function irHistRec() {
   const div = document.createElement('div');
   div.id = 'pg-hist-rec';
   div.style.cssText = 'position:fixed;inset:0;background:var(--bg);z-index:150;overflow-y:auto;padding-bottom:20px';
+  const esc = v => String(v==null?'':v).replace(/"/g,'&quot;');
+  const base = cloudRecFiltrado();
+  const culturas = [...new Set(base.map(r => r.cultura).filter(Boolean))].sort();
+  const safras = [...new Set(base.map(r => r.safra).filter(Boolean))];
+  div.innerHTML = `
+    <div class="top"><div class="top-in">
+      <button class="bk" onclick="this.closest('#pg-hist-rec').remove()">‹</button>
+      <h1 class="top-title">Histórico Recepção</h1>
+    </div></div>
+    <div style="padding:12px">
+      <div class="card" style="margin-bottom:10px">
+        <input type="text" id="hr-busca" class="finput" placeholder="🔎 Placa, motorista, talhão, variedade..." oninput="renderHistRec()" style="margin-bottom:8px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+          <select id="hr-cultura" class="finput" onchange="renderHistRec()">
+            <option value="">Todas as culturas</option>
+            ${culturas.map(c => `<option value="${esc(c)}">${c}</option>`).join('')}
+          </select>
+          <select id="hr-safra" class="finput" onchange="renderHistRec()">
+            <option value="">Todas as safras</option>
+            ${safras.map(s => `<option value="${esc(s)}">${_fmtSafra(s)}</option>`).join('')}
+          </select>
+        </div>
+        <div id="hr-resumo" style="font-size:11px;color:var(--ink3);margin-top:8px"></div>
+      </div>
+      <div id="hist-rec-lista"></div>
+    </div>`;
+  document.body.appendChild(div);
+  renderHistRec();
+}
+
+// Renderiza a lista do histórico de recepção aplicando os filtros (busca/cultura/safra)
+function renderHistRec() {
+  const el = document.getElementById('hist-rec-lista');
+  if (!el) return;
   const admRec = !!(usr && usr.nivel === 'admin');
-  const itens = cloudRecFiltrado().map(r => `
+  const q  = (document.getElementById('hr-busca')?.value || '').toLowerCase().trim();
+  const fc = document.getElementById('hr-cultura')?.value || '';
+  const fs = document.getElementById('hr-safra')?.value || '';
+  let ls = cloudRecFiltrado();
+  if (fc) ls = ls.filter(r => r.cultura === fc);
+  if (fs) ls = ls.filter(r => r.safra === fs);
+  if (q) ls = ls.filter(r =>
+    (r.placa||'').toLowerCase().includes(q) ||
+    (r.motorista||'').toLowerCase().includes(q) ||
+    (r.talhaoCod||'').toLowerCase().includes(q) ||
+    (r.cultura||'').toLowerCase().includes(q) ||
+    (r.variedade||'').toLowerCase().includes(q));
+  const totSc = ls.reduce((s,r) => s + (r.sacas||0), 0);
+  const resumo = document.getElementById('hr-resumo');
+  if (resumo) resumo.textContent = `${ls.length} pesagem(ns) · ${Math.round(totSc).toLocaleString('pt-BR')} sc`;
+  el.innerHTML = ls.map(r => `
     <div class="oc" style="margin-bottom:8px${admRec?';cursor:pointer':''}"${admRec?` onclick="abrirEditarRec('${r.id}')"`:''}>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
         <div class="plc" style="font-size:16px">${r.placa}</div>
@@ -5666,14 +5715,7 @@ function irHistRec() {
       <div class="oi">⚖️ Liq: <b style="color:var(--g1)">${Math.round(r.pesoLiquidoKg||0).toLocaleString('pt-BR')} kg · ${r.sacas||0} sc</b></div>
       <div class="oi">💧 U: ${r.umidade||0}% · I: ${r.impureza||0}%</div>
       ${admRec?'<div style="text-align:right;font-size:10px;color:var(--g1);font-weight:700;margin-top:2px">✏️ Editar</div>':''}
-    </div>`).join('') || '<div class="emp"><div class="ei">📋</div><p>Nenhuma recepção registrada</p></div>';
-  div.innerHTML = `
-    <div class="top"><div class="top-in">
-      <button class="bk" onclick="this.closest('#pg-hist-rec').remove()">‹</button>
-      <h1 class="top-title">Histórico Recepção</h1>
-    </div></div>
-    <div style="padding:12px">${itens}</div>`;
-  document.body.appendChild(div);
+    </div>`).join('') || '<div class="emp"><div class="ei">📋</div><p>Nenhuma pesagem encontrada</p></div>';
 }
 
 /* ── RECEPÇÃO: editar ticket (admin) ── */
