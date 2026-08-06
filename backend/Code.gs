@@ -73,6 +73,8 @@ function doPost(e){
     if(d.acao==="salvarTalhao")       return resposta(salvarTalhao(d.talhao));
     if(d.acao==="listarTalhoes")      return resposta(listarTalhoes());
     if(d.acao==="delTalhao")          return resposta(delTalhao(d.cod));
+    if(d.acao==="listarPermissoes")   return resposta(listarPermissoes());
+    if(d.acao==="salvarPermissoes")   return resposta(salvarPermissoes(d.permissoes));
     if(d.acao==="listarEstoque")      return resposta(listarEstoque());
     if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
@@ -732,6 +734,48 @@ function delTalhao(cod){
   var cods=sh.getRange(2,1,sh.getLastRow()-1,1).getValues();
   for(var i=0;i<cods.length;i++){if(s(cods[i][0])===s(cod)){sh.getRange(i+2,8).setValue("Nao");return{ok:true};}}
   return{ok:false};
+}
+
+// ══════════════════════════════════════════════════════════════
+// PERMISSÕES (Funcionários) — sincroniza acesso/balança entre aparelhos
+// ══════════════════════════════════════════════════════════════
+function _shPermissoes(){
+  var ss=SpreadsheetApp.openById(PLANILHA_ID);
+  var sh=ss.getSheetByName("Permissoes");
+  if(!sh){
+    sh=ss.insertSheet("Permissoes");
+    sh.appendRow(["Email","Modulos","Balanca","Atualizado"]);
+    sh.getRange(1,1,1,4).setFontWeight("bold");
+  }
+  return sh;
+}
+
+function listarPermissoes(){
+  var sh=_shPermissoes();
+  if(sh.getLastRow()<2)return{ok:true,permissoes:[]};
+  var dados=sh.getRange(2,1,sh.getLastRow()-1,3).getValues();
+  var lista=[];
+  for(var i=0;i<dados.length;i++){
+    var email=s(dados[i][0]);if(!email)continue;
+    lista.push({email:email, modulos:s(dados[i][1]), bal:n(dados[i][2])});
+  }
+  return{ok:true,permissoes:lista};
+}
+
+function salvarPermissoes(permissoes){
+  var sh=_shPermissoes();
+  // Sobrescreve toda a lista (o app envia o conjunto completo); mantém o cabeçalho
+  if(sh.getLastRow()>1)sh.getRange(2,1,sh.getLastRow()-1,sh.getLastColumn()).clearContent();
+  if(!permissoes||!permissoes.length)return{ok:true};
+  var linhas=[];
+  for(var i=0;i<permissoes.length;i++){
+    var p=permissoes[i];if(!p||!p.email)continue;
+    var mods=p.modulos;
+    if(Object.prototype.toString.call(mods)==="[object Array]")mods=mods.join(",");
+    linhas.push([s(p.email), s(mods), n(p.bal), agora()]);
+  }
+  if(linhas.length)sh.getRange(2,1,linhas.length,4).setValues(linhas);
+  return{ok:true,salvos:linhas.length};
 }
 
 // ══════════════════════════════════════════════════════════════
