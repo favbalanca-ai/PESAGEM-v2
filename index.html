@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v106"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v107"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2045,17 +2045,21 @@ function _estoqueLocal(){
     vendGrupo[g]=(vendGrupo[g]||0)+entSc;                // vendido = tudo expedido (não limita)
     compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-entSc); // comprometido = saldo restante
   });
-  // Distribui o vendido proporcional às entradas de cada safra; saldo = entradas - vendido
+  // Total de entradas POR GRUPO (não por cultura) — para distribuir o vendido do
+  // grupo sem contar em dobro quando 2 culturas caem no mesmo grupo (ex.: Milho e Milho Safrinha).
+  var grupoTot={};
+  Object.keys(rows).forEach(function(k){ var g=_grupoKey(rows[k].cultura); grupoTot[g]=(grupoTot[g]||0)+rows[k].entradas_sc; });
+  // Distribui o vendido do GRUPO proporcional às entradas de cada linha; saldo = entradas - vendido
   Object.keys(rows).forEach(function(k){
-    var row=rows[k], g=_grupoKey(row.cultura), tot=culturaTot[row.cultura]||0;
+    var row=rows[k], g=_grupoKey(row.cultura), tot=grupoTot[g]||0;
     var vend=(vendGrupo[g]||0)*(tot>0?row.entradas_sc/tot:0);
     row.saidas_sc=vend; row.saldo_sc=Math.max(0,row.entradas_sc-vend);
   });
-  // Comprometido por cultura (chave "safra|cultura" — usa 1ª ocorrência da cultura)
+  // Comprometido POR GRUPO (uma vez por grupo, na 1ª linha daquele grupo)
   var comp={}, jaComp={};
   Object.keys(rows).forEach(function(k){
-    var cultura=rows[k].cultura; if(jaComp[cultura])return; jaComp[cultura]=1;
-    comp[k]={comprometido_sc:compGrupo[_grupoKey(cultura)]||0};
+    var g=_grupoKey(rows[k].cultura); if(jaComp[g])return; jaComp[g]=1;
+    comp[k]={comprometido_sc:compGrupo[g]||0};
   });
   return {estoque:Object.values(rows), comprometido:comp};
 }
@@ -2101,14 +2105,15 @@ function renderGcEstoque(elId){
   const nSc=v=>Math.round(v||0).toLocaleString('pt-BR');
   const nR$=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   // Consolida por PRODUTO (cultura), somando todas as safras
+  // Consolida por GRUPO de produtos (soma culturas do mesmo grupo — ex.: Milho + Milho Safrinha)
   const prod={};
   est.forEach(e=>{
-    const c=(e.cultura||'?');
-    if(!prod[c])prod[c]={cultura:c,estoque:0,vendido:0,entradas:0,comprometido:0,safras:{}};
-    prod[c].estoque+=e.saldo_sc||0; prod[c].vendido+=e.saidas_sc||0; prod[c].entradas+=e.entradas_sc||0;
-    if(e.safra)prod[c].safras[e.safra]=1;
+    const c=(e.cultura||'?'), g=_grupoKey(c);
+    if(!prod[g])prod[g]={cultura:c,estoque:0,vendido:0,entradas:0,comprometido:0,safras:{}};
+    prod[g].estoque+=e.saldo_sc||0; prod[g].vendido+=e.saidas_sc||0; prod[g].entradas+=e.entradas_sc||0;
+    if(e.safra)prod[g].safras[e.safra]=1;
   });
-  Object.keys(comp).forEach(k=>{const c=k.split('|')[1]; if(prod[c])prod[c].comprometido+=comp[k]?.comprometido_sc||0;});
+  Object.keys(comp).forEach(k=>{const c=k.split('|')[1], g=_grupoKey(c); if(prod[g])prod[g].comprometido+=comp[k]?.comprometido_sc||0;});
   const lista=Object.values(prod).sort((a,b)=>b.estoque-a.estoque);
   const mc=(lbl,val,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px"><div style="font-weight:800;color:${cor};font-size:12px">${val}</div><div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div></div>`;
   let tE=0,tV=0,tC=0,tD=0,tVal=0;
