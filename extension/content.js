@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.1 (valor c/ input escondido + Condicionante pós-dispositivo + limite de Adicionar)
+// FAV NFA - Content Script v7.2 (Observações Complementares do contrato antes do Adicionar)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -725,9 +725,26 @@ async function etapa_Produtos(dados) {
         logFAV('Pós-dispositivo → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"');
       } else await wait(500);
 
-      if (prod.obs) {
-        const ta = document.querySelector('textarea[id*="observacao"],textarea[id*="Observacao"]');
-        if (ta) { ta.value = prod.obs; ta.dispatchEvent(new Event('change',{bubbles:true})); }
+      // 5.5) Observações Complementares (aba Produtos) — o texto vem do CONTRATO
+      //      (info_complementar). Sequência da página: ... dispositivo legal →
+      //      informações complementares → Adicionar.
+      const obsTexto = String(dados.info_complementar || prod.obs || '').trim();
+      if (obsTexto) {
+        const ta = [...document.querySelectorAll('textarea')].find(t =>
+          t.offsetParent !== null && /observac|complement/i.test((t.id||'') + ' ' + (t.name||'')));
+        if (ta) {
+          if (String(ta.value||'').trim() !== obsTexto) {
+            ta.focus();
+            ta.value = obsTexto;
+            ['input','change','keyup','blur'].forEach(ev => ta.dispatchEvent(new Event(ev, { bubbles: true })));
+            logFAV('Observações complementares preenchidas ✓ (' + obsTexto.length + ' caracteres)');
+          } else {
+            logFAV('Observações complementares já preenchidas ✓');
+          }
+          await wait(700);
+        } else {
+          logFAV('Observações: textarea não encontrado nesta tela — seguindo');
+        }
       }
 
       // 6) Adicionar — só com TODOS os campos ok; conta tentativas em sessionStorage
