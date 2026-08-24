@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.3 (anti-duplicação: checa a tabela antes de cada clique em Adicionar)
+// FAV NFA - Content Script v7.4 (confirma Condicionante na entrada da etapa Produtos + log neutro)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -361,7 +361,7 @@ async function confirmarCaixa(timeout = 8000) {
     }
     await wait(400);
   }
-  logFAV('confirmarCaixa: caixa não encontrada/confirmada no tempo');
+  logFAV('sem caixa de confirmação pendente (ok)');
   return false;
 }
 
@@ -604,6 +604,11 @@ async function selecionarDispositivoLegal(valorContrato) {
 async function etapa_Produtos(dados) {
   atualizarStatus('Produtos: preenchendo...');
   await wait(DELAY);
+  // Condicionante pendente do Adicionar anterior? Confirma JÁ — a gravação do
+  // produto completa aqui, e o check abaixo encontra a tabela preenchida
+  // (corta a re-verificação de todos os campos após o reload).
+  await confirmarCaixa(4000);
+  await wait(600);
   const jaAdicionado = [...document.querySelectorAll('table, .ui-datatable')].some(t => {
     const txt = (t.textContent||'');
     if (/nenhum produto adicionado/i.test(txt)) return false;
