@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.2 (Observações Complementares do contrato antes do Adicionar)
+// FAV NFA - Content Script v7.3 (anti-duplicação: checa a tabela antes de cada clique em Adicionar)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -764,6 +764,14 @@ async function etapa_Produtos(dados) {
       }
       try { sessionStorage.setItem('fav_nfa_add_tent', String(addTent + 1)); } catch(e){}
       await confirmarCaixa(3000); // caixa pendente antes do Adicionar
+      // Anti-duplicação: se o produto JÁ entrou na tabela (ex.: o clique anterior
+      // gravou mas a página recarregou antes da verificação), NÃO clica de novo.
+      if (produtoNaTabela()) {
+        logFAV('Produto já está na tabela — não clico Adicionar de novo (anti-duplicação)');
+        adicionadoOk = true;
+        try { sessionStorage.removeItem('fav_nfa_add_tent'); } catch(e){}
+        break;
+      }
       atualizarStatus('Produto: adicionando... (tentativa ' + (addTent + 1) + ')');
       await wait(500);
       const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null && !b.disabled);
