@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.0 (skip compara com o VALOR desejado via label visível)
+// FAV NFA - Content Script v7.1 (valor c/ input escondido + Condicionante pós-dispositivo + limite de Adicionar)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -182,6 +182,20 @@ function atualizarStatus(msg, tipo = 'info') {
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
+// Preenche um campo NUMÉRICO do PrimeFaces: seta TODOS os inputs com o id
+// (inclusive o hidden _hinput que é o que vai pro servidor) e dispara blur.
+function setCampoNumero(idParcial, valor) {
+  const els = [...document.querySelectorAll('input')].filter(i => i.id && i.id.includes(idParcial));
+  if (!els.length || valor === undefined || valor === null || valor === '') return false;
+  els.forEach(el => {
+    try {
+      el.focus && el.focus();
+      el.value = valor;
+      ['input','change','keyup','blur'].forEach(ev => el.dispatchEvent(new Event(ev, { bubbles: true })));
+    } catch (e) {}
+  });
+  return true;
+}
 function setInputPorId(idParcial, valor) {
   const el = [...document.querySelectorAll('input')].find(i => i.id && i.id.includes(idParcial) && i.offsetParent !== null);
   if (!el || valor === undefined || valor === null || valor === '') return false;
@@ -599,6 +613,7 @@ async function etapa_Produtos(dados) {
     });
   });
   if (jaAdicionado) {
+    try { sessionStorage.removeItem('fav_nfa_add_tent'); } catch(e){}
     atualizarStatus('Produto já adicionado. Indo para Continuar...');
     await wait(800); await irParaContinuarProdutos(); return;
   }
@@ -684,32 +699,30 @@ async function etapa_Produtos(dados) {
         await wait(5000);
       }
 
-      // 4) Quantidade e Valor — ordem do formulário: ANTES do dispositivo legal
-      let okCampos = false;
-      for (let tent = 1; tent <= 4 && !okCampos; tent++) {
-        if (lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '') {
-          atualizarStatus('Produto: quantidade e valor já preenchidos ✓');
-          okCampos = true; break;
-        }
-        atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
-        await confirmarCaixa(2500); // popup atrasado (ex.: Condicionante) trava a tela
-        if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
-        if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); }
-        await wait(900); await aguardarSefazLivre(6000);
-        okCampos = lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '';
-        if (!okCampos) await wait(1500);
+      // 4) Quantidade e Valor — SEMPRE re-aplica com o setter robusto (o campo do
+      //    SEFAZ tem input escondido que vai pro servidor; só o visível não basta)
+      atualizarStatus('Produto: quantidade e valor...');
+      await confirmarCaixa(2500); // popup atrasado trava a tela
+      setCampoNumero('quantidadeProduto', qtdStr); await wait(700);
+      setCampoNumero('valorUnitarioProduto', valStr); await wait(900);
+      await aguardarSefazLivre(6000);
+      logFAV('Campos lidos → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"');
+      if (lerCampo('quantidadeProduto') === '' || lerCampo('valorUnitarioProduto') === '') {
+        setCampoNumero('quantidadeProduto', qtdStr); await wait(700);
+        setCampoNumero('valorUnitarioProduto', valStr); await wait(900);
       }
-      if (!okCampos) continue; // rodada seguinte re-avalia tudo
 
-      // 5) Dispositivo Legal — por ÚLTIMO entre os selects (sequência da página:
-      //    grupo → operação → produto → quantidade → valor → dispositivo legal).
-      //    Se o postback dele limpar qtd/valor, re-preenche logo em seguida.
+      // 5) Dispositivo Legal — por ÚLTIMO entre os selects (sequência da página).
+      //    A caixa "Condicionante" costuma aparecer DEPOIS dele → janela LONGA.
       atualizarStatus('Produto: dispositivo legal...');
       const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
       if (usouDispLegal) {
-        await aguardarSefazLivre(15000); await wait(2000);
-        if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
-        if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); await wait(600); }
+        await confirmarCaixa(12000);        // Condicionante pós-dispositivo (Aceito os Termos)
+        await aguardarSefazLivre(15000); await wait(1500);
+        // o postback pode limpar qtd/valor — re-aplica
+        setCampoNumero('quantidadeProduto', qtdStr); await wait(600);
+        setCampoNumero('valorUnitarioProduto', valStr); await wait(800);
+        logFAV('Pós-dispositivo → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"');
       } else await wait(500);
 
       if (prod.obs) {
@@ -717,20 +730,33 @@ async function etapa_Produtos(dados) {
         if (ta) { ta.value = prod.obs; ta.dispatchEvent(new Event('change',{bubbles:true})); }
       }
 
-      // 5) Só clica Adicionar com TODOS os campos ok (selects + qtd/valor)
+      // 6) Adicionar — só com TODOS os campos ok; conta tentativas em sessionStorage
+      //    (sobrevive ao reload do SEFAZ — sem isso o reload zera o contador e vira loop)
       if (!selTexto('grupoProduto') || !selTexto('naturezaOperacaoAdmin') || !selTexto('nomeProdutoAdmin')) {
         atualizarStatus('Produto: um dos campos resetou — reavaliando...');
         continue; // rodada seguinte re-seleciona o que faltar
       }
-      atualizarStatus('Produto: adicionando...');
+      let addTent = 0;
+      try { addTent = parseInt(sessionStorage.getItem('fav_nfa_add_tent') || '0', 10) || 0; } catch(e){}
+      if (addTent >= 3) {
+        try { sessionStorage.removeItem('fav_nfa_add_tent'); } catch(e){}
+        window.__FAV_NFA_PARAR__ = true;
+        try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
+        atualizarStatus('⚠️ O Adicionar recarregou a página 3x sem gravar o produto. CONFIRA na tela: Valor Unitário (' + valStr + '), a caixa "Aceito os Termos" se aparecer, e clique Adicionar manualmente. Depois "▶ Continuar IA".', 'aviso');
+        throw new Error('PARADO_PELO_USUARIO');
+      }
+      try { sessionStorage.setItem('fav_nfa_add_tent', String(addTent + 1)); } catch(e){}
+      await confirmarCaixa(3000); // caixa pendente antes do Adicionar
+      atualizarStatus('Produto: adicionando... (tentativa ' + (addTent + 1) + ')');
       await wait(500);
       const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null && !b.disabled);
       if (btnAdd) { btnAdd.click(); await wait(DELAY); }
       await aguardarSefazLivre(20000);
-      await confirmarCaixa(6000);
+      await confirmarCaixa(8000);
       await aguardarSefazLivre(20000);
       await wait(2000);
       adicionadoOk = produtoNaTabela();
+      if (adicionadoOk) { try { sessionStorage.removeItem('fav_nfa_add_tent'); } catch(e){} }
     }
 
     if (!adicionadoOk) {
