@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v105"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v106"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3013,8 +3013,9 @@ function loadContratosNFADaPlanilha(){
 
 function rContratosNFA(){
   var el=document.getElementById('lst-nc'); if(!el) return;
+  var adm=!!(usr && usr.nivel==='admin');
   if(!contratosNFA.length){el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:14px">Nenhum contrato NFA.<br>Cadastre acima ou toque ☁️ para carregar.</div>';return;}
-  el.innerHTML=contratosNFA.map(function(c){
+  el.innerHTML=contratosNFA.map(function(c,i){
     var cor=c.status==='Ativo'?'var(--g1)':'var(--ink3)';
     return '<div style="border:1.5px solid var(--brd);border-radius:var(--r2px);padding:11px 13px;margin-bottom:8px">'+
       '<div style="display:flex;justify-content:space-between;align-items:center">'+
@@ -3023,8 +3024,111 @@ function rContratosNFA(){
       '<div style="font-size:12px;color:var(--ink2);margin-top:3px">'+c.emitente+' → '+c.destinatario_nome+'</div>'+
       '<div style="font-size:11px;color:var(--ink3);margin-top:2px">'+(c.produto||'')+' · R$ '+Number(c.valor_unitario||0).toFixed(4)+'/'+(c.unidade||'KG')+
       ' · Saldo: '+Number(c.saldo||0).toLocaleString('pt-BR')+'</div>'+
+      (adm ? '<button onclick="abrirEditarContrato('+i+')" class="btn btns" style="margin-top:9px;padding:8px;font-size:12px">✏️ Editar contrato</button>' : '')+
       '</div>';
   }).join('');
+}
+
+/* ══ EDIÇÃO COMPLETA DE CONTRATO (Admin) ═══════════════════════ */
+function abrirEditarContrato(idx){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Só admin pode editar contratos'); return; }
+  var c=contratosNFA[idx];
+  if(!c){ toast('Contrato não encontrado'); return; }
+  var ex=document.getElementById('pg-edit-ctr'); if(ex) ex.remove();
+  var esc=function(v){return String(v==null?'':v).replace(/"/g,'&quot;');};
+  var selSty="width:100%;padding:10px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-family:'Inter',sans-serif;font-size:14px;-webkit-appearance:none;background:var(--card);color:var(--ink)";
+  var opt=function(vals,cur){return vals.map(function(v){return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+v+'</option>';}).join('');};
+  var div=document.createElement('div');
+  div.id='pg-edit-ctr';
+  div.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:160;overflow-y:auto;padding-bottom:40px';
+  div.innerHTML=
+    '<div class="top"><div class="top-in">'+
+      '<button class="bk" onclick="this.closest(\'#pg-edit-ctr\').remove()">‹</button>'+
+      '<h1 class="top-title">✏️ Editar Contrato</h1>'+
+    '</div></div>'+
+    '<div style="padding:12px"><div class="card">'+
+      '<div class="f"><label>Número do Contrato</label><input id="ec-id" value="'+esc(c.id)+'" readonly style="background:var(--bg);color:var(--ink2)"></div>'+
+      '<div class="f"><label>Emitente</label><select id="ec-emit" style="'+selSty+'">'+opt(['JOVANE','JOAQUIM','TAIS','JOAO'],c.emitente)+'</select></div>'+
+      '<div class="f"><label>Tipo de Nota</label><select id="ec-tipo" style="'+selSty+'">'+opt(['NORMAL','GADO'],c.tipo_nota||'NORMAL')+'</select></div>'+
+      '<div class="f"><label>Destinatário — Nome</label><input id="ec-nome" value="'+esc(c.destinatario_nome)+'" style="text-transform:uppercase"></div>'+
+      '<div class="f"><label>CNPJ</label><input id="ec-cnpj" value="'+esc(c.destinatario_cnpj)+'"></div>'+
+      '<div class="f"><label>Inscrição Estadual</label><input id="ec-ie" value="'+esc(c.destinatario_ie)+'"></div>'+
+      '<div class="f"><label>E-mail</label><input id="ec-email" value="'+esc(c.destinatario_email)+'"></div>'+
+      '<div class="f"><label>WhatsApp</label><input id="ec-wa" value="'+esc(c.destinatario_whatsapp)+'" placeholder="5561999990000"></div>'+
+      '<div class="f"><label>Grupo</label><input id="ec-grupo" value="'+esc(c.grupo_produto)+'"></div>'+
+      '<div class="f"><label>Tipo de Operação</label><input id="ec-tipoop" value="'+esc(c.tipo_operacao)+'"></div>'+
+      '<div class="f"><label>Dispositivo Legal</label><input id="ec-displegal" value="'+esc(c.dispositivo_legal)+'"></div>'+
+      '<div class="f"><label>Produto</label><input id="ec-produto" value="'+esc(c.produto)+'"></div>'+
+      '<div class="f"><label>Unidade</label><select id="ec-unidade" style="'+selSty+'">'+opt(['KG','T','SC','CABECA'],c.unidade||'KG')+'</select></div>'+
+      '<div class="f"><label>Valor Unitário (R$)</label><input id="ec-valor" type="number" step="0.0001" min="0" value="'+(c.valor_unitario||0)+'"></div>'+
+      '<div class="f"><label>Volume Total</label><input id="ec-vol" type="number" step="1" min="0" value="'+(c.volume_total||0)+'"></div>'+
+      '<div class="f"><label>Volume já entregue</label><input id="ec-ventregue" type="number" step="0.01" min="0" value="'+(c.volume_entregue||0)+'"><div style="font-size:10px;color:var(--ink3);margin-top:3px">O saldo é recalculado (Total − Entregue).</div></div>'+
+      '<div class="f"><label>Safra</label><input id="ec-safra" value="'+esc(c.safra)+'"></div>'+
+      '<div class="f"><label>Origem (Município / UF)</label><input id="ec-origem" value="'+esc(c.origem_mercadoria)+'"></div>'+
+      '<div class="f"><label>Responsável pelo Frete</label><select id="ec-frete" style="'+selSty+'">'+opt(['Destinatário','Remetente','Sem Frete'],c.responsavel_frete||'Destinatário')+'</select></div>'+
+      '<div class="f"><label>Balança</label><select id="ec-bal" style="'+selSty+'"><option value="1"'+((Number(c.balanca)||1)===1?' selected':'')+'>Balança 1 — Água Viva</option><option value="2"'+(Number(c.balanca)===2?' selected':'')+'>Balança 2 — Espora</option></select></div>'+
+      '<div class="f"><label>Informações Complementares (NFA)</label><input id="ec-info" value="'+esc(c.info_complementar)+'"></div>'+
+      '<div class="f"><label>Obs</label><input id="ec-obs" value="'+esc(c.obs)+'"></div>'+
+      '<div class="f"><label>Status</label><select id="ec-status" style="'+selSty+'">'+opt(['Ativo','Inativo'],c.status||'Ativo')+'</select></div>'+
+      '<button class="btn btnp" onclick="salvarEditarContrato('+idx+')">💾 Salvar alterações</button>'+
+      '<button class="btn btns" onclick="this.closest(\'#pg-edit-ctr\').remove()" style="margin-top:6px">Cancelar</button>'+
+    '</div></div>';
+  document.body.appendChild(div);
+}
+
+function salvarEditarContrato(idx){
+  var c=contratosNFA[idx]; if(!c){ toast('Contrato não encontrado'); return; }
+  var g=function(id){return document.getElementById(id);};
+  var nome=(g('ec-nome').value||'').trim();
+  if(!nome){ toast('⚠️ Informe o destinatário'); return; }
+  var dados={
+    id: c.id,
+    linha: c.linha,               // backend atualiza EXATAMENTE esta linha
+    criado_em: c.criado_em,       // preserva a data de criação
+    status: g('ec-status').value,
+    volume_entregue: parseFloat(g('ec-ventregue').value)||0,
+    emitente: g('ec-emit').value,
+    tipo_nota: g('ec-tipo').value,
+    destinatario_nome: nome,
+    destinatario_cnpj: g('ec-cnpj').value.trim(),
+    destinatario_ie: g('ec-ie').value.trim(),
+    destinatario_email: g('ec-email').value.trim(),
+    destinatario_whatsapp: g('ec-wa').value.replace(/\D/g,''),
+    grupo_produto: g('ec-grupo').value.trim(),
+    tipo_operacao: g('ec-tipoop').value.trim(),
+    dispositivo_legal: g('ec-displegal').value.trim(),
+    produto: g('ec-produto').value.trim(),
+    unidade: g('ec-unidade').value,
+    valor_unitario: parseFloat(g('ec-valor').value)||0,
+    volume_total: parseFloat(g('ec-vol').value)||0,
+    safra: g('ec-safra').value.trim(),
+    origem_mercadoria: g('ec-origem').value.trim(),
+    responsavel_frete: g('ec-frete').value,
+    info_complementar: g('ec-info').value.trim(),
+    balanca: parseInt(g('ec-bal').value)||1,
+    obs: g('ec-obs').value.trim(),
+    // preserva campos que não estão no formulário
+    wa_classificador: c.wa_classificador||'',
+    wa_comprador: c.wa_comprador||'',
+    email_classificador: c.email_classificador||'',
+    email_comprador: c.email_comprador||''
+  };
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — edição de contrato exige internet'); return; }
+  toast('⏳ Salvando contrato...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'salvarContratoNFA',dados:dados,token:TOKEN})})
+    .then(function(r){return r.text();})
+    .then(function(t){
+      try{
+        var j=JSON.parse(t);
+        if(j.ok){
+          toast('✅ Contrato atualizado!');
+          var pg=document.getElementById('pg-edit-ctr'); if(pg) pg.remove();
+          loadContratosNFADaPlanilha();
+        }else{ toast('❌ '+(j.erro||'erro ao salvar')); }
+      }catch(e){ toast('❌ Erro ao processar resposta'); }
+    })
+    .catch(function(){ toast('❌ Sem conexão ao salvar'); });
 }
 
 /* ══ SCANNER CNH / DOCUMENTO ═══════════════════════════════════ */
