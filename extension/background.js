@@ -74,6 +74,7 @@ function injetarComDados(tabId, tentativa) {
           if (limpar) {
             window.__FAV_NFA_PARAR__ = false;
             try { sessionStorage.removeItem('fav_nfa_parar'); } catch(e){}
+            try { sessionStorage.removeItem('fav_nfa_log'); } catch(e){} // log zera a cada emissão nova
           }
         },
         args: [dados, ehNova]
