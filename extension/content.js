@@ -1,10 +1,24 @@
-// FAV NFA - Content Script v6.6 (execução única + produtos em rodadas com reavaliação)
+// FAV NFA - Content Script v6.7 (log persistente + botão Copiar log)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
   window.__FAV_NFA_LOADED__ = true;
 
 const DELAY = 900;
+
+// ─── LOG PERSISTENTE (sobrevive aos reloads da SEFAZ; botão 📋 Copiar log) ────
+function logFAV() {
+  const args = [...arguments];
+  console.log.apply(console, ['[FAV NFA]'].concat(args));
+  try {
+    const ts = new Date().toLocaleTimeString('pt-BR');
+    const linha = ts + '  ' + args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ').replace(/<[^>]+>/g, ' ').trim();
+    const log = JSON.parse(sessionStorage.getItem('fav_nfa_log') || '[]');
+    log.push(linha);
+    while (log.length > 800) log.shift();
+    sessionStorage.setItem('fav_nfa_log', JSON.stringify(log));
+  } catch (e) {}
+}
 
 function wait(ms) {
   return new Promise((resolve, reject) => {
@@ -99,7 +113,7 @@ let _overlay = null;
 let _ultimaMsg = '', _ultimoTipo = 'info';
 function atualizarStatus(msg, tipo = 'info') {
   _ultimaMsg = msg; _ultimoTipo = tipo;
-  console.log('[FAV NFA]', typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
+  logFAV( typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
   if (!_overlay) {
     _overlay = document.createElement('div');
     _overlay.id = 'fav-nfa-overlay';
@@ -115,7 +129,10 @@ function atualizarStatus(msg, tipo = 'info') {
     '<button id="fav-btn-parar" style="flex:1;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⛔ PARAR</button>' +
     '<button id="fav-btn-continuar" style="flex:1;padding:8px;background:#1a6c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">▶ Continuar IA</button>' +
     '</div>' +
-    '<button id="fav-btn-pular" style="width:100%;margin-top:6px;padding:7px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⏭️ Pular campo</button>';
+    '<div style="display:flex;gap:6px;margin-top:6px">' +
+    '<button id="fav-btn-pular" style="flex:1;padding:7px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⏭️ Pular campo</button>' +
+    '<button id="fav-btn-log" style="flex:1;padding:7px;background:#546e8f;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📋 Copiar log</button>' +
+    '</div>';
   const bp = _overlay.querySelector('#fav-btn-parar');
   if (bp) bp.onclick = () => {
     window.__FAV_NFA_PARAR__ = true;
@@ -141,6 +158,25 @@ function atualizarStatus(msg, tipo = 'info') {
     window.__FAV_NFA_PULAR__ = true;  // faz a espera atual desistir e seguir ao próximo campo
     const m = _overlay.querySelector('#fav-status-msg');
     if (m) m.textContent = '⏭️ Pulando o campo atual...';
+  };
+  const blog = _overlay.querySelector('#fav-btn-log');
+  if (blog) blog.onclick = () => {
+    let txt = '';
+    try {
+      const log = JSON.parse(sessionStorage.getItem('fav_nfa_log') || '[]');
+      txt = '=== FAV Automação NFA — LOG (' + log.length + ' linhas · ' + new Date().toLocaleString('pt-BR') + ' · ' + location.href + ') ===\n' + log.join('\n');
+    } catch (e) { txt = '(log vazio)'; }
+    const feito = () => { blog.textContent = '✓ Copiado!'; setTimeout(() => { blog.textContent = '📋 Copiar log'; }, 1600); };
+    const fallback = () => {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = txt; ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta); feito();
+      } catch (e) { blog.textContent = '⚠️ Falhou'; setTimeout(() => { blog.textContent = '📋 Copiar log'; }, 1600); }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(feito).catch(fallback);
+    else fallback();
   };
 }
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
@@ -269,13 +305,13 @@ async function confirmarCaixa(timeout = 8000) {
       var chkBox = dlgCond.querySelector('.ui-chkbox-box');
       var marcado = chk ? chk.checked : (chkBox && /ui-state-active/.test(chkBox.className||''));
       if (!marcado) {
-        console.log('[FAV NFA] confirmarCaixa: Condicionante -> marcando "Aceito os Termos"');
+        logFAV('confirmarCaixa: Condicionante -> marcando "Aceito os Termos"');
         if (chkBox) clicarRobusto(chkBox); else if (chk) clicarRobusto(chk);
         await wait(700);
       }
       var bC = acharBotaoConfirmar(dlgCond);
       if (bC) {
-        console.log('[FAV NFA] confirmarCaixa: Condicionante -> Confirmar');
+        logFAV('confirmarCaixa: Condicionante -> Confirmar');
         clicarRobusto(bC);
         await wait(1200);
         var dC2 = [...document.querySelectorAll('.ui-dialog, .ui-confirm-dialog, [id*="ondicionante"]')]
@@ -299,7 +335,7 @@ async function confirmarCaixa(timeout = 8000) {
     }
 
     if (alvo) {
-      console.log('[FAV NFA] confirmarCaixa: CONFIRMAR ->', alvo.id, '| txt:', (alvo.textContent||alvo.value||'').trim());
+      logFAV('confirmarCaixa: CONFIRMAR ->', alvo.id, '| txt:', (alvo.textContent||alvo.value||'').trim());
       clicarRobusto(alvo);
       await wait(1200);
       // verifica se a caixa CFOP fechou
@@ -311,7 +347,7 @@ async function confirmarCaixa(timeout = 8000) {
     }
     await wait(400);
   }
-  console.log('[FAV NFA] confirmarCaixa: caixa não encontrada/confirmada no tempo');
+  logFAV('confirmarCaixa: caixa não encontrada/confirmada no tempo');
   return false;
 }
 
@@ -516,30 +552,30 @@ async function etapa_Transporte(dados) {
 async function selecionarDispositivoLegal(valorContrato) {
   // localiza o <select> nativo do Dispositivo Legal
   const sel = document.getElementById('form:tabView:dispositivoLegalProduto_input');
-  if (!sel) { console.log('[FAV NFA] Dispositivo Legal: campo não existe, pulando'); return false; }
+  if (!sel) { logFAV('Dispositivo Legal: campo não existe, pulando'); return false; }
 
   // campo desabilitado = não há dispositivo legal para esta operação (ex: vendas 5101) -> PULA
-  if (sel.disabled) { console.log('[FAV NFA] Dispositivo Legal: desabilitado (venda/sem benefício), pulando'); return false; }
+  if (sel.disabled) { logFAV('Dispositivo Legal: desabilitado (venda/sem benefício), pulando'); return false; }
 
   // opções reais (descarta o placeholder e o "Nenhum...")
   const opcoes = [...sel.options].map(o => (o.text||'').trim());
   const temReais = opcoes.some(t => t &&
     !/^selecione somente/i.test(t) &&
     !/nenhum dispositivo legal/i.test(t));
-  if (!temReais) { console.log('[FAV NFA] Dispositivo Legal: só placeholder, pulando'); return false; }
+  if (!temReais) { logFAV('Dispositivo Legal: só placeholder, pulando'); return false; }
 
   // se o contrato não informou um dispositivo legal, deixa no placeholder (não obrigatório)
-  if (!valorContrato) { console.log('[FAV NFA] Dispositivo Legal: habilitado mas contrato não informou — deixando em branco'); return false; }
+  if (!valorContrato) { logFAV('Dispositivo Legal: habilitado mas contrato não informou — deixando em branco'); return false; }
 
   // JÁ SELECIONADO (sobreviveu a um reload)? Não re-seleciona — evita novo postback/loop.
   const atualSel = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
   if (atualSel && !/^selecione somente/i.test(atualSel) && !/nenhum dispositivo legal/i.test(atualSel)) {
-    console.log('[FAV NFA] Dispositivo Legal: já selecionado ✓ ("' + atualSel + '")');
+    logFAV('Dispositivo Legal: já selecionado ✓ ("' + atualSel + '")');
     return false;
   }
 
   // seleciona via PrimeFaces pelo texto do contrato
-  console.log('[FAV NFA] Dispositivo Legal: selecionando "' + valorContrato + '"');
+  logFAV('Dispositivo Legal: selecionando "' + valorContrato + '"');
   const ok = await selecionarPrimeFaces('dispositivoLegalProduto', valorContrato);
   if (!ok) setSelectPorId('dispositivoLegalProduto', valorContrato);
   await confirmarCaixa(5000);
@@ -756,7 +792,7 @@ async function detectarPaginaEExecutar(dados) {
 // ainda ativa) — elas se atropelam nos postbacks e o formulário reseta em loop.
 async function executarUnico(dados) {
   if (window.__FAV_NFA_EXECUTANDO__) {
-    console.log('[FAV NFA] Já existe uma execução ativa — não inicio outra.');
+    logFAV('Já existe uma execução ativa — não inicio outra.');
     return;
   }
   window.__FAV_NFA_EXECUTANDO__ = true;
