@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.7 (log persistente + botão Copiar log)
+// FAV NFA - Content Script v6.8 (placeholder '-' não conta como selecionado)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -569,7 +569,7 @@ async function selecionarDispositivoLegal(valorContrato) {
 
   // JÁ SELECIONADO (sobreviveu a um reload)? Não re-seleciona — evita novo postback/loop.
   const atualSel = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
-  if (atualSel && !/^selecione somente/i.test(atualSel) && !/nenhum dispositivo legal/i.test(atualSel)) {
+  if (atualSel && !/^selecione/i.test(atualSel) && !/^[-–—\s]+$/.test(atualSel) && !/nenhum dispositivo legal/i.test(atualSel)) {
     logFAV('Dispositivo Legal: já selecionado ✓ ("' + atualSel + '")');
     return false;
   }
@@ -604,7 +604,9 @@ async function etapa_Produtos(dados) {
     const sel = [...document.querySelectorAll('select')].find(s => s.id && s.id.includes(idParcial));
     if (!sel || sel.selectedIndex < 0) return '';
     const t = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
-    return /^(selecione|--)/i.test(t) ? '' : t;
+    // placeholder do SEFAZ pode ser "Selecione...", "-", "--", "–" ou vazio
+    if (!t || /^selecione/i.test(t) || /^[-–—\s]+$/.test(t)) return '';
+    return t;
   };
 
   for (let i = 0; i < dados.produtos.length; i++) {
