@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v108"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v109"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -6679,8 +6679,14 @@ function atualizarBotoesNFA(o){
     if(isAdm && emitida && o.nfa_drive_url){ btnImp.style.display='block'; btnImp.onclick=()=>imprimirNFA(o.nfa_drive_url); }
     else btnImp.style.display='none';
   }
-  // Emitir NFA — admin, peso finalizado e ainda não emitida
-  if(btnNFA) btnNFA.style.display=(isAdm && finalizado && !emitida)?'block':'none';
+  // Emitir NFA — admin, peso finalizado e: não emitida OU emitida com SALDO pendente (complemento)
+  const pesoTicketKg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
+  const jaKg=(typeof _kgJaEmitidos==='function')?_kgJaEmitidos(o.id):0;
+  const temSaldo=emitida && pesoTicketKg>0 && jaKg>0 && jaKg<pesoTicketKg;
+  if(btnNFA){
+    btnNFA.style.display=(isAdm && finalizado && (!emitida || temSaldo))?'block':'none';
+    btnNFA.textContent=temSaldo?('📄 Emitir NF de complemento ('+(pesoTicketKg-jaKg).toLocaleString('pt-BR')+' kg)'):'📄 Emitir NFA';
+  }
   // Botão de autorização removido
   if(btnAut) btnAut.style.display='none';
 }
@@ -6763,6 +6769,8 @@ function confirmarValidaNFA(){
 // Atualiza o cache local após a emissão (o backend já gravou em NFAs_Emitidas
 // via processarNFA). Mantém os mesmos nomes de campo do listarPesagens.
 function persistirNFAEmitida(data){
+  // Registra os kg desta emissão (p/ sugerir o saldo na NF de complemento do mesmo ticket)
+  if(_nfaKgEmitindo && _nfaKgEmitindo.ticket){ _registrarKgEmitidos(_nfaKgEmitindo.ticket,_nfaKgEmitindo.kg); _nfaKgEmitindo=null; }
   const o = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual && atual.id===_nfaTicketAtual ? atual : null);
   if(!o) return;
   o.nfa_emitida = true; o.nfa_autorizada = true;
@@ -6894,6 +6902,21 @@ function _ajustarQtdUnidadeNFA(nfa){
   });
   return nfa;
 }
+/* ── Peso editável na prévia + saldo p/ NF de complemento ──
+   'nfa-emitidos-v2' guarda, por ticket, os kg já emitidos em NFA(s) anteriores.
+   Ao abrir a prévia do mesmo ticket, sugere automaticamente o SALDO restante. */
+function _kgJaEmitidos(ticketId){
+  try{ const m=JSON.parse(localStorage.getItem('nfa-emitidos-v2')||'{}'); return Number(m[ticketId]?.kg)||0; }catch(e){ return 0; }
+}
+function _registrarKgEmitidos(ticketId,kg){
+  if(!ticketId||!(kg>0))return;
+  try{
+    const m=JSON.parse(localStorage.getItem('nfa-emitidos-v2')||'{}');
+    m[ticketId]={kg:(Number(m[ticketId]?.kg)||0)+kg, em:new Date().toLocaleString('pt-BR')};
+    localStorage.setItem('nfa-emitidos-v2',JSON.stringify(m));
+  }catch(e){}
+}
+let _nfaPesoTicketKg=0; // peso líquido original do ticket (kg)
 function renderPreviaNFA(n){
   document.getElementById('nfa-prev-tk').textContent=n.ticket_id||'';
   document.getElementById('nfa-prev-sub').textContent=(n.contrato_id||'')+' · '+new Date().toLocaleDateString('pt-BR');
@@ -6903,12 +6926,49 @@ function renderPreviaNFA(n){
   document.getElementById('nfa-prev-placa').textContent=n.placa||'—';
   document.getElementById('nfa-prev-data').textContent=n.data_transporte||'—';
   document.getElementById('nfa-prev-bruto').textContent=n.peso_bruto_kg?Number(n.peso_bruto_kg).toLocaleString('pt-BR')+' kg':'—';
-  document.getElementById('nfa-prev-liq').textContent=n.peso_liquido_kg?Number(n.peso_liquido_kg).toLocaleString('pt-BR')+' kg':'—';
   document.getElementById('nfa-prev-frete').textContent=n.responsavel_frete||'—';
   document.getElementById('nfa-prev-email').textContent=n.destinatario_email||'—';
   document.getElementById('nfa-prev-zap').textContent=n.destinatario_whatsapp||'—';
+  // Peso: ticket, já emitido e sugestão (saldo p/ complemento)
+  _nfaPesoTicketKg=Number(n.peso_liquido_kg)||0;
+  const ja=_kgJaEmitidos(n.ticket_id);
+  const lnT=document.getElementById('nfa-ln-ticket'), lnJ=document.getElementById('nfa-ln-jaemit');
+  if(lnT){lnT.style.display='flex';document.getElementById('nfa-prev-ticket').textContent=_nfaPesoTicketKg.toLocaleString('pt-BR')+' kg';}
+  if(lnJ){
+    lnJ.style.display=ja>0?'flex':'none';
+    if(ja>0)document.getElementById('nfa-prev-jaemit').textContent=ja.toLocaleString('pt-BR')+' kg';
+  }
+  const sugerido=ja>0?Math.max(0,_nfaPesoTicketKg-ja):_nfaPesoTicketKg;
+  const inp=document.getElementById('nfa-prev-liq-inp');
+  if(inp)inp.value=sugerido;
+  if(ja>0)toast('📄 NF de complemento: sugerido o saldo de '+sugerido.toLocaleString('pt-BR')+' kg');
+  _onEditPesoNFA(); // aplica peso + produtos + saldo + total
+}
+// Recalcula tudo quando o peso é editado: produtos (qtd/unidade), total e saldo
+function _onEditPesoNFA(){
+  if(!_nfaDados)return;
+  const inp=document.getElementById('nfa-prev-liq-inp');
+  const kg=Math.max(0,Math.round(Number(inp?.value)||0));
+  _nfaDados.peso_liquido_kg=String(kg);
+  // Reaplica a conversão de unidade nas quantidades (kg → t/sc conforme o produto)
+  (_nfaDados.produtos||[]).forEach(function(p){
+    const u=String(p.unidade||'').toUpperCase();
+    if(u==='T'||_prodEhTonelada(p.produto)){ p.quantidade=String(Math.round(kg)/1000); p.unidade='T'; }
+    else if(u==='SC'||_prodEhSaca(p.produto)){ const pk=_pesoSacoProduto(p.produto); p.quantidade=String(Math.round(kg/pk*1000)/1000); p.unidade='SC'; }
+    else p.quantidade=String(kg);
+  });
+  // Saldo p/ complemento = peso do ticket − já emitido − o que vai nesta NF
+  const ja=_kgJaEmitidos(_nfaDados.ticket_id);
+  const saldo=Math.max(0,_nfaPesoTicketKg-ja-kg);
+  const lnS=document.getElementById('nfa-ln-saldo');
+  if(lnS){
+    lnS.style.display=(_nfaPesoTicketKg>0&&kg<_nfaPesoTicketKg-ja)?'flex':'none';
+    const el=document.getElementById('nfa-prev-saldo');
+    if(el){el.textContent=saldo.toLocaleString('pt-BR')+' kg';el.style.color=saldo>0?'#a15c00':'#1a6c3c';}
+  }
+  // Produtos + total
   let total=0;
-  document.getElementById('nfa-prev-prods').innerHTML=(n.produtos||[]).map(p=>{
+  document.getElementById('nfa-prev-prods').innerHTML=(_nfaDados.produtos||[]).map(p=>{
     const t=Number(p.quantidade||0)*Number(p.valor_unitario||0);total+=t;
     return `<div class="nfa-prod-item"><div class="pn">${p.produto}</div><div class="pv"><span>${Number(p.quantidade||0).toLocaleString('pt-BR')} ${_unidLabelNFA(p.unidade)} × R$ ${Number(p.valor_unitario||0).toFixed(4)}</span><span style="font-weight:700;color:#1a3a6c">R$ ${t.toLocaleString('pt-BR',{minimumFractionDigits:2})}</span></div></div>`;
   }).join('');
@@ -6917,9 +6977,11 @@ function renderPreviaNFA(n){
 
 function fecharPreviaNFA(){document.getElementById('modal-previa-nfa').style.display='none';_nfaDados=null;}
 
+let _nfaKgEmitindo=null; // {ticket, kg} da emissão em andamento — registrado ao concluir
 async function confirmarEmissaoNFA(){
   if(!_nfaDados)return;
   const dadosNFA=_nfaDados;            // guarda ANTES de fechar (fecharPreviaNFA zera _nfaDados)
+  _nfaKgEmitindo={ticket:dadosNFA.ticket_id, kg:Number(dadosNFA.peso_liquido_kg)||0};
   const extId=getNFAExtId();
   fecharPreviaNFA();
   if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
@@ -7251,7 +7313,12 @@ function salvarFuncionarios(){
       <div class="nfa-ln"><span>Placa</span><span id="nfa-prev-placa"></span></div>
       <div class="nfa-ln"><span>Data</span><span id="nfa-prev-data"></span></div>
       <div class="nfa-ln"><span>Peso Bruto</span><span id="nfa-prev-bruto"></span></div>
-      <div class="nfa-ln"><span>Carga Líquida</span><span id="nfa-prev-liq" style="color:#1a6c3c;font-weight:700"></span></div>
+      <div class="nfa-ln" id="nfa-ln-ticket" style="display:none"><span>Peso do ticket</span><span id="nfa-prev-ticket" style="color:#555"></span></div>
+      <div class="nfa-ln" id="nfa-ln-jaemit" style="display:none"><span>Já emitido (NFA anterior)</span><span id="nfa-prev-jaemit" style="color:#a15c00;font-weight:600"></span></div>
+      <div class="nfa-ln"><span>Carga Líquida (kg) — editável</span>
+        <input id="nfa-prev-liq-inp" type="number" step="1" min="0" inputmode="numeric" oninput="_onEditPesoNFA()" style="width:130px;text-align:right;color:#1a6c3c;font-weight:700;border:1.5px solid #bfe0cd;border-radius:8px;padding:6px 9px;font-size:14px">
+      </div>
+      <div class="nfa-ln" id="nfa-ln-saldo" style="display:none"><span>Saldo p/ complemento</span><span id="nfa-prev-saldo" style="font-weight:700"></span></div>
       <div class="nfa-ln"><span>Frete</span><span id="nfa-prev-frete"></span></div>
       <div class="nfa-sec">PRODUTO</div>
       <div id="nfa-prev-prods"></div>

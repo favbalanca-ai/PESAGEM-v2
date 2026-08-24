@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v5.9 (sequência de etapas + resumo de conferência)
+// FAV NFA - Content Script v6.1 (pausa transportadora de outro estado + Pular campo)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -9,6 +9,7 @@ const DELAY = 900;
 function wait(ms) {
   return new Promise((resolve, reject) => {
     if (window.__FAV_NFA_PARAR__) return reject(new Error('PARADO_PELO_USUARIO'));
+    if (window.__FAV_NFA_PULAR__) { window.__FAV_NFA_PULAR__ = false; return resolve(); } // ⏭️ pular campo
     setTimeout(() => {
       if (window.__FAV_NFA_PARAR__) return reject(new Error('PARADO_PELO_USUARIO'));
       resolve();
@@ -113,7 +114,8 @@ function atualizarStatus(msg, tipo = 'info') {
     '<div style="display:flex;gap:6px">' +
     '<button id="fav-btn-parar" style="flex:1;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⛔ PARAR</button>' +
     '<button id="fav-btn-continuar" style="flex:1;padding:8px;background:#1a6c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">▶ Continuar IA</button>' +
-    '</div>';
+    '</div>' +
+    '<button id="fav-btn-pular" style="width:100%;margin-top:6px;padding:7px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⏭️ Pular campo</button>';
   const bp = _overlay.querySelector('#fav-btn-parar');
   if (bp) bp.onclick = () => {
     window.__FAV_NFA_PARAR__ = true;
@@ -134,6 +136,12 @@ function atualizarStatus(msg, tipo = 'info') {
     if (!dados) { if (m) m.textContent = '⚠️ Sem dados da NFA.'; return; }
     try { await detectarPaginaEExecutar(dados); }
     catch (err) { if (!(err && err.message === 'PARADO_PELO_USUARIO')) atualizarStatus('❌ ' + err.message, 'erro'); }
+  };
+  const bpu = _overlay.querySelector('#fav-btn-pular');
+  if (bpu) bpu.onclick = () => {
+    window.__FAV_NFA_PULAR__ = true;  // faz a espera atual desistir e seguir ao próximo campo
+    const m = _overlay.querySelector('#fav-status-msg');
+    if (m) m.textContent = '⏭️ Pulando o campo atual...';
   };
 }
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
@@ -176,6 +184,7 @@ function aguardarSefazLivre(timeout = 15000) {
   return new Promise((resolve) => {
     const ini = Date.now();
     const check = () => {
+      if (window.__FAV_NFA_PULAR__) { window.__FAV_NFA_PULAR__ = false; return resolve(true); } // ⏭️ pular campo
       const bloqueio = document.querySelector('.ui-blockui, .blockUI, .ui-widget-overlay');
       const temAguarde = [...document.querySelectorAll('div,span')].some(e =>
         e.offsetParent !== null && /aguarde/i.test(e.textContent || '') && (e.textContent||'').length < 30);
@@ -191,6 +200,7 @@ function aguardarPreenchimento(condFn, timeout = 10000) {
   return new Promise((resolve) => {
     const ini = Date.now();
     const check = () => {
+      if (window.__FAV_NFA_PULAR__) { window.__FAV_NFA_PULAR__ = false; return resolve(false); } // ⏭️ pular campo
       try { if (condFn()) return resolve(true); } catch(e){}
       if (Date.now() - ini > timeout) return resolve(false);
       setTimeout(check, 300);
