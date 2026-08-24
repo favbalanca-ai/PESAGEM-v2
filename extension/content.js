@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.1 (pausa transportadora de outro estado + Pular campo)
+// FAV NFA - Content Script v6.2 (produtos: re-tenta qtd/valor após postback do dispositivo legal)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -559,30 +559,70 @@ async function etapa_Produtos(dados) {
     // 3.5) Dispositivo Legal (campo dependente do Tipo de Operação)
     //      - Se o SEFAZ deixar o campo DESABILITADO (caso das vendas, ex: 5101), PULA.
     //      - Se estiver HABILITADO e o contrato informou um dispositivo_legal, seleciona.
+    //      ⚠️ A seleção dispara um postback AJAX que RE-RENDERIZA (e limpa) os campos
+    //      de quantidade/valor — por isso a espera longa antes de preenchê-los.
     atualizarStatus('Produto: dispositivo legal...');
-    await selecionarDispositivoLegal(prod.dispositivo_legal);
-    await wait(800);
+    const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
+    if (usouDispLegal) { await aguardarSefazLivre(15000); await wait(3000); }
+    else await wait(800);
 
-    // 4) Quantidade e Valor
-    atualizarStatus('Produto: quantidade e valor...');
-    setInputPorId('quantidadeProduto', String(prod.quantidade).replace('.', ','));
-    await wait(500);
-    setInputPorId('valorUnitarioProduto', String(prod.valor_unitario).replace('.', ','));
-    await wait(500);
+    // 4) Quantidade e Valor — preenche, VERIFICA e re-tenta (o postback pode apagar)
+    const qtdStr = String(prod.quantidade).replace('.', ',');
+    const valStr = String(prod.valor_unitario).replace('.', ',');
+    const lerCampo = (idp) => {
+      const el = [...document.querySelectorAll('input')].find(i => i.id && i.id.includes(idp) && i.offsetParent !== null);
+      return el ? String(el.value||'').trim() : '';
+    };
+    let okCampos = false;
+    for (let tent = 1; tent <= 4 && !okCampos; tent++) {
+      atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
+      setInputPorId('quantidadeProduto', qtdStr);
+      await wait(600);
+      setInputPorId('valorUnitarioProduto', valStr);
+      await wait(900); await aguardarSefazLivre(6000);
+      okCampos = lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '';
+      if (!okCampos) await wait(1500); // postback ainda mexendo na tela — espera e re-tenta
+    }
+    if (!okCampos) {
+      window.__FAV_NFA_PARAR__ = true;
+      try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
+      atualizarStatus('⚠️ O SEFAZ está limpando Quantidade/Valor. Preencha MANUALMENTE (Qtd: ' + qtdStr + ' · Valor: ' + valStr + '), clique Adicionar, e depois "▶ Continuar IA".', 'aviso');
+      throw new Error('PARADO_PELO_USUARIO');
+    }
 
     if (prod.obs) {
       const ta = document.querySelector('textarea[id*="observacao"],textarea[id*="Observacao"]');
       if (ta) { ta.value = prod.obs; ta.dispatchEvent(new Event('change',{bubbles:true})); }
     }
 
-    // 5) Adicionar → confirma → espera
-    await wait(500);
-    const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null);
-    if (btnAdd) { btnAdd.click(); await wait(DELAY); }
-    await aguardarSefazLivre(20000);
-    await confirmarCaixa(6000);
-    await aguardarSefazLivre(20000);
-    await wait(2000);
+    // 5) Adicionar → confirma → espera → VERIFICA se o produto entrou na tabela
+    let adicionado = false;
+    for (let tent = 1; tent <= 2 && !adicionado; tent++) {
+      await wait(500);
+      const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null);
+      if (btnAdd) { btnAdd.click(); await wait(DELAY); }
+      await aguardarSefazLivre(20000);
+      await confirmarCaixa(6000);
+      await aguardarSefazLivre(20000);
+      await wait(2000);
+      adicionado = [...document.querySelectorAll('table, .ui-datatable')].some(t => {
+        const txt = (t.textContent||'');
+        if (/nenhum produto adicionado/i.test(txt)) return false;
+        return [...t.querySelectorAll('tbody tr')].some(tr => /\d{2,}[.,]\d/.test(tr.textContent||''));
+      });
+      if (!adicionado && tent < 2) {
+        // validação falhou (campos limpos de novo) — re-preenche e tenta 1x mais
+        atualizarStatus('Produto: Adicionar falhou — re-preenchendo quantidade/valor...');
+        setInputPorId('quantidadeProduto', qtdStr); await wait(600);
+        setInputPorId('valorUnitarioProduto', valStr); await wait(900);
+      }
+    }
+    if (!adicionado) {
+      window.__FAV_NFA_PARAR__ = true;
+      try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
+      atualizarStatus('⚠️ Não consegui ADICIONAR o produto. Confira Quantidade (' + qtdStr + ') e Valor (' + valStr + '), clique Adicionar manualmente e depois "▶ Continuar IA".', 'aviso');
+      throw new Error('PARADO_PELO_USUARIO');
+    }
   }
   await irParaContinuarProdutos();
 }
@@ -591,12 +631,20 @@ async function irParaContinuarProdutos() {
   atualizarStatus('Produtos: continuando...');
   await aguardarSefazLivre(20000);
   await wait(1500);
-  const btnCont = [...document.querySelectorAll('input,button')].find(b => /continuar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null);
-  if (btnCont) btnCont.click();
-  await wait(1500);
-  await confirmarCaixa(6000);
-  await aguardarSefazLivre(15000);
-  await wait(DELAY * 2);
+  // tenta avançar até 3x — se a validação segurar a tela na aba Produtos, re-clica
+  for (let t = 1; t <= 3; t++) {
+    const btnCont = [...document.querySelectorAll('input,button')].find(b => /continuar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null);
+    if (btnCont) btnCont.click();
+    await wait(1500);
+    await confirmarCaixa(6000);
+    await aguardarSefazLivre(15000);
+    await wait(DELAY * 2);
+    const aindaEmProdutos = [...document.querySelectorAll('input,select')].some(e => e.id && e.id.includes('quantidadeProduto') && e.offsetParent !== null);
+    if (!aindaEmProdutos) return; // avançou (resumo/informações complementares)
+    atualizarStatus('Produtos: tela não avançou — tentando Continuar de novo (' + t + '/3)...');
+    await wait(1200);
+  }
+  atualizarStatus('⚠️ Não consegui avançar da aba Produtos. Clique "Continuar" manualmente na página e depois "▶ Continuar IA".', 'aviso');
 }
 
 async function etapa_Resumo(dados) {
