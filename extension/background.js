@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v5.9
+// FAV NFA - Background Service Worker v6.4 (re-tenta injeção quando a SEFAZ recarrega no meio)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '5.9' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '6.4' });
     return true;
   }
   return false;
@@ -61,7 +61,8 @@ function obterDados(tabId, cb) {
   });
 }
 
-function injetarComDados(tabId) {
+function injetarComDados(tabId, tentativa) {
+  tentativa = tentativa || 1;
   obterDados(tabId, (dados) => {
     if (!dados) { console.log('[FAV BG] Sem dados para aba', tabId, '- não injeta'); return; }
     chrome.storage.local.get('nfa_nova_' + tabId, (marca) => {
@@ -81,7 +82,23 @@ function injetarComDados(tabId) {
         return chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['content.js'] });
       }).then(() => {
         console.log('[FAV BG] injetado na aba', tabId, ehNova ? '(emissão nova - parada limpa)' : '');
-      }).catch(err => console.error('[FAV BG] Falha ao injetar:', err));
+      }).catch(err => {
+        // A SEFAZ recarrega a página no meio da injeção ("Frame with ID 0 was removed").
+        // Se a aba ainda existir e continuar no SEFAZ, re-tenta em ~1,2s (até 3x).
+        const msg = String(err && err.message || err);
+        const transitorio = /Frame with ID|No frame with|was removed|No tab with id|cannot be scripted/i.test(msg);
+        if (transitorio && tentativa < 3) {
+          console.log('[FAV BG] Injeção interrompida por reload (tentativa ' + tentativa + ') — re-tentando...');
+          setTimeout(() => {
+            chrome.tabs.get(tabId, (tab) => {
+              if (chrome.runtime.lastError || !tab || !tab.url) return; // aba fechou — desiste
+              if (tab.url.includes('sefaz.go.gov.br')) injetarComDados(tabId, tentativa + 1);
+            });
+          }, 1200);
+        } else {
+          console.error('[FAV BG] Falha ao injetar:', err);
+        }
+      });
     });
   });
 }
