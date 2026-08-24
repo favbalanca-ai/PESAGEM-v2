@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.3 (popup Condicionante: marca Aceito os Termos + Confirmar)
+// FAV NFA - Content Script v6.5 (produtos: retoma após reload sem re-selecionar o que já está feito)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -532,6 +532,13 @@ async function selecionarDispositivoLegal(valorContrato) {
   // se o contrato não informou um dispositivo legal, deixa no placeholder (não obrigatório)
   if (!valorContrato) { console.log('[FAV NFA] Dispositivo Legal: habilitado mas contrato não informou — deixando em branco'); return false; }
 
+  // JÁ SELECIONADO (sobreviveu a um reload)? Não re-seleciona — evita novo postback/loop.
+  const atualSel = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
+  if (atualSel && !/^selecione somente/i.test(atualSel) && !/nenhum dispositivo legal/i.test(atualSel)) {
+    console.log('[FAV NFA] Dispositivo Legal: já selecionado ✓ ("' + atualSel + '")');
+    return false;
+  }
+
   // seleciona via PrimeFaces pelo texto do contrato
   console.log('[FAV NFA] Dispositivo Legal: selecionando "' + valorContrato + '"');
   const ok = await selecionarPrimeFaces('dispositivoLegalProduto', valorContrato);
@@ -556,30 +563,54 @@ async function etapa_Produtos(dados) {
     atualizarStatus('Produto já adicionado. Indo para Continuar...');
     await wait(800); await irParaContinuarProdutos(); return;
   }
+  // Texto da opção selecionada num <select> (PrimeFaces esconde o select nativo,
+  // então NÃO filtra por visibilidade). Vazio se placeholder ("Selecione...").
+  const selTexto = (idParcial) => {
+    const sel = [...document.querySelectorAll('select')].find(s => s.id && s.id.includes(idParcial));
+    if (!sel || sel.selectedIndex < 0) return '';
+    const t = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
+    return /^(selecione|--)/i.test(t) ? '' : t;
+  };
+
   for (let i = 0; i < dados.produtos.length; i++) {
     const prod = dados.produtos[i];
+    // ⚠️ O SEFAZ às vezes faz um RELOAD de página inteira no meio da etapa, mas o
+    // servidor PRESERVA o que já foi selecionado. Ao re-executar, PULAMOS o que já
+    // está feito — re-selecionar dispara novos postbacks e vira loop infinito.
 
     // 1) Grupo → confirma caixa → espera 5s
-    atualizarStatus('Produto: grupo ' + prod.grupo + '...');
-    if (!await selecionarPrimeFaces('grupoProduto', prod.grupo)) setSelectPorId('grupoProduto', prod.grupo);
-    await confirmarCaixa(6000);
-    await aguardarSefazLivre(12000);
-    await wait(5000);
+    if (selTexto('grupoProduto')) {
+      atualizarStatus('Produto: grupo já selecionado ✓');
+    } else {
+      atualizarStatus('Produto: grupo ' + prod.grupo + '...');
+      if (!await selecionarPrimeFaces('grupoProduto', prod.grupo)) setSelectPorId('grupoProduto', prod.grupo);
+      await confirmarCaixa(6000);
+      await aguardarSefazLivre(12000);
+      await wait(5000);
+    }
 
     // 2) Tipo de Operação / Natureza (5101) → confirma caixa → espera 5s
-    atualizarStatus('Produto: tipo de operação...');
-    const natBusca = prod.tipo_operacao || prod.natureza || '5101';
-    if (!await selecionarPrimeFaces('naturezaOperacaoAdmin', natBusca)) setSelectPorId('naturezaOperacaoAdmin', natBusca);
-    await confirmarCaixa(6000);
-    await aguardarSefazLivre(12000);
-    await wait(5000);
+    if (selTexto('naturezaOperacaoAdmin')) {
+      atualizarStatus('Produto: tipo de operação já selecionado ✓');
+    } else {
+      atualizarStatus('Produto: tipo de operação...');
+      const natBusca = prod.tipo_operacao || prod.natureza || '5101';
+      if (!await selecionarPrimeFaces('naturezaOperacaoAdmin', natBusca)) setSelectPorId('naturezaOperacaoAdmin', natBusca);
+      await confirmarCaixa(6000);
+      await aguardarSefazLivre(12000);
+      await wait(5000);
+    }
 
     // 3) Nome do Produto → confirma caixa → espera 5s
-    atualizarStatus('Produto: nome do produto...');
-    if (prod.produto) { if (!await selecionarPrimeFaces('nomeProdutoAdmin', prod.produto)) setSelectPorId('nomeProdutoAdmin', prod.produto); }
-    await confirmarCaixa(6000);
-    await aguardarSefazLivre(10000);
-    await wait(5000);
+    if (selTexto('nomeProdutoAdmin')) {
+      atualizarStatus('Produto: nome já selecionado ✓');
+    } else {
+      atualizarStatus('Produto: nome do produto...');
+      if (prod.produto) { if (!await selecionarPrimeFaces('nomeProdutoAdmin', prod.produto)) setSelectPorId('nomeProdutoAdmin', prod.produto); }
+      await confirmarCaixa(6000);
+      await aguardarSefazLivre(10000);
+      await wait(5000);
+    }
 
     // 3.5) Dispositivo Legal (campo dependente do Tipo de Operação)
     //      - Se o SEFAZ deixar o campo DESABILITADO (caso das vendas, ex: 5101), PULA.
@@ -600,11 +631,15 @@ async function etapa_Produtos(dados) {
     };
     let okCampos = false;
     for (let tent = 1; tent <= 4 && !okCampos; tent++) {
+      // Já preenchidos (ex.: preservados por um reload)? Não mexe — evita novo postback.
+      if (lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '') {
+        atualizarStatus('Produto: quantidade e valor já preenchidos ✓');
+        okCampos = true; break;
+      }
       atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
       await confirmarCaixa(2500); // popup atrasado (ex.: Condicionante/Aceito os Termos) trava a tela
-      setInputPorId('quantidadeProduto', qtdStr);
-      await wait(600);
-      setInputPorId('valorUnitarioProduto', valStr);
+      if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
+      if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); }
       await wait(900); await aguardarSefazLivre(6000);
       okCampos = lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '';
       if (!okCampos) await wait(1500); // postback ainda mexendo na tela — espera e re-tenta
