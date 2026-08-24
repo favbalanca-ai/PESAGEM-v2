@@ -426,6 +426,16 @@ async function etapa_Transporte(dados) {
       if (btnP) btnP.click();
       atualizarStatus('Transporte: pesquisando transportadora...');
       await wait(2500); await aguardarSefazLivre(15000); await wait(1000);
+      // Se a busca não achou (transportadora de OUTRO ESTADO / não cadastrada em GO),
+      // pausa para o usuário digitar a transportadora manualmente e depois clicar Continuar IA.
+      const nomeDepois = [...document.querySelectorAll('input')].find(i => /nomeRazaoSocialTransporte/i.test(i.id) && i.offsetParent !== null);
+      const achou = nomeDepois && nomeDepois.value && nomeDepois.value.trim().length > 2;
+      if (!achou) {
+        window.__FAV_NFA_PARAR__ = true;
+        try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
+        atualizarStatus('⚠️ Transportadora não encontrada (provável de OUTRO ESTADO). Preencha a transportadora MANUALMENTE (nome e endereço) e depois clique "▶ Continuar IA".', 'aviso');
+        throw new Error('PARADO_PELO_USUARIO');
+      }
     }
   }
   atualizarStatus('Transporte: data...');
