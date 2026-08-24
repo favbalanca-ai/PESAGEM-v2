@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.8 (placeholder '-' não conta como selecionado)
+// FAV NFA - Content Script v6.9 (ordem correta: qtd/valor antes do dispositivo legal)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -665,13 +665,7 @@ async function etapa_Produtos(dados) {
         await wait(5000);
       }
 
-      // 3.5) Dispositivo Legal (pula se desabilitado/já selecionado)
-      atualizarStatus('Produto: dispositivo legal...');
-      const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
-      if (usouDispLegal) { await aguardarSefazLivre(15000); await wait(3000); }
-      else await wait(800);
-
-      // 4) Quantidade e Valor — só preenche o que estiver vazio
+      // 4) Quantidade e Valor — ordem do formulário: ANTES do dispositivo legal
       let okCampos = false;
       for (let tent = 1; tent <= 4 && !okCampos; tent++) {
         if (lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '') {
@@ -687,6 +681,17 @@ async function etapa_Produtos(dados) {
         if (!okCampos) await wait(1500);
       }
       if (!okCampos) continue; // rodada seguinte re-avalia tudo
+
+      // 5) Dispositivo Legal — por ÚLTIMO entre os selects (sequência da página:
+      //    grupo → operação → produto → quantidade → valor → dispositivo legal).
+      //    Se o postback dele limpar qtd/valor, re-preenche logo em seguida.
+      atualizarStatus('Produto: dispositivo legal...');
+      const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
+      if (usouDispLegal) {
+        await aguardarSefazLivre(15000); await wait(2000);
+        if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
+        if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); await wait(600); }
+      } else await wait(500);
 
       if (prod.obs) {
         const ta = document.querySelector('textarea[id*="observacao"],textarea[id*="Observacao"]');
