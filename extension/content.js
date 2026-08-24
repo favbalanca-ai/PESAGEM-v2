@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.2 (produtos: re-tenta qtd/valor após postback do dispositivo legal)
+// FAV NFA - Content Script v6.3 (popup Condicionante: marca Aceito os Termos + Confirmar)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -261,6 +261,31 @@ async function confirmarCaixa(timeout = 8000) {
   }
 
   while (Date.now() - ini < timeout) {
+    // 0) Popup "Condicionante" (ex.: MANTEM O CREDITO): marcar "Aceito os Termos" e Confirmar
+    var dlgCond = [...document.querySelectorAll('.ui-dialog, .ui-confirm-dialog, [id*="ondicionante"]')]
+      .find(d => dialogAberto(d) && /aceito os termos|condicionante/i.test(d.textContent||''));
+    if (dlgCond) {
+      // marca o checkbox (nativo ou estilizado do PrimeFaces)
+      var chk = dlgCond.querySelector('input[type=checkbox]');
+      var chkBox = dlgCond.querySelector('.ui-chkbox-box');
+      var marcado = chk ? chk.checked : (chkBox && /ui-state-active/.test(chkBox.className||''));
+      if (!marcado) {
+        console.log('[FAV NFA] confirmarCaixa: Condicionante -> marcando "Aceito os Termos"');
+        if (chkBox) clicarRobusto(chkBox); else if (chk) clicarRobusto(chk);
+        await wait(700);
+      }
+      var bC = acharBotaoConfirmar(dlgCond);
+      if (bC) {
+        console.log('[FAV NFA] confirmarCaixa: Condicionante -> Confirmar');
+        clicarRobusto(bC);
+        await wait(1200);
+        var dC2 = [...document.querySelectorAll('.ui-dialog, .ui-confirm-dialog, [id*="ondicionante"]')]
+          .find(d => dialogAberto(d) && /aceito os termos|condicionante/i.test(d.textContent||''));
+        if (!dC2) { await wait(300); return true; }
+      }
+      await wait(500);
+      continue; // insiste no Condicionante até fechar (ou estourar o timeout)
+    }
     // 1) Mira a caixa específica de troca de operação (id fixo do SEFAZ)
     var alvo = null;
     var cfop = document.getElementById('form:tabView:confirmDialogCFOP');
@@ -576,6 +601,7 @@ async function etapa_Produtos(dados) {
     let okCampos = false;
     for (let tent = 1; tent <= 4 && !okCampos; tent++) {
       atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
+      await confirmarCaixa(2500); // popup atrasado (ex.: Condicionante/Aceito os Termos) trava a tela
       setInputPorId('quantidadeProduto', qtdStr);
       await wait(600);
       setInputPorId('valorUnitarioProduto', valStr);
