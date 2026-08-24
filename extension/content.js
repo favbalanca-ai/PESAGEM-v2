@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.5 (produtos: retoma após reload sem re-selecionar o que já está feito)
+// FAV NFA - Content Script v6.6 (execução única + produtos em rodadas com reavaliação)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -134,8 +134,7 @@ function atualizarStatus(msg, tipo = 'info') {
     let dados = window.__FAV_NFA_DADOS__;
     if (!dados) { try { dados = await new Promise(r => chrome.runtime.sendMessage({ action: 'GET_NFA_PENDENTE' }, x => r(x||null))); } catch(e){} }
     if (!dados) { if (m) m.textContent = '⚠️ Sem dados da NFA.'; return; }
-    try { await detectarPaginaEExecutar(dados); }
-    catch (err) { if (!(err && err.message === 'PARADO_PELO_USUARIO')) atualizarStatus('❌ ' + err.message, 'erro'); }
+    await executarUnico(dados); // trava: nunca 2 execuções ao mesmo tempo
   };
   const bpu = _overlay.querySelector('#fav-btn-pular');
   if (bpu) bpu.onclick = () => {
@@ -574,114 +573,108 @@ async function etapa_Produtos(dados) {
 
   for (let i = 0; i < dados.produtos.length; i++) {
     const prod = dados.produtos[i];
-    // ⚠️ O SEFAZ às vezes faz um RELOAD de página inteira no meio da etapa, mas o
-    // servidor PRESERVA o que já foi selecionado. Ao re-executar, PULAMOS o que já
-    // está feito — re-selecionar dispara novos postbacks e vira loop infinito.
-
-    // 1) Grupo → confirma caixa → espera 5s
-    if (selTexto('grupoProduto')) {
-      atualizarStatus('Produto: grupo já selecionado ✓');
-    } else {
-      atualizarStatus('Produto: grupo ' + prod.grupo + '...');
-      if (!await selecionarPrimeFaces('grupoProduto', prod.grupo)) setSelectPorId('grupoProduto', prod.grupo);
-      await confirmarCaixa(6000);
-      await aguardarSefazLivre(12000);
-      await wait(5000);
-    }
-
-    // 2) Tipo de Operação / Natureza (5101) → confirma caixa → espera 5s
-    if (selTexto('naturezaOperacaoAdmin')) {
-      atualizarStatus('Produto: tipo de operação já selecionado ✓');
-    } else {
-      atualizarStatus('Produto: tipo de operação...');
-      const natBusca = prod.tipo_operacao || prod.natureza || '5101';
-      if (!await selecionarPrimeFaces('naturezaOperacaoAdmin', natBusca)) setSelectPorId('naturezaOperacaoAdmin', natBusca);
-      await confirmarCaixa(6000);
-      await aguardarSefazLivre(12000);
-      await wait(5000);
-    }
-
-    // 3) Nome do Produto → confirma caixa → espera 5s
-    if (selTexto('nomeProdutoAdmin')) {
-      atualizarStatus('Produto: nome já selecionado ✓');
-    } else {
-      atualizarStatus('Produto: nome do produto...');
-      if (prod.produto) { if (!await selecionarPrimeFaces('nomeProdutoAdmin', prod.produto)) setSelectPorId('nomeProdutoAdmin', prod.produto); }
-      await confirmarCaixa(6000);
-      await aguardarSefazLivre(10000);
-      await wait(5000);
-    }
-
-    // 3.5) Dispositivo Legal (campo dependente do Tipo de Operação)
-    //      - Se o SEFAZ deixar o campo DESABILITADO (caso das vendas, ex: 5101), PULA.
-    //      - Se estiver HABILITADO e o contrato informou um dispositivo_legal, seleciona.
-    //      ⚠️ A seleção dispara um postback AJAX que RE-RENDERIZA (e limpa) os campos
-    //      de quantidade/valor — por isso a espera longa antes de preenchê-los.
-    atualizarStatus('Produto: dispositivo legal...');
-    const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
-    if (usouDispLegal) { await aguardarSefazLivre(15000); await wait(3000); }
-    else await wait(800);
-
-    // 4) Quantidade e Valor — preenche, VERIFICA e re-tenta (o postback pode apagar)
     const qtdStr = String(prod.quantidade).replace('.', ',');
     const valStr = String(prod.valor_unitario).replace('.', ',');
     const lerCampo = (idp) => {
-      const el = [...document.querySelectorAll('input')].find(i => i.id && i.id.includes(idp) && i.offsetParent !== null);
+      const el = [...document.querySelectorAll('input')].find(i2 => i2.id && i2.id.includes(idp) && i2.offsetParent !== null);
       return el ? String(el.value||'').trim() : '';
     };
-    let okCampos = false;
-    for (let tent = 1; tent <= 4 && !okCampos; tent++) {
-      // Já preenchidos (ex.: preservados por um reload)? Não mexe — evita novo postback.
-      if (lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '') {
-        atualizarStatus('Produto: quantidade e valor já preenchidos ✓');
-        okCampos = true; break;
+    const produtoNaTabela = () => [...document.querySelectorAll('table, .ui-datatable')].some(t => {
+      const txt = (t.textContent||'');
+      if (/nenhum produto adicionado/i.test(txt)) return false;
+      return [...t.querySelectorAll('tbody tr')].some(tr => /\d{2,}[.,]\d/.test(tr.textContent||''));
+    });
+
+    // ⚠️ O SEFAZ às vezes faz RELOAD/reset no meio da etapa, mas costuma PRESERVAR
+    // parte do que foi feito. Rodamos a sequência em RODADAS: cada rodada refaz
+    // SOMENTE o que estiver vazio e tenta Adicionar; se o SEFAZ resetar algo,
+    // a rodada seguinte re-seleciona só o que faltar.
+    let adicionadoOk = false;
+    for (let rodada = 1; rodada <= 3 && !adicionadoOk; rodada++) {
+      if (rodada > 1) { atualizarStatus('Produto: reavaliando os campos (rodada ' + rodada + ')...'); await wait(1500); }
+
+      // 1) Grupo
+      if (selTexto('grupoProduto')) {
+        atualizarStatus('Produto: grupo já selecionado ✓');
+      } else {
+        atualizarStatus('Produto: grupo ' + prod.grupo + '...');
+        if (!await selecionarPrimeFaces('grupoProduto', prod.grupo)) setSelectPorId('grupoProduto', prod.grupo);
+        await confirmarCaixa(6000);
+        await aguardarSefazLivre(12000);
+        await wait(5000);
       }
-      atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
-      await confirmarCaixa(2500); // popup atrasado (ex.: Condicionante/Aceito os Termos) trava a tela
-      if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
-      if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); }
-      await wait(900); await aguardarSefazLivre(6000);
-      okCampos = lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '';
-      if (!okCampos) await wait(1500); // postback ainda mexendo na tela — espera e re-tenta
-    }
-    if (!okCampos) {
-      window.__FAV_NFA_PARAR__ = true;
-      try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
-      atualizarStatus('⚠️ O SEFAZ está limpando Quantidade/Valor. Preencha MANUALMENTE (Qtd: ' + qtdStr + ' · Valor: ' + valStr + '), clique Adicionar, e depois "▶ Continuar IA".', 'aviso');
-      throw new Error('PARADO_PELO_USUARIO');
-    }
 
-    if (prod.obs) {
-      const ta = document.querySelector('textarea[id*="observacao"],textarea[id*="Observacao"]');
-      if (ta) { ta.value = prod.obs; ta.dispatchEvent(new Event('change',{bubbles:true})); }
-    }
+      // 2) Tipo de Operação / Natureza
+      if (selTexto('naturezaOperacaoAdmin')) {
+        atualizarStatus('Produto: tipo de operação já selecionado ✓');
+      } else {
+        atualizarStatus('Produto: tipo de operação...');
+        const natBusca = prod.tipo_operacao || prod.natureza || '5101';
+        if (!await selecionarPrimeFaces('naturezaOperacaoAdmin', natBusca)) setSelectPorId('naturezaOperacaoAdmin', natBusca);
+        await confirmarCaixa(6000);
+        await aguardarSefazLivre(12000);
+        await wait(5000);
+      }
 
-    // 5) Adicionar → confirma → espera → VERIFICA se o produto entrou na tabela
-    let adicionado = false;
-    for (let tent = 1; tent <= 2 && !adicionado; tent++) {
+      // 3) Nome do Produto
+      if (selTexto('nomeProdutoAdmin')) {
+        atualizarStatus('Produto: nome já selecionado ✓');
+      } else {
+        atualizarStatus('Produto: nome do produto...');
+        if (prod.produto) { if (!await selecionarPrimeFaces('nomeProdutoAdmin', prod.produto)) setSelectPorId('nomeProdutoAdmin', prod.produto); }
+        await confirmarCaixa(6000);
+        await aguardarSefazLivre(10000);
+        await wait(5000);
+      }
+
+      // 3.5) Dispositivo Legal (pula se desabilitado/já selecionado)
+      atualizarStatus('Produto: dispositivo legal...');
+      const usouDispLegal = await selecionarDispositivoLegal(prod.dispositivo_legal);
+      if (usouDispLegal) { await aguardarSefazLivre(15000); await wait(3000); }
+      else await wait(800);
+
+      // 4) Quantidade e Valor — só preenche o que estiver vazio
+      let okCampos = false;
+      for (let tent = 1; tent <= 4 && !okCampos; tent++) {
+        if (lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '') {
+          atualizarStatus('Produto: quantidade e valor já preenchidos ✓');
+          okCampos = true; break;
+        }
+        atualizarStatus('Produto: quantidade e valor' + (tent>1 ? ' (tentativa '+tent+')' : '') + '...');
+        await confirmarCaixa(2500); // popup atrasado (ex.: Condicionante) trava a tela
+        if (lerCampo('quantidadeProduto') === '') { setInputPorId('quantidadeProduto', qtdStr); await wait(600); }
+        if (lerCampo('valorUnitarioProduto') === '') { setInputPorId('valorUnitarioProduto', valStr); }
+        await wait(900); await aguardarSefazLivre(6000);
+        okCampos = lerCampo('quantidadeProduto') !== '' && lerCampo('valorUnitarioProduto') !== '';
+        if (!okCampos) await wait(1500);
+      }
+      if (!okCampos) continue; // rodada seguinte re-avalia tudo
+
+      if (prod.obs) {
+        const ta = document.querySelector('textarea[id*="observacao"],textarea[id*="Observacao"]');
+        if (ta) { ta.value = prod.obs; ta.dispatchEvent(new Event('change',{bubbles:true})); }
+      }
+
+      // 5) Só clica Adicionar com TODOS os campos ok (selects + qtd/valor)
+      if (!selTexto('grupoProduto') || !selTexto('naturezaOperacaoAdmin') || !selTexto('nomeProdutoAdmin')) {
+        atualizarStatus('Produto: um dos campos resetou — reavaliando...');
+        continue; // rodada seguinte re-seleciona o que faltar
+      }
+      atualizarStatus('Produto: adicionando...');
       await wait(500);
-      const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null);
+      const btnAdd = [...document.querySelectorAll('input,button')].find(b => /adicionar/i.test((b.value||'')+(b.textContent||'')) && b.offsetParent !== null && !b.disabled);
       if (btnAdd) { btnAdd.click(); await wait(DELAY); }
       await aguardarSefazLivre(20000);
       await confirmarCaixa(6000);
       await aguardarSefazLivre(20000);
       await wait(2000);
-      adicionado = [...document.querySelectorAll('table, .ui-datatable')].some(t => {
-        const txt = (t.textContent||'');
-        if (/nenhum produto adicionado/i.test(txt)) return false;
-        return [...t.querySelectorAll('tbody tr')].some(tr => /\d{2,}[.,]\d/.test(tr.textContent||''));
-      });
-      if (!adicionado && tent < 2) {
-        // validação falhou (campos limpos de novo) — re-preenche e tenta 1x mais
-        atualizarStatus('Produto: Adicionar falhou — re-preenchendo quantidade/valor...');
-        setInputPorId('quantidadeProduto', qtdStr); await wait(600);
-        setInputPorId('valorUnitarioProduto', valStr); await wait(900);
-      }
+      adicionadoOk = produtoNaTabela();
     }
-    if (!adicionado) {
+
+    if (!adicionadoOk) {
       window.__FAV_NFA_PARAR__ = true;
       try { sessionStorage.setItem('fav_nfa_parar', '1'); } catch(e){}
-      atualizarStatus('⚠️ Não consegui ADICIONAR o produto. Confira Quantidade (' + qtdStr + ') e Valor (' + valStr + '), clique Adicionar manualmente e depois "▶ Continuar IA".', 'aviso');
+      atualizarStatus('⚠️ Não consegui ADICIONAR o produto após 3 rodadas. Confira os campos (Qtd: ' + qtdStr + ' · Valor: ' + valStr + '), clique Adicionar manualmente e depois "▶ Continuar IA".', 'aviso');
       throw new Error('PARADO_PELO_USUARIO');
     }
   }
@@ -758,6 +751,23 @@ async function detectarPaginaEExecutar(dados) {
   else { atualizarStatus('⏳ Aguardando próxima tela do SEFAZ...', 'aviso'); }
 }
 
+// ─── EXECUÇÃO ÚNICA ──────────────────────────────────────────────────────────
+// Impede DUAS execuções simultâneas (ex.: clicar "Continuar IA" com uma execução
+// ainda ativa) — elas se atropelam nos postbacks e o formulário reseta em loop.
+async function executarUnico(dados) {
+  if (window.__FAV_NFA_EXECUTANDO__) {
+    console.log('[FAV NFA] Já existe uma execução ativa — não inicio outra.');
+    return;
+  }
+  window.__FAV_NFA_EXECUTANDO__ = true;
+  try { await detectarPaginaEExecutar(dados); }
+  catch (err) {
+    if (err && err.message === 'PARADO_PELO_USUARIO') { atualizarStatus('⛔ Pausada. Clique "Continuar IA" para retomar.', 'aviso'); }
+    else { atualizarStatus('❌ ' + err.message, 'erro'); console.error('[FAV NFA] Erro:', err); }
+  }
+  finally { window.__FAV_NFA_EXECUTANDO__ = false; }
+}
+
 // ─── INICIALIZAÇÃO ───────────────────────────────────────────────────────────
 (async () => {
   try { if (sessionStorage.getItem('fav_nfa_parar') === '1') window.__FAV_NFA_PARAR__ = true; } catch(e){}
@@ -767,11 +777,7 @@ async function detectarPaginaEExecutar(dados) {
   let dados = (typeof window !== 'undefined' && window.__FAV_NFA_DADOS__) ? window.__FAV_NFA_DADOS__ : null;
   if (!dados) { try { dados = await new Promise((resolve) => { chrome.runtime.sendMessage({ action: 'GET_NFA_PENDENTE' }, (r) => resolve(r || null)); }); } catch (e) { dados = null; } }
   if (!dados) { atualizarStatus('⚠️ Nenhuma NFA pendente. Emita pelo app FAV.', 'aviso'); setTimeout(removerOverlay, 6000); return; }
-  try { await detectarPaginaEExecutar(dados); }
-  catch (err) {
-    if (err && err.message === 'PARADO_PELO_USUARIO') { atualizarStatus('⛔ Pausada. Clique "Continuar IA" para retomar.', 'aviso'); }
-    else { atualizarStatus('❌ ' + err.message, 'erro'); console.error('[FAV NFA] Erro:', err); }
-  }
+  await executarUnico(dados);
 })();
 
 } // fim guarda __FAV_NFA_LOADED__
