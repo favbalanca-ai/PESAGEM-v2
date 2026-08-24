@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v107"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v108"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2037,23 +2037,28 @@ function _estoqueLocal(){
   // Vendido = TUDO que já foi expedido (pesagens finalizadas), medido pelo peso real —
   // sem limitar ao volume do contrato. Comprometido = saldo do contrato ainda a entregar.
   // Ex.: contrato 10.000 sc, 50% atendido → 5.000 vendido + 5.000 comprometido.
-  var vendGrupo={}, compGrupo={};
+  // Vendido = TOTAL dos contratos de venda (no papel).
+  // Comprometido = o que falta entregar. entGrupo = já entregue (para o estoque físico).
+  var vendGrupo={}, entGrupo={}, compGrupo={};
   (contratosCloud||[]).forEach(function(ct){
     var g=_grupoKey(ct.p); if(!g)return;                 // produto do contrato → grupo
-    var volSc=(parseFloat(ct.vol)||0)/60;                // contrato de venda em kg → sacas
+    var volSc=(parseFloat(ct.vol)||0)/60;                // volume do contrato em kg → sacas
     var entSc=_entregueContrato(ct.n)/60;                // já expedido em sacas (peso real)
-    vendGrupo[g]=(vendGrupo[g]||0)+entSc;                // vendido = tudo expedido (não limita)
-    compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-entSc); // comprometido = saldo restante
+    vendGrupo[g]=(vendGrupo[g]||0)+volSc;                // VENDIDO = total dos contratos
+    entGrupo[g]=(entGrupo[g]||0)+entSc;                  // já entregue (saiu fisicamente)
+    compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-entSc); // COMPROMETIDO = falta entregar
   });
-  // Total de entradas POR GRUPO (não por cultura) — para distribuir o vendido do
-  // grupo sem contar em dobro quando 2 culturas caem no mesmo grupo (ex.: Milho e Milho Safrinha).
+  // Total de entradas POR GRUPO (não por cultura) — para distribuir por grupo
+  // sem contar em dobro quando 2 culturas caem no mesmo grupo (ex.: Milho e Milho Safrinha).
   var grupoTot={};
   Object.keys(rows).forEach(function(k){ var g=_grupoKey(rows[k].cultura); grupoTot[g]=(grupoTot[g]||0)+rows[k].entradas_sc; });
-  // Distribui o vendido do GRUPO proporcional às entradas de cada linha; saldo = entradas - vendido
+  // Distribui por GRUPO proporcional às entradas de cada linha.
+  // Vendido = total dos contratos; Em estoque (saldo) = entradas − já entregue (físico).
   Object.keys(rows).forEach(function(k){
-    var row=rows[k], g=_grupoKey(row.cultura), tot=grupoTot[g]||0;
-    var vend=(vendGrupo[g]||0)*(tot>0?row.entradas_sc/tot:0);
-    row.saidas_sc=vend; row.saldo_sc=Math.max(0,row.entradas_sc-vend);
+    var row=rows[k], g=_grupoKey(row.cultura), tot=grupoTot[g]||0, frac=(tot>0?row.entradas_sc/tot:0);
+    row.saidas_sc=(vendGrupo[g]||0)*frac;                          // VENDIDO = total dos contratos
+    var entregue=(entGrupo[g]||0)*frac;
+    row.saldo_sc=Math.max(0,row.entradas_sc-entregue);            // EM ESTOQUE = entradas − entregue
   });
   // Comprometido POR GRUPO (uma vez por grupo, na 1ª linha daquele grupo)
   var comp={}, jaComp={};
