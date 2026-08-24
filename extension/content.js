@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v6.9 (ordem correta: qtd/valor antes do dispositivo legal)
+// FAV NFA - Content Script v7.0 (skip compara com o VALOR desejado via label visível)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -567,9 +567,13 @@ async function selecionarDispositivoLegal(valorContrato) {
   // se o contrato não informou um dispositivo legal, deixa no placeholder (não obrigatório)
   if (!valorContrato) { logFAV('Dispositivo Legal: habilitado mas contrato não informou — deixando em branco'); return false; }
 
-  // JÁ SELECIONADO (sobreviveu a um reload)? Não re-seleciona — evita novo postback/loop.
-  const atualSel = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
-  if (atualSel && !/^selecione/i.test(atualSel) && !/^[-–—\s]+$/.test(atualSel) && !/nenhum dispositivo legal/i.test(atualSel)) {
+  // JÁ SELECIONADO com o valor DO CONTRATO? Não re-seleciona — evita novo postback.
+  // (Prioriza o label visível; o select nativo pode marcar a 1ª opção por padrão.)
+  const lblDL = [...document.querySelectorAll('[id$="_label"]')].find(e => e.id.includes('dispositivoLegalProduto') && e.offsetParent !== null);
+  const atualSel = ((lblDL ? lblDL.textContent : ((sel.options[sel.selectedIndex] || {}).text || '')) || '').trim();
+  const normDL = (t) => String(t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toUpperCase().replace(/\s+/g,' ').trim();
+  const aDL = normDL(atualSel), bDL = normDL(valorContrato);
+  if (aDL && bDL && !/^SELECIONE/.test(aDL) && !/^[-–—\s]+$/.test(atualSel) && (aDL === bDL || aDL.includes(bDL) || bDL.includes(aDL))) {
     logFAV('Dispositivo Legal: já selecionado ✓ ("' + atualSel + '")');
     return false;
   }
@@ -600,13 +604,28 @@ async function etapa_Produtos(dados) {
   }
   // Texto da opção selecionada num <select> (PrimeFaces esconde o select nativo,
   // então NÃO filtra por visibilidade). Vazio se placeholder ("Selecione...").
+  // Lê o texto SELECIONADO de um dropdown PrimeFaces. Prioriza o LABEL VISÍVEL
+  // (o que o usuário vê) — o <select> nativo escondido pode vir com a 1ª opção
+  // marcada por padrão após o AJAX, dando "já selecionado" FALSO.
   const selTexto = (idParcial) => {
+    const limpa = (t) => {
+      t = String(t || '').trim();
+      if (!t || /^selecione/i.test(t) || /^[-–—\s]+$/.test(t)) return '';
+      return t;
+    };
+    const lbl = [...document.querySelectorAll('[id$="_label"]')].find(e => e.id.includes(idParcial) && e.offsetParent !== null);
+    if (lbl) return limpa(lbl.textContent);
     const sel = [...document.querySelectorAll('select')].find(s => s.id && s.id.includes(idParcial));
     if (!sel || sel.selectedIndex < 0) return '';
-    const t = ((sel.options[sel.selectedIndex] || {}).text || '').trim();
-    // placeholder do SEFAZ pode ser "Selecione...", "-", "--", "–" ou vazio
-    if (!t || /^selecione/i.test(t) || /^[-–—\s]+$/.test(t)) return '';
-    return t;
+    return limpa(((sel.options[sel.selectedIndex] || {}).text || ''));
+  };
+  // Compara textos de opção (sem acentos/caixa/espaços). Só considera "já
+  // selecionado" se for O VALOR DESEJADO — não qualquer valor.
+  const norm = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().replace(/\s+/g, ' ').trim();
+  const mesmoTexto = (a, b) => {
+    a = norm(a); b = norm(b);
+    if (!a || !b) return false;
+    return a === b || a.includes(b) || b.includes(a);
   };
 
   for (let i = 0; i < dados.produtos.length; i++) {
@@ -631,9 +650,9 @@ async function etapa_Produtos(dados) {
     for (let rodada = 1; rodada <= 3 && !adicionadoOk; rodada++) {
       if (rodada > 1) { atualizarStatus('Produto: reavaliando os campos (rodada ' + rodada + ')...'); await wait(1500); }
 
-      // 1) Grupo
-      if (selTexto('grupoProduto')) {
-        atualizarStatus('Produto: grupo já selecionado ✓');
+      // 1) Grupo — pula SÓ se o selecionado for o grupo desejado
+      if (mesmoTexto(selTexto('grupoProduto'), prod.grupo)) {
+        atualizarStatus('Produto: grupo já selecionado ✓ (' + selTexto('grupoProduto') + ')');
       } else {
         atualizarStatus('Produto: grupo ' + prod.grupo + '...');
         if (!await selecionarPrimeFaces('grupoProduto', prod.grupo)) setSelectPorId('grupoProduto', prod.grupo);
@@ -642,20 +661,20 @@ async function etapa_Produtos(dados) {
         await wait(5000);
       }
 
-      // 2) Tipo de Operação / Natureza
-      if (selTexto('naturezaOperacaoAdmin')) {
+      // 2) Tipo de Operação / Natureza — pula SÓ se for a operação desejada
+      const natBusca = prod.tipo_operacao || prod.natureza || '5101';
+      if (mesmoTexto(selTexto('naturezaOperacaoAdmin'), natBusca)) {
         atualizarStatus('Produto: tipo de operação já selecionado ✓');
       } else {
         atualizarStatus('Produto: tipo de operação...');
-        const natBusca = prod.tipo_operacao || prod.natureza || '5101';
         if (!await selecionarPrimeFaces('naturezaOperacaoAdmin', natBusca)) setSelectPorId('naturezaOperacaoAdmin', natBusca);
         await confirmarCaixa(6000);
         await aguardarSefazLivre(12000);
         await wait(5000);
       }
 
-      // 3) Nome do Produto
-      if (selTexto('nomeProdutoAdmin')) {
+      // 3) Nome do Produto — pula SÓ se for o produto desejado
+      if (prod.produto && mesmoTexto(selTexto('nomeProdutoAdmin'), prod.produto)) {
         atualizarStatus('Produto: nome já selecionado ✓');
       } else {
         atualizarStatus('Produto: nome do produto...');
