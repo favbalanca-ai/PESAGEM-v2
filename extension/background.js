@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v6.4 (re-tenta injeção quando a SEFAZ recarrega no meio)
+// FAV NFA - Background Service Worker v7.5 (registra a nota emitida: PDF -> Drive + planilha)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '6.4' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.5' });
     return true;
   }
   return false;
@@ -130,6 +130,11 @@ async function processarPDF(msg) {
   const resp = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
   if (!resp.ok) throw new Error('GAS retornou: ' + resp.status);
   const data = await resp.json();
-  if (data.ok) chrome.storage.local.remove('nfa_pendente');
+  if (data.ok) {
+    chrome.storage.local.remove('nfa_pendente');
+    // O app faz polling de GET_NFA_CONCLUIDA para gravar o nº da NFA no ticket.
+    // Sem guardar aqui, o app esperava para sempre e a nota nunca era marcada.
+    chrome.storage.local.set({ nfa_concluida: data });
+  }
   return data;
 }

@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v118"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v119"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1667,7 +1667,14 @@ function logout(){
 // ══ DADOS: planilha é a fonte de verdade ══════════════════════
 // Localmente só guardamos pendentes (offline) e cache temporário
 function saveDB(){
-  localStorage.setItem('ppd-v2',JSON.stringify(pend));
+  // NUNCA pode estourar: se o localStorage encher (assinaturas/fotos em base64),
+  // um erro aqui derrubava a linha seguinte — o envio para a planilha — e a
+  // pesagem ficava só no aparelho, com o status parado em "Aguardando" na planilha.
+  try{
+    localStorage.setItem('ppd-v2',JSON.stringify(pend));
+  }catch(e){
+    try{ addLog('⚠️ Memória do aparelho cheia ao salvar a fila: '+e.message,'erro'); }catch(_){}
+  }
 }
 function saveCloud(){
   try{
@@ -4030,7 +4037,12 @@ function finalizar(){
   try{ localStorage.setItem('sig_'+atual.id, atual.assinatura); }catch(e){}
   const idx=DB.ordens.findIndex(o=>o.id===atual.id);
   if(idx>=0)DB.ordens[idx]={...atual};
-  saveDB(); _refletirNoCloud(atual); enviar(atual,'atualizar');
+  saveDB(); _refletirNoCloud(atual);
+  // Avisa em alto e bom som se o peso NÃO chegou na planilha (antes falhava calado
+  // e o ticket ficava "Aguardando" na planilha para todo mundo).
+  enviar(atual,'atualizar').then(function(ok){
+    if(!ok) toast('⚠️ Peso salvo no aparelho, mas NÃO chegou na planilha ('+(_ultimoErroEnvio||'erro')+') — veja Diagnóstico');
+  });
   uploadFotosDrive(atual);
   uploadTicketDrive(atual);
   // som de alerta conforme status
@@ -4397,29 +4409,37 @@ function limparFilaInvalidos(){
 
 /* ── Enviar para planilha (offline → fila com timestamp) ────── */
 async function enviar(ordem,acao){
-  if(!SHEETS_URL){addLog('SHEETS_URL não configurado','erro');return;}
+  if(!SHEETS_URL){addLog('SHEETS_URL não configurado','erro');_ultimoErroEnvio='SHEETS_URL não configurado';return false;}
   if(!navigator.onLine){
     addP(ordem,acao);
     addLog(`Offline — ${ordem.placa||ordem.id} salvo na fila`,'aviso');
-    updS();return;
+    _ultimoErroEnvio='sem internet';
+    updS();return false;
   }
   try{
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao,ordem,token:TOKEN})});
-    const j=JSON.parse(await r.text());
+    const txt=await r.text();
+    let j; try{ j=JSON.parse(txt); }
+    catch(_){ throw new Error('resposta inválida do backend: '+txt.substring(0,120)); }
     if(j.ok){
       addLog(`✅ ${acao} — ${ordem.placa||ordem.id}`,'ok');
       localStorage.setItem('syncUlt-v2',new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+      updS(); return true;
     } else {
       addP(ordem,acao);
       addLog(`❌ API recusou — ${ordem.placa||ordem.id}: ${j.erro||'erro desconhecido'}`,'erro');
+      _ultimoErroEnvio=j.erro||'a planilha recusou o envio';
     }
   }catch(e){
     addP(ordem,acao);
     addLog(`❌ Falha de rede — ${ordem.placa||ordem.id}: ${e.message}`,'erro');
+    _ultimoErroEnvio=e.message;
   }
   updS();
+  return false;
 }
+let _ultimoErroEnvio='';
 
 /* ── Adicionar à fila com timestamp e contador de tentativas ── */
 function addP(o,a){

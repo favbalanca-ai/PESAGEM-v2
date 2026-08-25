@@ -90,10 +90,11 @@ function clicarBotaoVisivelPorId(trechoId) {
 // ─── SEQUÊNCIA DE ETAPAS (mostra o fluxo p/ o operador) ───────────────────────
 // A etapa corrente é derivada da página atual a cada injeção, então o progresso
 // se mantém correto mesmo o content.js recarregando entre as telas do SEFAZ.
-const ETAPAS_NFA = ['tipo','emitente','destinatario','transporte','produtos','resumo'];
+const ETAPAS_NFA = ['tipo','emitente','destinatario','transporte','produtos','resumo','registrar'];
 const ETAPAS_NOME = {
   tipo:'Tipo de nota', emitente:'Emitente', destinatario:'Destinatário',
-  transporte:'Transporte', produtos:'Produtos', resumo:'Resumo / Enviar'
+  transporte:'Transporte', produtos:'Produtos', resumo:'Resumo / Enviar',
+  registrar:'Registrar no app'
 };
 let _etapaCorrente = null;
 function definirEtapa(ch){ if (ETAPAS_NFA.indexOf(ch) >= 0) { _etapaCorrente = ch; if (_overlay) atualizarStatus(_ultimaMsg || '...', _ultimoTipo); } }
@@ -132,7 +133,11 @@ function atualizarStatus(msg, tipo = 'info') {
     '<div style="display:flex;gap:6px;margin-top:6px">' +
     '<button id="fav-btn-pular" style="flex:1;padding:7px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⏭️ Pular campo</button>' +
     '<button id="fav-btn-log" style="flex:1;padding:7px;background:#546e8f;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📋 Copiar log</button>' +
-    '</div>';
+    '</div>' +
+    '<div style="margin-top:6px">' +
+    '<button id="fav-btn-registrar" style="width:100%;padding:8px;background:#0e7c66;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📄 Registrar NFA emitida (anexar PDF)</button>' +
+    '</div>' +
+    '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
   const bp = _overlay.querySelector('#fav-btn-parar');
   if (bp) bp.onclick = () => {
     window.__FAV_NFA_PARAR__ = true;
@@ -178,8 +183,100 @@ function atualizarStatus(msg, tipo = 'info') {
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(feito).catch(fallback);
     else fallback();
   };
+  // Registrar a nota já emitida anexando o PDF que a SEFAZ baixou
+  const breg = _overlay.querySelector('#fav-btn-registrar');
+  const finp = _overlay.querySelector('#fav-pdf-input');
+  if (breg && finp) {
+    breg.onclick = () => finp.click();
+    finp.onchange = async () => {
+      const f = finp.files && finp.files[0];
+      finp.value = '';
+      if (!f) return;
+      try {
+        const b64 = await lerArquivoBase64(f);
+        await registrarNFAcomPDF(b64, 'arquivo: ' + f.name);
+      } catch (e) { atualizarStatus('❌ Não consegui ler o PDF: ' + e.message, 'erro'); }
+    };
+  }
 }
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
+
+// ─── REGISTRO DA NOTA EMITIDA ────────────────────────────────────────────────
+// Depois que a SEFAZ emite, o PDF precisa ir para o backend (Drive + aba
+// NFAs_Emitidas + e-mail/WhatsApp). Sem esta etapa a nota sai no SEFAZ mas o app
+// nunca fica sabendo — o ticket segue "Aguardando NFA" para sempre.
+function lerArquivoBase64(file) {
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => { const s = String(fr.result || ''); res(s.substring(s.indexOf(',') + 1)); };
+    fr.onerror = () => rej(new Error('falha ao ler o arquivo'));
+    fr.readAsDataURL(file);
+  });
+}
+function bufferParaBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+async function obterDadosNFA() {
+  if (window.__FAV_NFA_DADOS__) return window.__FAV_NFA_DADOS__;
+  try { return await new Promise(r => chrome.runtime.sendMessage({ action: 'GET_NFA_PENDENTE' }, x => r(x || null))); }
+  catch (e) { return null; }
+}
+async function registrarNFAcomPDF(pdf_base64, origem) {
+  const dados = await obterDadosNFA();
+  if (!dados) { atualizarStatus('⚠️ Sem os dados da NFA nesta aba — emita pelo app para registrar.', 'erro'); return false; }
+  logFAV('Registrando NFA no backend (' + origem + ')');
+  atualizarStatus('📤 Registrando a nota — Drive, planilha e envio ao destinatário...', 'info');
+  const resp = await new Promise(r => {
+    try { chrome.runtime.sendMessage({ action: 'PROCESSAR_PDF_NFA', pdf_base64: pdf_base64, dados_nfa: dados }, x => r(x || null)); }
+    catch (e) { r({ erro: e.message }); }
+  });
+  if (resp && resp.ok) {
+    logFAV('NFA registrada: nº ' + (resp.numero_nfa || '?'));
+    atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (resp.numero_nfa || '—') +
+      '<div style="font-size:11px;margin-top:5px">Já aparece no app como emitida.</div>', 'ok');
+    return true;
+  }
+  const err = (resp && (resp.erro || resp.error)) || 'sem resposta do servidor';
+  logFAV('Falha ao registrar: ' + err);
+  atualizarStatus('❌ Não consegui registrar a nota: ' + err +
+    '<div style="font-size:11px;margin-top:5px">Use "📄 Registrar NFA emitida" e anexe o PDF baixado.</div>', 'erro');
+  return false;
+}
+// Procura o PDF da nota na própria página (link, iframe, embed) e baixa usando a
+// sessão da SEFAZ. Retorna o base64 ou null se não achar.
+async function procurarPDFnaPagina() {
+  const urls = [...document.querySelectorAll('a[href],iframe[src],embed[src],object[data]')]
+    .map(e => e.href || e.src || e.getAttribute('data') || '')
+    .filter(u => u && /\.pdf|pdf=|imprimir|impressao|danfe|relatorio|documento/i.test(u));
+  for (const u of [...new Set(urls)]) {
+    try {
+      const r = await fetch(u, { credentials: 'include' });
+      if (!r.ok) continue;
+      const buf = await r.arrayBuffer();
+      const cab = String.fromCharCode.apply(null, new Uint8Array(buf.slice(0, 5)));
+      if (cab !== '%PDF-') continue;
+      logFAV('PDF encontrado na página: ' + u);
+      return bufferParaBase64(buf);
+    } catch (e) { logFAV('Candidato a PDF falhou (' + u + '): ' + e.message); }
+  }
+  return null;
+}
+async function etapa_Registrar(dados) {
+  const txt = document.body.innerText || '';
+  const pareceEmitida = /sucesso|emitida|autoriza|protocolo|n[uú]mero da nota/i.test(txt);
+  const b64 = await procurarPDFnaPagina();
+  if (b64) { definirEtapa('registrar'); await registrarNFAcomPDF(b64, 'PDF da página'); return; }
+  if (pareceEmitida) {
+    definirEtapa('registrar');
+    atualizarStatus('📄 <b>Nota emitida!</b> Clique em <b>"Registrar NFA emitida"</b> e escolha o PDF que a SEFAZ baixou — ele vai para o Drive, para a planilha e para o destinatário.', 'aviso');
+    return;
+  }
+  atualizarStatus('⏳ Aguardando próxima tela do SEFAZ...' +
+    '<div style="font-size:11px;margin-top:5px">Se a nota já saiu, use "📄 Registrar NFA emitida".</div>', 'aviso');
+}
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 // Preenche um campo NUMÉRICO do PrimeFaces: seta TODOS os inputs com o id
@@ -866,7 +963,7 @@ async function detectarPaginaEExecutar(dados) {
   else if (abaDestinat) { definirEtapa('destinatario'); await etapa_Destinatario(dados); }
   else if (abaEmitente) { definirEtapa('emitente'); await etapa_Emitente(dados); }
   else if (enviarVisivel || temResumo) { definirEtapa('resumo'); await etapa_Resumo(dados); }
-  else { atualizarStatus('⏳ Aguardando próxima tela do SEFAZ...', 'aviso'); }
+  else { await etapa_Registrar(dados); }   // sem abas de formulário = nota já enviada
 }
 
 // ─── EXECUÇÃO ÚNICA ──────────────────────────────────────────────────────────
