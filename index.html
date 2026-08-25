@@ -1143,6 +1143,14 @@ body.dark .card{background:#1a2d22}
       </div>
     </div>
 
+    <!-- NF por contrato: expedido x emitido -->
+    <div class="card">
+      <div class="ct">🧾 NF por contrato — expedido × emitido</div>
+      <div id="gc-nf-ct" style="font-size:12px">
+        <div style="color:var(--ink3);font-size:12px">Carregando...</div>
+      </div>
+    </div>
+
     <!-- Produção por talhão -->
     <div class="card">
       <div class="ct">🌱 Produção por talhão — safra atual</div>
@@ -1398,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v114"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v115"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1990,7 +1998,7 @@ function renderDashGeral(){
   const sacasExpHoje=expHoje.reduce((s,o)=>s+(parseFloat(o.cargaLiquida||0)*1000/60),0);
   document.getElementById('gc-exp-hoje').textContent=expHoje.length;
   document.getElementById('gc-sacas-exp').textContent=Math.round(sacasExpHoje).toLocaleString('pt-BR');
-  renderGcEstoque(); renderGcProducao(); renderGraficoRec7dias();
+  renderGcEstoque(); renderGcNFContratos(); renderGcProducao(); renderGraficoRec7dias();
   renderDashBalancas(cloud);
   const elBal=document.getElementById('gc-balancas');const elDash=document.getElementById('dash-balancas');
   if(elBal&&elDash) elBal.innerHTML=elDash.innerHTML;
@@ -2162,6 +2170,74 @@ function renderGcEstoque(elId){
 }
 // Renderiza o estoque por produto nos dois lugares (aba Expedição e Consolidado)
 function renderEstoqueProdutos(){ renderGcEstoque('gc-estoque'); }
+
+/* ═══ Painel NF por contrato ═══════════════════════════════════════════
+   Por contrato de venda:
+     EXPEDIDO   = peso líquido dos tickets finalizados ligados ao contrato
+     COM NF     = kg já emitidos em NFA nesses tickets (soma das NFAs, do servidor)
+     FALTA NF   = expedido − com NF (o que já saiu da fazenda e ainda está sem nota)
+   Diferenças abaixo de 1 saca são arredondamento (o servidor guarda sacas). */
+function _nfPorContrato(){
+  const map={};
+  (cloud||[]).forEach(o=>{
+    if(String(o.status||'').indexOf('Finalizado')<0) return;
+    const kg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
+    if(kg<=0) return;
+    const ct=String(o.numOrdem||'').trim()||'— sem contrato —';
+    if(!map[ct]) map[ct]={ct:ct,expKg:0,nfKg:0,cargas:0,pend:0};
+    const nfKg=Math.min(kg,_kgNFAemitidos(o));
+    map[ct].expKg+=kg; map[ct].nfKg+=nfKg; map[ct].cargas++;
+    if(kg-nfKg>=NFA_TOL_KG) map[ct].pend++;
+  });
+  return Object.values(map).map(r=>{
+    const c=(contratosCloud||[]).find(x=>String(x.n||'').trim()===r.ct);
+    r.produto=c?(c.p||''):''; r.volKg=c?(parseFloat(c.vol)||0):0;
+    r.faltaKg=Math.max(0,r.expKg-r.nfKg);
+    if(r.faltaKg<NFA_TOL_KG) r.faltaKg=0;
+    return r;
+  }).sort((a,b)=> b.faltaKg-a.faltaKg || b.expKg-a.expKg);
+}
+function renderGcNFContratos(){
+  const el=document.getElementById('gc-nf-ct'); if(!el) return;
+  const lista=_nfPorContrato();
+  if(!lista.length){ el.innerHTML='<div style="color:var(--ink3)">Nenhuma expedição finalizada ainda.</div>'; return; }
+  const fkg=v=>Math.round(v||0).toLocaleString('pt-BR');
+  const fsc=v=>Math.round((v||0)/60).toLocaleString('pt-BR');
+  const bx=(lbl,v,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px">
+      <div style="font-weight:800;color:${cor};font-size:12px">${fkg(v)} kg</div>
+      <div style="font-size:10px;font-weight:700;color:${cor};opacity:.85">${fsc(v)} sc</div>
+      <div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div>
+    </div>`;
+  let tE=0,tN=0,tF=0,tP=0;
+  let html=lista.map(r=>{
+    tE+=r.expKg; tN+=r.nfKg; tF+=r.faltaKg; tP+=r.pend;
+    const pct=r.expKg>0?Math.min(100,Math.round(r.nfKg/r.expKg*100)):0;
+    const okTudo=r.faltaKg===0;
+    return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:.5px solid var(--brd)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-weight:800;font-size:14px">🧾 ${r.ct}${r.produto?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+r.produto+'</span>':''}</span>
+        <span style="font-size:11px;color:${okTudo?'#1a6c3c':'#a15c00'};font-weight:700">${okTudo?'✅ tudo com NF':'⚠️ '+r.pend+' carga'+(r.pend>1?'s':'')+' sem NF'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;text-align:center">
+        ${bx('Expedido',r.expKg,'var(--g1)','var(--g3)')}
+        ${bx('Com NF emitida',r.nfKg,'#1a5c9e','#e8f0fb')}
+        ${bx('Falta emitir NF',r.faltaKg,r.faltaKg>0?'#c0392b':'#1a6c3c',r.faltaKg>0?'#fdeaea':'var(--g3)')}
+      </div>
+      <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden;margin-top:7px"><div style="height:100%;width:${pct}%;background:#1a5c9e;border-radius:4px" title="${pct}% com NF"></div></div>
+      <div style="font-size:10px;color:var(--ink3);margin-top:4px;display:flex;justify-content:space-between">
+        <span>${r.cargas} carga${r.cargas>1?'s':''} · ${pct}% com NF</span>
+        <span>${r.volKg>0?'Contrato: '+fkg(r.volKg)+' kg ('+fsc(r.volKg)+' sc)':''}</span>
+      </div>
+    </div>`;
+  }).join('');
+  html+=`<div style="background:${tF>0?'#fdeaea':'var(--g3)'};border-radius:9px;padding:10px 12px;text-align:center">
+    <div style="font-size:11px;color:var(--ink2)">Total expedido <b>${fkg(tE)} kg</b> (${fsc(tE)} sc) · com NF <b style="color:#1a5c9e">${fkg(tN)} kg</b> (${fsc(tN)} sc)</div>
+    <div style="font-size:14px;font-weight:800;color:${tF>0?'#c0392b':'#1a6c3c'};margin-top:3px">${tF>0?'Falta emitir NF: '+fkg(tF)+' kg ('+fsc(tF)+' sc) · '+tP+' carga'+(tP>1?'s':''):'✅ Todo o expedido já tem NF'}</div>
+  </div>`;
+  const temServ=(cloud||[]).some(o=>o.nfa_sacas!=null);
+  if(!temServ) html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Kg de NF deste aparelho · publique a versão nova do backend para somar as NFAs de todos os aparelhos</div>';
+  el.innerHTML=html;
+}
 
 function renderGcProducao(){
   const el=document.getElementById('gc-producao');if(!el)return;
@@ -6718,7 +6794,7 @@ function atualizarBotoesNFA(o){
   // Ticket AGUARDANDO também pode emitir (antecipada): o peso líquido é editável
   // na prévia da NFA, então o operador informa o peso na hora.
   const pesoTicketKg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
-  const jaKg=(typeof _kgJaEmitidos==='function')?_kgJaEmitidos(o.id):0;
+  const jaKg=(typeof _kgNFAemitidos==='function')?_kgNFAemitidos(o):0;
   const temSaldo=emitida && pesoTicketKg>0 && jaKg>0 && jaKg<pesoTicketKg;
   if(btnNFA){
     btnNFA.style.display=(isAdm && (!emitida || temSaldo))?'block':'none';
@@ -6954,6 +7030,28 @@ function _registrarKgEmitidos(ticketId,kg){
     localStorage.setItem('nfa-emitidos-v2',JSON.stringify(m));
   }catch(e){}
 }
+/* kg já emitidos em NFA de um ticket, valendo em QUALQUER aparelho.
+   Servidor (aba NFAs_Emitidas → nfa_sacas, soma de todas as NFAs do ticket) é a
+   fonte principal; o registro local só entra se estiver maior (emissão recém-feita
+   neste aparelho, antes do próximo sync). Backend antigo (sem nfa_sacas): se a NFA
+   está marcada como emitida, considera o peso todo do ticket. */
+const NFA_TOL_KG=60;   // tolerância de 1 saca (o servidor guarda em sacas inteiras)
+// Mesma conta a partir do ID do ticket (usada na prévia da NFA)
+function _kgNFAticket(ticketId){
+  const o=(cloud||[]).find(x=>x.id===ticketId);
+  return o?_kgNFAemitidos(o):_kgJaEmitidos(ticketId);
+}
+function _kgNFAemitidos(o){
+  if(!o) return 0;
+  const pesoKg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
+  const localKg=_kgJaEmitidos(o.id);
+  let servKg=0;
+  if(o.nfa_sacas!=null && Number(o.nfa_sacas)>0) servKg=Math.round(Number(o.nfa_sacas)*60);
+  else if(o.nfa_emitida && !localKg) servKg=pesoKg;   // backend antigo → NFA cheia
+  let kg=Math.max(localKg,servKg);
+  if(pesoKg>0 && kg>0 && kg>pesoKg-NFA_TOL_KG) kg=pesoKg;  // arredondamento de sacas → quitado
+  return kg;
+}
 let _nfaPesoTicketKg=0; // peso líquido original do ticket (kg)
 // Informação complementar da NFA em 3 partes, cada uma opcional na prévia:
 //   CABEÇALHO = dados do contrato (CONTRATO/VOLUME/SALDO/MOTORISTA/CPF) — checkbox
@@ -7010,7 +7108,7 @@ function renderPreviaNFA(n){
   document.getElementById('nfa-prev-zap').textContent=n.destinatario_whatsapp||'—';
   // Peso: ticket, já emitido e sugestão (saldo p/ complemento)
   _nfaPesoTicketKg=Number(n.peso_liquido_kg)||0;
-  const ja=_kgJaEmitidos(n.ticket_id);
+  const ja=_kgNFAticket(n.ticket_id);
   const lnT=document.getElementById('nfa-ln-ticket'), lnJ=document.getElementById('nfa-ln-jaemit');
   if(lnT){lnT.style.display='flex';document.getElementById('nfa-prev-ticket').textContent=_nfaPesoTicketKg.toLocaleString('pt-BR')+' kg';}
   if(lnJ){
@@ -7037,7 +7135,7 @@ function _onEditPesoNFA(){
     else p.quantidade=String(kg);
   });
   // Saldo p/ complemento = peso do ticket − já emitido − o que vai nesta NF
-  const ja=_kgJaEmitidos(_nfaDados.ticket_id);
+  const ja=_kgNFAticket(_nfaDados.ticket_id);
   const saldo=Math.max(0,_nfaPesoTicketKg-ja-kg);
   const lnS=document.getElementById('nfa-ln-saldo');
   if(lnS){
