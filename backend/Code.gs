@@ -171,6 +171,18 @@ function listarContratosNFA(filtros){ return listarContratosUnico(filtros); }
 function salvarContratoNFA(dados){ return salvarContratoUnico(dados); }
 
 // ── Atualizar volume entregue no contrato NFA ────────────────
+// Peso em kg de um item da NFA, conforme a unidade do contrato.
+// T → ×1000 · SC → × peso do saco (60 kg, ou o nº que vier no nome: "SC 40 KG") · KG → direto
+function pesoKgProdutoNFA(p){
+  var q=n(p.quantidade), u=s(p.unidade).toUpperCase(), nome=s(p.produto).toUpperCase();
+  if(u==="T"||u==="TON"||u==="TONELADA") return q*1000;
+  if(u.indexOf("SC")===0||u.indexOf("SACA")===0){
+    var m=nome.match(/\bSC\s*(\d{2,3})\s*KG/);
+    return q*(m?parseInt(m[1],10):60);
+  }
+  return q; // KG
+}
+
 function atualizarVolumeContratoNFA(contrato_id,sacas){
   try{
     var ss=SpreadsheetApp.openById(PLANILHA_ID);
@@ -334,12 +346,21 @@ function processarNFA(payload){
     var msg_int="✅ *NFA Emitida - FAV*\nEmitente: "+emitente_nome+"\nDestinatário: "+dest_nome+"\nTicket: "+ticket_id+"\nContrato: "+contrato_id+"\nDrive: "+drive_url;
     links_wa.push(montarLinkWA(FAV_WA_ESCRITORIO,msg_int));
 
-    var pesoKg=0;
-    produtos.forEach(function(p){pesoKg+=n(p.quantidade);});
+    // ── Peso desta NFA ──────────────────────────────────────────────
+    // A quantidade vem na UNIDADE DO CONTRATO (KG, T, SC 60/40 kg ou CABEÇA),
+    // não em kg. Converter antes de somar, senão o peso registrado sai errado
+    // (ex.: 682 SC seriam gravadas como 11 sacas).
+    var pesoKg=0, qtdCabecas=0, ehCabeca=false;
+    produtos.forEach(function(p){
+      var u=s(p.unidade).toUpperCase();
+      if(u.indexOf("CAB")===0){ ehCabeca=true; qtdCabecas+=n(p.quantidade); }
+      else pesoKg+=pesoKgProdutoNFA(p);
+    });
     var sacas=Math.round(pesoKg/60);
-    atualizarVolumeContratoNFA(contrato_id,sacas);
+    // Vol_Entregue do contrato é medido em kg (cabeças, no caso de gado)
+    atualizarVolumeContratoNFA(contrato_id,ehCabeca?qtdCabecas:pesoKg);
 
-    registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas);
+    registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas,pesoKg);
 
     return{ok:true,drive_url:drive_url,numero_nfa:numero_nfa,links_whatsapp:links_wa,sacas_registradas:sacas};
   }catch(e){
@@ -427,18 +448,23 @@ function montarLinkWA(numero,mensagem){
   return"https://wa.me/"+numero.replace(/\D/g,"")+"?text="+encodeURIComponent(mensagem);
 }
 
-function registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas){
+function registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas,peso_kg){
   try{
     var ss=SpreadsheetApp.openById(PLANILHA_ID);
     var aba=ss.getSheetByName("NFAs_Emitidas");
     if(!aba){
       aba=ss.insertSheet("NFAs_Emitidas");
-      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em"];
+      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg"];
       aba.getRange(1,1,1,cab.length).setValues([cab]).setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
       aba.setFrozenRows(1);
     }
+    // Coluna 10 = Peso kg exato desta NFA (o app usa p/ saber o que falta emitir).
+    // Planilhas antigas têm só 9 colunas — cria a coluna/cabeçalho se faltar.
+    if(aba.getMaxColumns()<10) aba.insertColumnsAfter(aba.getMaxColumns(),10-aba.getMaxColumns());
+    if(!s(aba.getRange(1,10).getValue()))
+      aba.getRange(1,10).setValue("Peso kg").setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
     aba.appendRow([numero_nfa,ticket_id,contrato_id,emitente,dest_nome,sacas,
-      Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy"),drive_url,agora()]);
+      Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy"),drive_url,agora(),Math.round(n(peso_kg))]);
   }catch(e){Logger.log("registrarNFAEmitida: "+e.message);}
 }
 
@@ -571,14 +597,19 @@ function listarPesagens(){
   var ticketsComNFA={};
   var shN=ss.getSheetByName("NFAs_Emitidas");
   if(shN&&shN.getLastRow()>1){
-    var nfaRows=shN.getRange(2,1,shN.getLastRow()-1,8).getValues(); // Nº, Ticket, Contrato, Emit, Dest, Sacas(6), Data, Drive URL(8)
+    var nCn=Math.min(shN.getLastColumn(),10); // Nº, Ticket, Contrato, Emit, Dest, Sacas(6), Data, Drive(8), Reg(9), Peso kg(10)
+    var nfaRows=shN.getRange(2,1,shN.getLastRow()-1,nCn).getValues();
     for(var k=0;k<nfaRows.length;k++){
       var tk=s(nfaRows[k][1]);
       if(!tk) continue;
-      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",sacas:0,qtd:0};
+      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",sacas:0,kg:0,qtd:0};
       ticketsComNFA[tk].numero=s(nfaRows[k][0]);
       ticketsComNFA[tk].drive=s(nfaRows[k][7]);
-      ticketsComNFA[tk].sacas+=n(nfaRows[k][5]);
+      var scLin=n(nfaRows[k][5]);
+      var kgLin=nCn>=10?n(nfaRows[k][9]):0;      // kg exato (NFAs novas)
+      if(!kgLin) kgLin=scLin*60;                 // NFAs antigas: converte das sacas
+      ticketsComNFA[tk].sacas+=scLin;
+      ticketsComNFA[tk].kg+=kgLin;
       ticketsComNFA[tk].qtd++;
     }
   }
@@ -605,6 +636,7 @@ function listarPesagens(){
       nfa_numero:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].numero:"",
       nfa_drive_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].drive:"", // [NFA-AUTORIZACAO]
       nfa_sacas:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].sacas:0,      // sacas já emitidas em NFA (soma)
+      nfa_kg:ticketsComNFA[idTicket]?Math.round(ticketsComNFA[idTicket].kg):0,// kg já emitidos em NFA (soma)
       nfa_qtd:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].qtd:0,          // quantas NFAs o ticket já tem
       nfa_autorizada:(r[27]?s(r[27])==="Sim":false),                          // [NFA-AUTORIZACAO] col 28
       nfa_autorizada_por:(r[28]?s(r[28]):"")                                   // [NFA-AUTORIZACAO] col 29
