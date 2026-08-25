@@ -565,14 +565,21 @@ function listarPesagens(){
   var sh=ss.getSheetByName("Pesagem");
   if(!sh||sh.getLastRow()<2)return{ok:true,ordens:[]};
 
-  // Map de tickets com NFA emitida (nº + link do Drive) — aba NFAs_Emitidas
+  // Map de tickets com NFA emitida (nº + link do Drive + SACAS) — aba NFAs_Emitidas
+  // Soma as sacas de TODAS as NFAs do mesmo ticket (NF antecipada + complemento),
+  // para o app saber quanto do que já foi expedido ainda está sem NF.
   var ticketsComNFA={};
   var shN=ss.getSheetByName("NFAs_Emitidas");
   if(shN&&shN.getLastRow()>1){
-    var nfaRows=shN.getRange(2,1,shN.getLastRow()-1,8).getValues(); // Nº, Ticket, Contrato, ..., Drive URL(8)
+    var nfaRows=shN.getRange(2,1,shN.getLastRow()-1,8).getValues(); // Nº, Ticket, Contrato, Emit, Dest, Sacas(6), Data, Drive URL(8)
     for(var k=0;k<nfaRows.length;k++){
       var tk=s(nfaRows[k][1]);
-      if(tk) ticketsComNFA[tk]={numero:s(nfaRows[k][0]), drive:s(nfaRows[k][7])};
+      if(!tk) continue;
+      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",sacas:0,qtd:0};
+      ticketsComNFA[tk].numero=s(nfaRows[k][0]);
+      ticketsComNFA[tk].drive=s(nfaRows[k][7]);
+      ticketsComNFA[tk].sacas+=n(nfaRows[k][5]);
+      ticketsComNFA[tk].qtd++;
     }
   }
 
@@ -597,6 +604,8 @@ function listarPesagens(){
       nfa_emitida:!!ticketsComNFA[idTicket],
       nfa_numero:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].numero:"",
       nfa_drive_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].drive:"", // [NFA-AUTORIZACAO]
+      nfa_sacas:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].sacas:0,      // sacas já emitidas em NFA (soma)
+      nfa_qtd:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].qtd:0,          // quantas NFAs o ticket já tem
       nfa_autorizada:(r[27]?s(r[27])==="Sim":false),                          // [NFA-AUTORIZACAO] col 28
       nfa_autorizada_por:(r[28]?s(r[28]):"")                                   // [NFA-AUTORIZACAO] col 29
     });
