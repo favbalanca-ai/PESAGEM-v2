@@ -1398,7 +1398,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v112"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v113"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4757,9 +4757,15 @@ function normOrdem(o){
     // "Finalizado - "+statusPeso a cada atualização; sem limpar, empilha:
     // "Finalizado - Finalizado - ... - ATENÇÃO"). statusPeso = só o veredito;
     // status = "Finalizado - X" único.
-    statusPeso:   String(o.statusPeso||o.status||'').replace(/(Finalizado\s*[-—]\s*)+/gi,'').trim(),
-    status:       (function(){ var s=String(o.status||''); if(!/finalizado/i.test(s)) return s;
+    // statusPeso = SÓ veredito de peso (CONFORME/ATENÇÃO/EXCEDIDO). Ticket
+    // aguardando fica '' — senão o backend grava "Finalizado - Aguardando" ao
+    // atualizar (ex.: validação p/ NFA antecipada) e o ticket some da lista.
+    statusPeso:   (function(){ var v=String(o.statusPeso||o.status||'').replace(/(Finalizado\s*[-—]\s*)+/gi,'').trim();
+                    return /CONFORME|ATEN|EXCEDIDO/i.test(v)?v:''; })(),
+    status:       (function(){ var s=String(o.status||'');
                     var resto=s.replace(/(Finalizado\s*[-—]\s*)+/gi,'').trim();
+                    if(/aguardando/i.test(resto)) return 'Aguardando';   // repara "Finalizado - Aguardando"
+                    if(!/finalizado/i.test(s)) return s;
                     return resto?('Finalizado - '+resto):'Finalizado'; })(),
     assinatura:   assinatura,
     longo:        o.longo===true||o.longo==='Sim'||o.longo==='sim',
