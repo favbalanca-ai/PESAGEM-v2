@@ -521,7 +521,7 @@ function salvarPesagem(o){
   ];
   sh.appendRow(linha);
   var row=sh.getLastRow();
-  var st=s(o.statusPeso);
+  var st=s(o.statusPeso).replace(/(Finalizado\s*[-—]\s*)+/gi,"").trim();
   var cor=st==="EXCEDIDO"?"#fce8e8":st==="ATENCAO"?"#fff3cd":st!==""?"#e8f5e9":"#fff9e6";
   sh.getRange(row,1,1,linha.length).setBackground(cor);
   if(st!==""){sh.getRange(row,18).setValue("Finalizado - "+st).setFontWeight("bold").setFontColor(st==="EXCEDIDO"?"#c0392b":"#1a5c45");}
@@ -537,7 +537,7 @@ function atualizarPesagem(o){
   for(var i=0;i<ids.length;i++){if(s(ids[i][0])===s(o.id)){idx=i;break;}}
   if(idx<0)return salvarPesagem(o);
   var row=idx+2;
-  var st=s(o.statusPeso);
+  var st=s(o.statusPeso).replace(/(Finalizado\s*[-—]\s*)+/gi,"").trim();
   var cor=st==="EXCEDIDO"?"#fce8e8":"#e8f5e9";
   // Dados editáveis pelo Adm (validação/edição) — antes não eram persistidos
   if(o.numOrdem!==undefined)  sh.getRange(row,4).setValue(s(o.numOrdem));
@@ -581,7 +581,7 @@ function listarPesagens(){
   var ordens=[];
   for(var i=0;i<dados.length;i++){
     var r=dados[i];if(!s(r[0]))continue;
-    var st=s(r[17]);var sp=st.replace("Finalizado - ","").replace("Finalizado — ","");
+    var st=s(r[17]);var sp=st.replace(/(Finalizado\s*[-—]\s*)+/gi,"").trim();
     var idTicket=s(r[0]);
     ordens.push({
       id:idTicket,dataEntrada:fmtD(r[1]),horaEntrada:fmtH(r[2]),

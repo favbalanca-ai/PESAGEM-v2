@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v109"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v110"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4731,7 +4731,14 @@ function normOrdem(o){
     cargaLiquida: parseFloat(o.cargaLiquida)||0,
     pbtMax:       parseFloat(o.pbtMax||o.limPeso)||0,
     limPeso:      parseFloat(o.pbtMax||o.limPeso)||0,
-    statusPeso:   String(o.status||o.statusPeso||'').replace('Finalizado — ',''),
+    // Remove TODOS os prefixos "Finalizado - " acumulados (o backend concatena
+    // "Finalizado - "+statusPeso a cada atualização; sem limpar, empilha:
+    // "Finalizado - Finalizado - ... - ATENÇÃO"). statusPeso = só o veredito;
+    // status = "Finalizado - X" único.
+    statusPeso:   String(o.statusPeso||o.status||'').replace(/(Finalizado\s*[-—]\s*)+/gi,'').trim(),
+    status:       (function(){ var s=String(o.status||''); if(!/finalizado/i.test(s)) return s;
+                    var resto=s.replace(/(Finalizado\s*[-—]\s*)+/gi,'').trim();
+                    return resto?('Finalizado - '+resto):'Finalizado'; })(),
     assinatura:   assinatura,
     longo:        o.longo===true||o.longo==='Sim'||o.longo==='sim',
   };
