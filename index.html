@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v117"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v118"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1729,11 +1729,23 @@ function saveCfg(){
 }
 
 /* ══ NAV ══════════════════════════════════════════════════════ */
+/* Redesenha a página que está sendo aberta. Sem isso, ao voltar pelo ‹ a tela
+   mantém o HTML desenhado antes (ex.: o caminhão continua "Aguardando" mesmo
+   depois do peso finalizado), porque rHist()/rAg() só rodavam ao entrar pelo menu. */
+function _rerenderPg(id){
+  try{
+    if(id==='pg-home' && typeof updHome==='function') updHome();
+    else if(id==='pg-ag' && typeof rAg==='function') rAg();
+    else if(id==='pg-hist' && typeof rHist==='function') rHist();
+  }catch(e){}
+}
+const _pgTit={};   // último título de cada página (o ‹ voltar não repassa o título)
 function showPg(id,tit,dots,da){
   document.querySelectorAll('.pg').forEach(p=>p.classList.remove('on'));
   const el=document.getElementById(id); if(el) el.classList.add('on');
   pgAntes=pgAtual; pgAtual=id;
-  document.getElementById('pgtit').textContent=tit||'⚖️ Pesagem';
+  if(tit) _pgTit[id]=tit;
+  document.getElementById('pgtit').textContent=tit||_pgTit[id]||'⚖️ Pesagem';
   document.getElementById('btn-bk').style.display=id!=='pg-home'?'flex':'none';
   document.getElementById('btn-logout').style.display=id==='pg-home'?'block':'none';
   const btnModo = document.getElementById('btn-modo');
@@ -1744,6 +1756,7 @@ function showPg(id,tit,dots,da){
   document.querySelectorAll('.bi').forEach(b=>b.classList.remove('on'));
   ({pg_home:'bi-home','pg-nova':'bi-nova','pg-ag':'bi-ag','pg-hist':'bi-hist'})[id]&&document.getElementById(({pg_home:'bi-home','pg-nova':'bi-nova','pg-ag':'bi-ag','pg-hist':'bi-hist'})[id]).classList.add('on');
   window.scrollTo(0,0);
+  _rerenderPg(id);
 }
 function goBack(){pgAntes&&pgAntes!==pgAtual?showPg(pgAntes):home();}
 function home(){updHome();showPg('pg-home','⚖️ Pesagem');}
