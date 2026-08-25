@@ -1395,7 +1395,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v110"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v111"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2037,15 +2037,17 @@ function _estoqueLocal(){
   // Vendido = TUDO que já foi expedido (pesagens finalizadas), medido pelo peso real —
   // sem limitar ao volume do contrato. Comprometido = saldo do contrato ainda a entregar.
   // Ex.: contrato 10.000 sc, 50% atendido → 5.000 vendido + 5.000 comprometido.
-  // Vendido = TOTAL dos contratos de venda (no papel).
-  // Comprometido = o que falta entregar. entGrupo = já entregue (para o estoque físico).
-  var vendGrupo={}, entGrupo={}, compGrupo={};
+  // Definições do painel (por grupo de produto):
+  //   VENDIDO      = tickets de expedição FINALIZADOS (peso real que já saiu)
+  //   COMPROMETIDO = saldo dos contratos (volume − entregue)
+  //   EM ESTOQUE   = colheita − vendido
+  //   DISPONÍVEL   = estoque − comprometido (= colheita − vendido − saldo contratos)
+  var vendGrupo={}, compGrupo={};
   (contratosCloud||[]).forEach(function(ct){
     var g=_grupoKey(ct.p); if(!g)return;                 // produto do contrato → grupo
     var volSc=(parseFloat(ct.vol)||0)/60;                // volume do contrato em kg → sacas
-    var entSc=_entregueContrato(ct.n)/60;                // já expedido em sacas (peso real)
-    vendGrupo[g]=(vendGrupo[g]||0)+volSc;                // VENDIDO = total dos contratos
-    entGrupo[g]=(entGrupo[g]||0)+entSc;                  // já entregue (saiu fisicamente)
+    var entSc=_entregueContrato(ct.n)/60;                // expedido em sacas (tickets finalizados)
+    vendGrupo[g]=(vendGrupo[g]||0)+entSc;                // VENDIDO = expedido real
     compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-entSc); // COMPROMETIDO = falta entregar
   });
   // Total de entradas POR GRUPO (não por cultura) — para distribuir por grupo
@@ -2053,12 +2055,11 @@ function _estoqueLocal(){
   var grupoTot={};
   Object.keys(rows).forEach(function(k){ var g=_grupoKey(rows[k].cultura); grupoTot[g]=(grupoTot[g]||0)+rows[k].entradas_sc; });
   // Distribui por GRUPO proporcional às entradas de cada linha.
-  // Vendido = total dos contratos; Em estoque (saldo) = entradas − já entregue (físico).
   Object.keys(rows).forEach(function(k){
     var row=rows[k], g=_grupoKey(row.cultura), tot=grupoTot[g]||0, frac=(tot>0?row.entradas_sc/tot:0);
-    row.saidas_sc=(vendGrupo[g]||0)*frac;                          // VENDIDO = total dos contratos
-    var entregue=(entGrupo[g]||0)*frac;
-    row.saldo_sc=Math.max(0,row.entradas_sc-entregue);            // EM ESTOQUE = entradas − entregue
+    var vend=(vendGrupo[g]||0)*frac;
+    row.saidas_sc=vend;                                  // VENDIDO = expedido (tickets finalizados)
+    row.saldo_sc=Math.max(0,row.entradas_sc-vend);       // EM ESTOQUE = colheita − vendido
   });
   // Comprometido POR GRUPO (uma vez por grupo, na 1ª linha daquele grupo)
   var comp={}, jaComp={};
@@ -6686,13 +6687,16 @@ function atualizarBotoesNFA(o){
     if(isAdm && emitida && o.nfa_drive_url){ btnImp.style.display='block'; btnImp.onclick=()=>imprimirNFA(o.nfa_drive_url); }
     else btnImp.style.display='none';
   }
-  // Emitir NFA — admin, peso finalizado e: não emitida OU emitida com SALDO pendente (complemento)
+  // Emitir NFA — admin e: não emitida OU emitida com SALDO pendente (complemento).
+  // Ticket AGUARDANDO também pode emitir (antecipada): o peso líquido é editável
+  // na prévia da NFA, então o operador informa o peso na hora.
   const pesoTicketKg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
   const jaKg=(typeof _kgJaEmitidos==='function')?_kgJaEmitidos(o.id):0;
   const temSaldo=emitida && pesoTicketKg>0 && jaKg>0 && jaKg<pesoTicketKg;
   if(btnNFA){
-    btnNFA.style.display=(isAdm && finalizado && (!emitida || temSaldo))?'block':'none';
-    btnNFA.textContent=temSaldo?('📄 Emitir NF de complemento ('+(pesoTicketKg-jaKg).toLocaleString('pt-BR')+' kg)'):'📄 Emitir NFA';
+    btnNFA.style.display=(isAdm && (!emitida || temSaldo))?'block':'none';
+    btnNFA.textContent=temSaldo?('📄 Emitir NF de complemento ('+(pesoTicketKg-jaKg).toLocaleString('pt-BR')+' kg)')
+      :(!finalizado?'📄 Emitir NFA (informar peso)':'📄 Emitir NFA');
   }
   // Botão de autorização removido
   if(btnAut) btnAut.style.display='none';
@@ -6987,6 +6991,12 @@ function fecharPreviaNFA(){document.getElementById('modal-previa-nfa').style.dis
 let _nfaKgEmitindo=null; // {ticket, kg} da emissão em andamento — registrado ao concluir
 async function confirmarEmissaoNFA(){
   if(!_nfaDados)return;
+  // Ticket aguardando/peso zerado: exige informar o peso líquido antes de emitir
+  if(!(Number(_nfaDados.peso_liquido_kg)>0)){
+    toast('⚠️ Informe o peso líquido (kg) antes de emitir');
+    const inp=document.getElementById('nfa-prev-liq-inp'); if(inp) inp.focus();
+    return;
+  }
   const dadosNFA=_nfaDados;            // guarda ANTES de fechar (fecharPreviaNFA zera _nfaDados)
   _nfaKgEmitindo={ticket:dadosNFA.ticket_id, kg:Number(dadosNFA.peso_liquido_kg)||0};
   const extId=getNFAExtId();
