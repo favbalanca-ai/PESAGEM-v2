@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v115"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v116"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -7046,7 +7046,8 @@ function _kgNFAemitidos(o){
   const pesoKg=Math.round((parseFloat(o.cargaLiquida)||0)*1000);
   const localKg=_kgJaEmitidos(o.id);
   let servKg=0;
-  if(o.nfa_sacas!=null && Number(o.nfa_sacas)>0) servKg=Math.round(Number(o.nfa_sacas)*60);
+  if(Number(o.nfa_kg)>0) servKg=Math.round(Number(o.nfa_kg));            // kg exato da planilha
+  else if(Number(o.nfa_sacas)>0) servKg=Math.round(Number(o.nfa_sacas)*60); // NFAs antigas: das sacas
   else if(o.nfa_emitida && !localKg) servKg=pesoKg;   // backend antigo → NFA cheia
   let kg=Math.max(localKg,servKg);
   if(pesoKg>0 && kg>0 && kg>pesoKg-NFA_TOL_KG) kg=pesoKg;  // arredondamento de sacas → quitado
