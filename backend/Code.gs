@@ -77,6 +77,7 @@ function doPost(e){
     if(d.acao==="salvarPermissoes")   return resposta(salvarPermissoes(d.permissoes));
     if(d.acao==="listarEstoque")      return resposta(listarEstoque());
     if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
+    if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
@@ -357,8 +358,10 @@ function processarNFA(payload){
       else pesoKg+=pesoKgProdutoNFA(p);
     });
     var sacas=Math.round(pesoKg/60);
-    // Vol_Entregue do contrato é medido em kg (cabeças, no caso de gado)
-    atualizarVolumeContratoNFA(contrato_id,ehCabeca?qtdCabecas:pesoKg);
+    // Entregue/saldo do contrato vêm das pesagens finalizadas, não da emissão da
+    // nota — senão contaria duas vezes. Gado (cabeças) continua somando aqui.
+    if(ehCabeca) atualizarVolumeContratoNFA(contrato_id,qtdCabecas);
+    else recalcularVolumeContratos();
 
     registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas,pesoKg);
 
@@ -582,7 +585,10 @@ function atualizarPesagem(o){
   if(o.transpCnpj!==undefined)sh.getRange(row,26).setValue(s(o.transpCnpj));
   if(o.transpNome!==undefined)sh.getRange(row,27).setValue(s(o.transpNome));
   if(st!==""){sh.getRange(row,1,1,25).setBackground(cor);sh.getRange(row,18).setFontWeight("bold").setFontColor(st==="EXCEDIDO"?"#c0392b":"#1a5c45");}
-  if(st==="CONFORME"||st==="ATENÇÃO"||st==="EXCEDIDO"){_baixarEstoqueExpedicao(o);}
+  if(st==="CONFORME"||st==="ATENÇÃO"||st==="EXCEDIDO"){
+    _baixarEstoqueExpedicao(o);
+    recalcularVolumeContratos();   // peso finalizado → atualiza entregue/saldo do contrato
+  }
   return{ok:true,id:s(o.id),atualizado:true};
 }
 
@@ -858,9 +864,51 @@ function recalcularEstoque(){
       linhas.push([p[0],p[1],ent,sai,Math.max(0,ent-sai),now]);
     });
     if(linhas.length) shE.getRange(2,1,linhas.length,6).setValues(linhas);
-    return {ok:true, produtos:linhas.length};
+    var rc=recalcularVolumeContratos();   // o botão 🔄 Recalcular também acerta os contratos
+    return {ok:true, produtos:linhas.length, contratos:(rc&&rc.contratos)||0};
   }catch(e){return {ok:false,erro:e.message};}
 }
+/* Recalcula Vol_Entregue e Saldo de TODOS os contratos a partir das PESAGENS
+   FINALIZADAS (mesma conta que o app usa na tela). Antes esses valores só eram
+   somados dentro do processarNFA — que depende da nota ser registrada — então a
+   coluna ficava parada e o "SALDO DO CONTRATO" impresso na NFA saía errado.
+   É idempotente: recalcula do zero, corrigindo também o histórico. */
+function recalcularVolumeContratos(){
+  try{
+    var ss=SpreadsheetApp.openById(PLANILHA_ID);
+    // 1) kg expedidos por contrato (col 4 = nº do contrato, 17 = carga em t, 18 = status)
+    var entregue={};
+    var shP=ss.getSheetByName("Pesagem");
+    if(shP&&shP.getLastRow()>1){
+      var dp=shP.getRange(2,1,shP.getLastRow()-1,18).getValues();
+      for(var i=0;i<dp.length;i++){
+        var ct=s(dp[i][3]);
+        if(!ct) continue;
+        if(s(dp[i][17]).toLowerCase().indexOf("finalizado")<0) continue;
+        entregue[ct]=(entregue[ct]||0)+n(dp[i][16])*1000;
+      }
+    }
+    // 2) grava entregue/saldo em cada contrato (contratos em CABEÇA ficam como estão)
+    var aba=ss.getSheetByName(ABA_CONTRATOS);
+    if(!aba||aba.getLastRow()<2) return {ok:true,contratos:0};
+    var dados=aba.getRange(2,1,aba.getLastRow()-1,NUM_COLS_CONTRATO).getValues();
+    var out=[], qt=0;
+    for(var r=0;r<dados.length;r++){
+      var id=s(dados[r][COL.ID-1]);
+      var unid=s(dados[r][COL.UNIDADE-1]).toUpperCase();
+      if(!id || unid.indexOf("CAB")===0){
+        out.push([n(dados[r][COL.VOL_ENTREGUE-1]), n(dados[r][COL.SALDO-1])]);
+        continue;
+      }
+      var ent=entregue[id]||0;
+      out.push([ent, n(dados[r][COL.VOL_TOTAL-1])-ent]);
+      qt++;
+    }
+    if(out.length) aba.getRange(2,COL.VOL_ENTREGUE,out.length,2).setValues(out);
+    return {ok:true,contratos:qt};
+  }catch(e){return {ok:false,erro:e.message};}
+}
+
 function _baixarEstoqueExpedicao(o){
   var ss=SpreadsheetApp.openById(PLANILHA_ID);var sh=ss.getSheetByName(ABA_CONTRATOS);
   if(!sh||sh.getLastRow()<2)return;
