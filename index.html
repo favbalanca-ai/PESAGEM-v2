@@ -1016,6 +1016,9 @@ body.dark .card{background:#1a2d22}
           <div class="f"><label>Obs</label><input type="text" id="nc-obs" placeholder="Observações"></div>
         </div>
         <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
+        <div class="f"><label>Texto fiscal adicional <span style="font-weight:400;color:var(--ink3)">(opcional — você escolhe incluir na hora de emitir)</span></label>
+          <textarea id="nc-info2" rows="3" placeholder="Ex.: isenção de ICMS, FUNRURAL, SENAR, contrato de sementes..." style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:'Inter',sans-serif;color:var(--ink);background:var(--card);resize:vertical"></textarea>
+        </div>
       </div>
 
       <button class="btn btnp" onclick="addContratoNFA()" style="margin-top:3px">📄 Cadastrar Contrato</button>
@@ -1395,7 +1398,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v111"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v112"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2944,6 +2947,22 @@ function preencherOrigemEmitente(){
   if(inMun) inMun.value=mun;
 }
 
+/* ── Texto fiscal adicional do contrato ──
+   Guardado DENTRO de info_complementar com um separador (sem mudar o backend).
+   O app separa: parte fixa sempre sai na NFA; o adicional é opcional (checkbox
+   na prévia da emissão). */
+const NFA_SEP_ADICIONAL='\n#TEXTO-ADICIONAL#\n';
+function _splitInfoContrato(s){
+  s=String(s==null?'':s);
+  const i=s.indexOf(NFA_SEP_ADICIONAL);
+  if(i<0) return {base:s.trim(), extra:''};
+  return {base:s.slice(0,i).trim(), extra:s.slice(i+NFA_SEP_ADICIONAL.length).trim()};
+}
+function _joinInfoContrato(base,extra){
+  base=String(base==null?'':base).trim(); extra=String(extra==null?'':extra).trim();
+  return extra ? (base+NFA_SEP_ADICIONAL+extra) : base;
+}
+
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
   var produto=document.getElementById('nc-produto').value.trim();
@@ -2977,7 +2996,7 @@ function addContratoNFA(){
       return m && u ? (m+' / '+u) : (m||u);
     })(),
     responsavel_frete: document.getElementById('nc-frete').value,
-    info_complementar: document.getElementById('nc-info').value.trim(),
+    info_complementar: _joinInfoContrato(document.getElementById('nc-info').value, document.getElementById('nc-info2')?document.getElementById('nc-info2').value:''),
     balanca: parseInt(document.getElementById('nc-bal').value)||1,
     obs: document.getElementById('nc-obs').value.trim()
   };
@@ -2992,7 +3011,7 @@ function addContratoNFA(){
         var j=JSON.parse(t);
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
-          ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem-uf','nc-origem-mun','nc-info','nc-obs'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+          ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem-uf','nc-origem-mun','nc-info','nc-info2','nc-obs'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
           preencherOrigemEmitente();
           if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
@@ -3049,6 +3068,7 @@ function abrirEditarContrato(idx){
   var esc=function(v){return String(v==null?'':v).replace(/"/g,'&quot;');};
   var selSty="width:100%;padding:10px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-family:'Inter',sans-serif;font-size:14px;-webkit-appearance:none;background:var(--card);color:var(--ink)";
   var opt=function(vals,cur){return vals.map(function(v){return '<option value="'+esc(v)+'"'+(String(cur)===String(v)?' selected':'')+'>'+v+'</option>';}).join('');};
+  var infoPartes=_splitInfoContrato(c.info_complementar);
   var div=document.createElement('div');
   div.id='pg-edit-ctr';
   div.style.cssText='position:fixed;inset:0;background:var(--bg);z-index:160;overflow-y:auto;padding-bottom:40px';
@@ -3078,7 +3098,8 @@ function abrirEditarContrato(idx){
       '<div class="f"><label>Origem (Município / UF)</label><input id="ec-origem" value="'+esc(c.origem_mercadoria)+'"></div>'+
       '<div class="f"><label>Responsável pelo Frete</label><select id="ec-frete" style="'+selSty+'">'+opt(['Destinatário','Remetente','Sem Frete'],c.responsavel_frete||'Destinatário')+'</select></div>'+
       '<div class="f"><label>Balança</label><select id="ec-bal" style="'+selSty+'"><option value="1"'+((Number(c.balanca)||1)===1?' selected':'')+'>Balança 1 — Água Viva</option><option value="2"'+(Number(c.balanca)===2?' selected':'')+'>Balança 2 — Espora</option></select></div>'+
-      '<div class="f"><label>Informações Complementares (NFA)</label><input id="ec-info" value="'+esc(c.info_complementar)+'"></div>'+
+      '<div class="f"><label>Informações Complementares (NFA)</label><input id="ec-info" value="'+esc(infoPartes.base)+'"></div>'+
+      '<div class="f"><label>Texto fiscal adicional (opcional na emissão)</label><textarea id="ec-info2" rows="3" style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:\'Inter\',sans-serif;color:var(--ink);background:var(--card);resize:vertical">'+String(infoPartes.extra||'').replace(/</g,'&lt;')+'</textarea></div>'+
       '<div class="f"><label>Obs</label><input id="ec-obs" value="'+esc(c.obs)+'"></div>'+
       '<div class="f"><label>Status</label><select id="ec-status" style="'+selSty+'">'+opt(['Ativo','Inativo'],c.status||'Ativo')+'</select></div>'+
       '<button class="btn btnp" onclick="salvarEditarContrato('+idx+')">💾 Salvar alterações</button>'+
@@ -3115,7 +3136,7 @@ function salvarEditarContrato(idx){
     safra: g('ec-safra').value.trim(),
     origem_mercadoria: g('ec-origem').value.trim(),
     responsavel_frete: g('ec-frete').value,
-    info_complementar: g('ec-info').value.trim(),
+    info_complementar: _joinInfoContrato(g('ec-info').value, g('ec-info2')?g('ec-info2').value:''),
     balanca: parseInt(g('ec-bal').value)||1,
     obs: g('ec-obs').value.trim(),
     // preserva campos que não estão no formulário
@@ -6928,7 +6949,29 @@ function _registrarKgEmitidos(ticketId,kg){
   }catch(e){}
 }
 let _nfaPesoTicketKg=0; // peso líquido original do ticket (kg)
+// Texto fiscal adicional do contrato (separado do info pelo marcador):
+// a parte fixa sempre sai; o adicional entra só se o checkbox estiver marcado.
+let _nfaInfoBase='', _nfaInfoExtra='';
+function _aplicarInfoExtraNFA(){
+  if(!_nfaDados) return;
+  const chk=document.getElementById('nfa-prev-extra-chk');
+  const incluir=(!chk || chk.checked);
+  _nfaDados.info_complementar=(_nfaInfoExtra && incluir)?(_nfaInfoBase+'\n'+_nfaInfoExtra):_nfaInfoBase;
+}
+function _prepararInfoExtraNFA(n){
+  const p=_splitInfoContrato(n.info_complementar);
+  _nfaInfoBase=p.base; _nfaInfoExtra=p.extra;
+  const ln=document.getElementById('nfa-ln-extra');
+  if(ln){
+    ln.style.display=_nfaInfoExtra?'flex':'none';
+    const chk=document.getElementById('nfa-prev-extra-chk'); if(chk) chk.checked=true;
+    const pv=document.getElementById('nfa-prev-extra-prev');
+    if(pv) pv.textContent=_nfaInfoExtra?(_nfaInfoExtra.substring(0,90)+(_nfaInfoExtra.length>90?'…':'')):'';
+  }
+  _aplicarInfoExtraNFA();
+}
 function renderPreviaNFA(n){
+  _prepararInfoExtraNFA(n);
   document.getElementById('nfa-prev-tk').textContent=n.ticket_id||'';
   document.getElementById('nfa-prev-sub').textContent=(n.contrato_id||'')+' · '+new Date().toLocaleDateString('pt-BR');
   document.getElementById('nfa-prev-emit').textContent=n.emitente_nome||'—';
@@ -7342,6 +7385,10 @@ function salvarFuncionarios(){
       <div class="nfa-ln" style="border-top:2px solid #1a3a6c;margin-top:6px;padding-top:12px">
         <span style="font-weight:700">VALOR TOTAL</span>
         <span id="nfa-prev-total" style="font-size:17px;font-weight:800;color:#1a3a6c"></span>
+      </div>
+      <div class="nfa-ln" id="nfa-ln-extra" style="display:none;align-items:flex-start">
+        <label for="nfa-prev-extra-chk" style="cursor:pointer;flex:1">Incluir texto fiscal do contrato<br><span id="nfa-prev-extra-prev" style="font-size:10px;color:#888;font-weight:400"></span></label>
+        <input type="checkbox" id="nfa-prev-extra-chk" checked onchange="_aplicarInfoExtraNFA()" style="width:20px;height:20px;flex-shrink:0;margin-top:2px">
       </div>
       <div class="nfa-sec">ENVIO APÓS EMISSÃO</div>
       <div class="nfa-ln"><span>E-mail</span><span id="nfa-prev-email" style="font-size:12px;color:#555"></span></div>
