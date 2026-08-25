@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v116"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v117"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1672,6 +1672,21 @@ function saveDB(){
 function saveCloud(){
   try{
     localStorage.setItem('pcloud-v2',JSON.stringify(cloud.slice(0,200)));
+  }catch(e){}
+}
+/* Espelha no cache 'cloud' o ticket que acabou de mudar NESTE aparelho.
+   A Home e o Histórico leem de 'cloud' (retrato da planilha); sem espelhar,
+   a tela continua mostrando o estado antigo — ex.: o caminhão segue
+   "Aguardando" depois de finalizar o peso — até o próximo sync. */
+function _refletirNoCloud(o){
+  if(!o||!o.id) return;
+  try{
+    const leve={...o}; delete leve.fotos;      // fotos não vão para o cache
+    const reg=normOrdem(leve);
+    const i=cloud.findIndex(x=>x.id===o.id);
+    if(i>=0) cloud[i]={...cloud[i],...reg};
+    else cloud.push(reg);
+    saveCloud();
   }catch(e){}
 }
 function loadDB(){
@@ -3598,7 +3613,7 @@ function salvar(){
     status:'Aguardando',
     pesoBruto:null, cargaLiquida:null, statusPeso:null, dataHoraFim:null, assinatura:null
   };
-  DB.ordens.push(o); saveDB();
+  DB.ordens.push(o); saveDB(); _refletirNoCloud(o);
   enviar(o,'salvar');
   beep('ok'); // bip ao registrar tara
   atual=o; toast('✅ Tara registrada!'); updHome(); irAg();
@@ -4002,7 +4017,7 @@ function finalizar(){
   try{ localStorage.setItem('sig_'+atual.id, atual.assinatura); }catch(e){}
   const idx=DB.ordens.findIndex(o=>o.id===atual.id);
   if(idx>=0)DB.ordens[idx]={...atual};
-  saveDB(); enviar(atual,'atualizar');
+  saveDB(); _refletirNoCloud(atual); enviar(atual,'atualizar');
   uploadFotosDrive(atual);
   uploadTicketDrive(atual);
   // som de alerta conforme status
@@ -4494,9 +4509,14 @@ async function carregarDaPlanilha(){
     const j=JSON.parse(txt);
     if(j.ok&&j.ordens){
       cloud=j.ordens.map(normOrdem);
-      // Mesclar com pendentes locais para não perder dados offline
-      pend.filter(p=>!p.falhou).forEach(p=>{
-        if(!cloud.find(o=>o.id===p.ordem.id)) cloud.unshift(normOrdem(p.ordem));
+      // Mesclar com pendentes locais para não perder dados offline.
+      // Se o ticket já existe na planilha mas há uma ATUALIZAÇÃO na fila (ex.: peso
+      // finalizado sem internet), a versão local prevalece — senão a tela voltaria
+      // a mostrar o estado antigo ("Aguardando") a cada sync.
+      pend.filter(p=>!p.falhou&&p.ordem&&p.ordem.id).forEach(p=>{
+        const i=cloud.findIndex(o=>o.id===p.ordem.id);
+        if(i<0) cloud.unshift(normOrdem(p.ordem));
+        else cloud[i]={...cloud[i],...normOrdem(p.ordem)};
       });
       DB.ordens=[...cloud];
       saveCloud(); // salvar para acesso offline imediato
@@ -4905,9 +4925,9 @@ function salvarEdicao(){
   atual.status      =document.getElementById('ed-status').value;
   const idx=DB.ordens.findIndex(o=>o.id===atual.id);
   if(idx>=0) DB.ordens[idx]={...atual};
-  saveDB(); enviar(atual,'atualizar');
+  saveDB(); _refletirNoCloud(atual); enviar(atual,'atualizar');
   fecharEditar(); rTicket(atual);
-  toast('✅ Ticket atualizado!');
+  toast('✅ Ticket atualizado!'); updHome();
 }
 
 /* ══ PDF ════════════════════════════════════════════════════════ */
