@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v119"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v120"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2724,8 +2724,24 @@ function abrirSelContrato(){
   }
   renderSelContrato(contratosCloud,lista);
 }
+/* Contratos que o operador pode usar no registro da pesagem: só os LIBERADOS
+   pelo Adm. O Adm continua vendo todos (com o selo de bloqueado). */
+function _contratosDisponiveis(ocs){
+  if(usr && usr.nivel==='admin') return ocs||[];
+  var lista=ocs||[];
+  // Backend antigo (sem a coluna Liberado) ou cache velho: não filtra, senão o
+  // operador ficaria sem nenhum contrato para escolher.
+  if(!lista.some(function(o){ return o.lib!==undefined; })) return lista;
+  return lista.filter(function(o){ return !!o.lib; });
+}
 function renderSelContrato(ocs,lista){
   var html='';
+  var adm=!!(usr && usr.nivel==='admin');
+  ocs=_contratosDisponiveis(ocs);
+  if(!ocs.length){
+    lista.innerHTML='<div style="padding:16px;text-align:center;font-size:12px;color:var(--ink3)">🔒 Nenhum contrato liberado para carregamento.<br>Peça ao administrador para liberar.</div>';
+    return;
+  }
   for(var i=0;i<ocs.length;i++){
     var o=ocs[i];
     var vol=parseFloat(o.vol)||0;
@@ -2737,9 +2753,10 @@ function renderSelContrato(ocs,lista){
     var balCor=o.bal===2?'var(--a1)':'var(--g1)';
     html+='<div onclick="selecionarContrato(\''+o.n+'\')" style="padding:10px 13px;cursor:pointer;border-bottom:.5px solid var(--brd)" onmouseover="this.style.background=\'var(--g3)\'" onmouseout="this.style.background=\'\'">';
     html+='<div style="display:flex;justify-content:space-between;align-items:center">';
-    html+='<div style="font-weight:700;font-size:13px">'+o.n+'</div>';
+    html+='<div style="font-weight:700;font-size:13px">'+(o.lib?'':'🔒 ')+o.n+'</div>';
     html+='<span style="font-size:10px;font-weight:700;color:'+balCor+'">'+balLabel+'</span>';
     html+='</div>';
+    if(adm && !o.lib) html+='<div style="font-size:10px;color:var(--a1);font-weight:700">Não liberado — o operador não vê este contrato</div>';
     html+='<div style="font-size:11px;color:var(--ink3)">'+(o.p||'—')+(o.d?' · '+o.d:'')+'</div>';
     if(vol>0) html+='<div style="font-size:11px;color:'+cor+';font-weight:600">Saldo: '+Math.round(saldo).toLocaleString('pt-BR')+'kg / '+vol.toLocaleString('pt-BR')+'kg</div>';
     html+='</div>';
@@ -2873,11 +2890,12 @@ function addOC(){
 
 function rOC(){
   var ocs=contratosCloud;
+  var admOC=!!(usr && usr.nivel==='admin');
   var el=document.getElementById('lst-oc');
-  // popular datalists
+  // popular datalists — o operador só digita contratos liberados
   var dl1=document.getElementById('dl-oc-n');
   var dl2=document.getElementById('dl-oc');
-  var opts=ocs.map(function(o){return '<option value="'+o.n+'">'+o.n+(o.p?' — '+o.p:'')+'</option>';}).join('');
+  var opts=_contratosDisponiveis(ocs).map(function(o){return '<option value="'+o.n+'">'+o.n+(o.p?' — '+o.p:'')+'</option>';}).join('');
   if(dl1) dl1.innerHTML=opts;
   if(dl2) dl2.innerHTML=opts;
   if(!ocs.length){
@@ -2913,7 +2931,16 @@ function rOC(){
     if(o.o) html+='<div style="font-size:10px;color:var(--ink3);margin-top:3px">'+o.o+'</div>';
     html+='</div>';
     html+='<button onclick="delOC(\''+o.n+'\')" style="background:var(--r2);color:var(--r1);border:none;border-radius:6px;padding:4px 9px;font-size:11px;cursor:pointer;font-weight:700;margin-left:8px;flex-shrink:0">×</button>';
-    html+='</div></div>';
+    html+='</div>';
+    // Liberação para carregamento — só o Adm libera; o operador só vê os liberados
+    if(admOC){
+      html+='<button onclick="toggleLiberaContrato(\''+o.n+'\')" style="width:100%;margin-top:7px;padding:8px;border:none;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;'+
+        (o.lib?'background:var(--g3);color:var(--g1)':'background:#fff3cd;color:#856404')+'">'+
+        (o.lib?'🔓 Liberado para carregamento — toque para bloquear':'🔒 Bloqueado — toque para liberar')+'</button>';
+    } else {
+      html+='<div style="margin-top:6px;font-size:11px;font-weight:700;color:'+(o.lib?'var(--g1)':'var(--a1)')+'">'+(o.lib?'🔓 Liberado para carregamento':'🔒 Bloqueado')+'</div>';
+    }
+    html+='</div>';
   }
   el.innerHTML=html;
 }
@@ -2954,7 +2981,7 @@ function loadContratosDaPlanilha(){
         if(j.ok&&j.contratos){
           contratosCloud=j.contratos;
           salvarContratosLocal();
-          var opts=j.contratos.map(function(c){
+          var opts=_contratosDisponiveis(j.contratos).map(function(c){
             return '<option value="'+c.n+'">'+c.n+(c.p?' — '+c.p:'')+'</option>';
           }).join('');
           var dl=document.getElementById('dl-oc'); if(dl) dl.innerHTML=opts;
@@ -2965,6 +2992,27 @@ function loadContratosDaPlanilha(){
     .catch(function(){});
 }
 
+/* Adm libera/bloqueia um contrato para carregamento. Enquanto bloqueado, o
+   operador não vê o contrato na hora de registrar a pesagem. */
+function toggleLiberaContrato(n){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Só o administrador libera contratos'); return; }
+  var o=contratosCloud.find(function(x){return x.n===n;});
+  if(!o) return;
+  var novo=!o.lib;
+  if(!novo && !confirm('Bloquear o contrato '+n+'?\n\nOs operadores deixam de ver este contrato ao registrar a pesagem.')) return;
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — a liberação precisa de internet'); return; }
+  o.lib=novo; salvarContratosLocal(); rOC();          // resposta imediata na tela
+  toast(novo?'⏳ Liberando '+n+'...':'⏳ Bloqueando '+n+'...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'liberarContrato',id:n,liberado:novo,por:(usr&&usr.nome)||'',token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){ toast(novo?('🔓 '+n+' liberado para carregamento'):('🔒 '+n+' bloqueado')); }
+      else { o.lib=!novo; salvarContratosLocal(); rOC();
+             toast('❌ '+((j&&j.erro)||'não consegui salvar — reimplante o backend')); }
+    })
+    .catch(function(){ o.lib=!novo; salvarContratosLocal(); rOC(); toast('❌ Erro de conexão'); });
+}
 function salvarContratosLocal(){
   localStorage.setItem('poc',JSON.stringify(contratosCloud));
 }
