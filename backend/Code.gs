@@ -79,6 +79,7 @@ function doPost(e){
     if(d.acao==="listarEstoque")      return resposta(listarEstoque());
     if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
     if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
+    if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
@@ -425,9 +426,82 @@ function salvarPDFnfa(pdf_base64,emitente,dest_nome){
   return{url:arq.getUrl(),numero_nfa:numero_nfa,nome:nome};
 }
 
+/* Pasta única, à prova de chamadas simultâneas.
+   "procurar e, se não achar, criar" duplicava pastas: fotos e ticket sobem ao
+   mesmo tempo (e vários caminhões do mesmo contrato em seguida), então duas
+   execuções não achavam a pasta e ambas criavam — o Drive aceita homônimas.
+   Agora a criação é serializada por LockService e, havendo homônimas antigas,
+   usa-se sempre a MAIS ANTIGA, para os arquivos pararem de se espalhar. */
+function _pastaMaisAntiga(parent,nome){
+  var it=parent.getFoldersByName(nome), esc=null;
+  while(it.hasNext()){
+    var f=it.next();
+    if(!esc || f.getDateCreated()<esc.getDateCreated()) esc=f;
+  }
+  return esc;
+}
 function obterOuCriar(parent,nome){
-  var it=parent.getFoldersByName(nome);
-  return it.hasNext()?it.next():parent.createFolder(nome);
+  var achada=_pastaMaisAntiga(parent,nome);
+  if(achada) return achada;
+  var lock=LockService.getScriptLock();
+  try{ lock.waitLock(20000); }catch(e){}
+  try{
+    achada=_pastaMaisAntiga(parent,nome);      // outra execução pode ter criado
+    return achada || parent.createFolder(nome);
+  } finally { try{ lock.releaseLock(); }catch(e){} }
+}
+
+/* ── Consolidar pastas duplicadas do Drive ──────────────────────
+   Junta pastas de mesmo nome (herança do bug de criação simultânea):
+   move o conteúdo para a mais antiga e manda as vazias para a lixeira.
+   Roda em Fotos/Recepcao e na raiz das NFAs. */
+function _moverConteudoPasta(de,para){
+  var fi=de.getFiles();
+  while(fi.hasNext()){
+    var f=fi.next();
+    try{
+      if(para.getFilesByName(f.getName()).hasNext())
+        f.setName(f.getName().replace(/(\.[^.]+)?$/, "-dup$1"));
+      f.moveTo(para);
+    }catch(e){ Logger.log("mover arquivo: "+e.message); }
+  }
+  var fo=de.getFolders();
+  while(fo.hasNext()){ var sf=fo.next(); try{ sf.moveTo(para); }catch(e){ Logger.log("mover pasta: "+e.message); } }
+}
+function _mesclarHomonimas(pai,nivel,cont){
+  if(nivel>3) return;
+  var porNome={}, it=pai.getFolders();
+  while(it.hasNext()){
+    var f=it.next(), nm=f.getName();
+    if(!porNome[nm]) porNome[nm]=[];
+    porNome[nm].push(f);
+  }
+  Object.keys(porNome).forEach(function(nm){
+    var lista=porNome[nm];
+    if(lista.length>1){
+      lista.sort(function(a,b){ return a.getDateCreated()-b.getDateCreated(); });
+      var alvo=lista[0];
+      for(var i=1;i<lista.length;i++){
+        _moverConteudoPasta(lista[i],alvo);
+        lista[i].setTrashed(true);
+        cont.mescladas++;
+      }
+      porNome[nm]=[alvo];
+    }
+  });
+  Object.keys(porNome).forEach(function(nm){ _mesclarHomonimas(porNome[nm][0],nivel+1,cont); });
+}
+function consolidarPastasDrive(){
+  var lock=LockService.getScriptLock();
+  try{ lock.waitLock(30000); }catch(e){}
+  try{
+    var cont={mescladas:0};
+    _mesclarHomonimas(DriveApp.getFolderById(DRIVE_ID),0,cont);
+    if(DRIVE_PASTA_NFA && DRIVE_PASTA_NFA!==DRIVE_ID)
+      _mesclarHomonimas(DriveApp.getFolderById(DRIVE_PASTA_NFA),0,cont);
+    return{ok:true,pastas:cont.mescladas};
+  }catch(e){ return{ok:false,erro:e.message}; }
+  finally{ try{ lock.releaseLock(); }catch(e){} }
 }
 
 function extrairNumeroNFA(b64){
@@ -1024,14 +1098,14 @@ function salvarFoto(dados,pasta){
   var ext=mime.indexOf("pdf")>=0?".pdf":(mime.indexOf("png")>=0?".png":".jpg");
   // Nome do arquivo dentro da pasta da pesagem: só o tipo (ex.: PLACA.jpg, TICKET.pdf)
   var nome=tipo+ext;
-  var raiz=DriveApp.getFolderById(DRIVE_ID);var pastaNome=pasta||"Fotos";var pastaObj;
-  var it=raiz.getFoldersByName(pastaNome);pastaObj=it.hasNext()?it.next():raiz.createFolder(pastaNome);
+  var raiz=DriveApp.getFolderById(DRIVE_ID);var pastaNome=pasta||"Fotos";
+  var pastaObj=obterOuCriar(raiz,pastaNome);
   // Nível 1 — pasta do contrato/referência
-  var sub;var it2=pastaObj.getFoldersByName(ref);sub=it2.hasNext()?it2.next():pastaObj.createFolder(ref);
+  var sub=obterOuCriar(pastaObj,ref);
   // Nível 2 — pasta da pesagem (Data_Placa): agrupa fotos + ticket da mesma pesagem
   var chave=s(dados.pesagem)||(data+"_"+placa);
   chave=chave.replace(/[\/\\:*?"<>|]/g,"-");
-  var ped;var it3=sub.getFoldersByName(chave);ped=it3.hasNext()?it3.next():sub.createFolder(chave);
+  var ped=obterOuCriar(sub,chave);
   var bytes=Utilities.base64Decode(base64);var blob=Utilities.newBlob(bytes,mime,nome);
   var arq=ped.createFile(blob);arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
   return{ok:true,nome:nome,url:arq.getUrl(),pasta_url:ped.getUrl()};
