@@ -66,6 +66,7 @@ function doPost(e){
     if(d.acao==="salvarContrato")     return resposta(salvarContrato(d.contrato));
     if(d.acao==="listarContratos")    return resposta(listarContratos());
     if(d.acao==="delContrato")        return resposta(delContrato(d.num));
+    if(d.acao==="liberarContrato")    return resposta(liberarContrato(d.id,d.liberado,d.por));
     if(d.acao==="salvarFoto")         return resposta(salvarFoto(d.dados,"Fotos"));
     if(d.acao==="salvarRecepcao")     return resposta(salvarRecepcao(d.rec));
     if(d.acao==="listarRecepcoes")    return resposta(listarRecepcoes());
@@ -108,7 +109,8 @@ var COL = {
   SAFRA:17, ORIGEM:18, RESP_FRETE:19, INFO_COMP:20,
   BALANCA:21,
   WA_CLASSIFICADOR:22, WA_COMPRADOR:23, EMAIL_CLASSIFICADOR:24, EMAIL_COMPRADOR:25,
-  STATUS:26, CRIADO_EM:27, OBS:28, DISP_LEGAL:29
+  STATUS:26, CRIADO_EM:27, OBS:28, DISP_LEGAL:29,
+  LIBERADO:30   // "Sim"/"Nao" — Adm libera o contrato para carregamento
 };
 var NUM_COLS_CONTRATO = 29;
 
@@ -161,8 +163,40 @@ function linhaParaContrato(r, idx){
     email_classificador:s(r[COL.EMAIL_CLASSIFICADOR-1]), email_comprador:s(r[COL.EMAIL_COMPRADOR-1]),
     status:s(r[COL.STATUS-1]),
     criado_em:fmtDH(r[COL.CRIADO_EM-1]), obs:s(r[COL.OBS-1]),
-    dispositivo_legal:s(r[COL.DISP_LEGAL-1]), linha:idx
+    dispositivo_legal:s(r[COL.DISP_LEGAL-1]),
+    liberado:(s(r[COL.LIBERADO-1])==="Sim"), linha:idx
   };
+}
+
+/* ── LIBERAÇÃO PARA CARREGAMENTO ────────────────────────────────
+   O Adm libera o contrato; o operador só enxerga os liberados na
+   hora de registrar a pesagem. Coluna 30 da aba Contratos. */
+function _garantirColunaLiberado(aba){
+  if(aba.getMaxColumns()<COL.LIBERADO)
+    aba.insertColumnsAfter(aba.getMaxColumns(), COL.LIBERADO-aba.getMaxColumns());
+  if(!s(aba.getRange(1,COL.LIBERADO).getValue()))
+    aba.getRange(1,COL.LIBERADO).setValue("Liberado")
+      .setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
+}
+function liberarContrato(id, liberado, por){
+  try{
+    var ss=SpreadsheetApp.openById(PLANILHA_ID);
+    var aba=ss.getSheetByName(ABA_CONTRATOS);
+    if(!aba||aba.getLastRow()<2) return{ok:false,erro:"Aba de contratos não encontrada"};
+    _garantirColunaLiberado(aba);
+    var ids=aba.getRange(2,COL.ID,aba.getLastRow()-1,1).getValues();
+    for(var i=0;i<ids.length;i++){
+      if(s(ids[i][0])===s(id)){
+        var row=i+2;
+        aba.getRange(row,COL.LIBERADO).setValue(b(liberado)?"Sim":"Nao");
+        if(s(por)) aba.getRange(row,COL.OBS).setValue(
+          s(aba.getRange(row,COL.OBS).getValue()).replace(/\s*\[(lib|bloq)\..*?\]$/i,"") +
+          " ["+(b(liberado)?"lib":"bloq")+". "+s(por)+" "+agora()+"]");
+        return{ok:true,id:s(id),liberado:b(liberado)};
+      }
+    }
+    return{ok:false,erro:"Contrato não encontrado: "+id};
+  }catch(e){return{ok:false,erro:e.message};}
 }
 
 // ── Listar Contratos NFA ─────────────────────────────────────
@@ -674,7 +708,7 @@ function listarContratos(){
   var contratos=u.contratos.filter(function(c){return c.status!=="Inativo"&&c.status!=="Nao";})
     .map(function(c){
       return {n:c.id, d:c.criado_em, p:c.produto, safra:c.safra, vol:c.volume_total,
-        o:c.obs, bal:c.balanca||1,
+        o:c.obs, bal:c.balanca||1, lib:!!c.liberado,
         waClas:c.wa_classificador||"", waComp:c.wa_comprador||"",
         emClas:c.email_classificador||"", emComp:c.email_comprador||""};
     });
