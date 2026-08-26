@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v121"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v122"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1508,6 +1508,10 @@ const USERS = [
 /* ══ ESTADO ═══════════════════════════════════════════════════ */
 let DB={ordens:[],cfg:{}}, pend=[], atual=null, usr=null;
 let fotos={}, utTara='kg', utBruto='kg', filAtivo='all', cloud=[];
+// De qual ticket são as fotos que estão no objeto 'fotos' (null = pesagem nova
+// ainda não salva). Evita que as fotos de um caminhão sejam arquivadas na pasta
+// de outro quando o operador registra um e finaliza outro.
+let _fotosDe=null;
 let contratosCloud=[]; // única fonte de verdade de contratos — vem da planilha
 let pgAtual='pg-home', pgAntes=null;
 let sigC, sigX, sigDraw=false, sigOk=false;
@@ -1781,7 +1785,7 @@ function abrirConfigAdmin(){
   showCfg('sel');
 }
 function irNova(){
-  fotos={}; atual=null; utTara='kg'; utBruto='kg';
+  fotos={}; _fotosDe=null; atual=null; utTara='kg'; utBruto='kg';
   ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf','f-transp-cnpj','f-transp-nome'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   // UF padrão GO (maioria das cargas é de Goiás) — agiliza e carrega a lista de municípios
   const ufNova=document.getElementById('f-uf');
@@ -3567,10 +3571,15 @@ async function uploadFotosDrive(ordem){
     ext:'EXTRA', fotaTara:'BALANCA-TARA', fotaTara2:'BALANCA-TARA-2',
     fotaBruto:'BALANCA-BRUTO', fotaBruto2:'BALANCA-BRUTO-2'
   };
+  // Fotos DESTE ticket: as guardadas nele (entrada) + as tiradas agora, e as
+  // tiradas agora só entram se pertencerem a ele (_fotosDe). Antes usava sempre
+  // o objeto global: as fotos da entrada se perdiam e, pior, as fotos do último
+  // caminhão registrado iam parar na pasta de outro caminhão.
+  const mapa=Object.assign({}, ordem.fotos||{}, (_fotosDe===ordem.id ? fotos : {}));
   // Coletar fotos existentes
   const lista=[];
   Object.keys(tipos).forEach(function(tipo){
-    if(fotos[tipo]) lista.push({tipo:tipo, nome:tipos[tipo], b64:fotos[tipo]});
+    if(mapa[tipo]) lista.push({tipo:tipo, nome:tipos[tipo], b64:mapa[tipo]});
   });
   // Adicionar assinatura se existir
   if(ordem.assinatura && ordem.assinatura.length>100){
@@ -3603,17 +3612,25 @@ async function uploadFotosDrive(ordem){
               if(idx>=0){DB.ordens[idx].assinaturaUrl=j.url; saveDB();}
             }
           }
-        }catch(e){}
+        }catch(e){ addLog('❌ Foto '+item.nome+' ('+(ordem.placa||ordem.id)+') não foi para o Drive: '+e.message,'erro'); }
         resolve();
       });
     });
   }
-  toast('✅ '+ok+'/'+lista.length+' foto(s) salvas no Drive!');
+  if(ok===lista.length) toast('✅ '+ok+'/'+lista.length+' foto(s) salvas no Drive!');
+  else {
+    toast('⚠️ '+ok+'/'+lista.length+' foto(s) no Drive — veja o Diagnóstico');
+    addLog('⚠️ Arquivamento de fotos incompleto ('+ok+'/'+lista.length+') — '+(ordem.placa||ordem.id),'erro');
+  }
 }
 
 // Gera o ticket em PDF e salva na MESMA pasta da pesagem (junto das fotos)
 async function uploadTicketDrive(ordem){
-  if(!SHEETS_URL||!navigator.onLine||!ordem||!window.jspdf) return;
+  if(!SHEETS_URL||!navigator.onLine||!ordem) return;
+  if(!window.jspdf||typeof html2canvas!=='function'){
+    addLog('⚠️ Ticket de '+(ordem.placa||ordem.id)+' não arquivado: bibliotecas de PDF não carregaram','erro');
+    return;
+  }
   try{
     const holder=document.createElement('div');
     holder.className='pdf-page';
@@ -3643,7 +3660,8 @@ async function uploadTicketDrive(ordem){
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:payload});
     const j=JSON.parse(await r.text());
     if(j.ok) toast('🎫 Ticket salvo no Drive!');
-  }catch(e){ console.log('uploadTicketDrive:',e); }
+    else addLog('❌ Ticket de '+(ordem.placa||ordem.id)+' recusado pelo Drive: '+(j.erro||'erro'),'erro');
+  }catch(e){ addLog('❌ Ticket de '+(ordem.placa||ordem.id)+' não foi para o Drive: '+e.message,'erro'); }
 }
 
 function fotoPlaca(inp) {
@@ -3705,7 +3723,12 @@ function salvar(){
     pesoBruto:null, cargaLiquida:null, statusPeso:null, dataHoraFim:null, assinatura:null
   };
   DB.ordens.push(o); saveDB(); _refletirNoCloud(o);
+  _fotosDe=o.id;
   enviar(o,'salvar');
+  // Arquiva JÁ as fotos da entrada (placa, CNH, contrato, tara). Antes só subiam
+  // ao finalizar o peso — e a essa altura o objeto 'fotos' já tinha sido zerado
+  // ou trocado pelo próximo caminhão, então elas nunca chegavam ao Drive.
+  uploadFotosDrive(o);
   beep('ok'); // bip ao registrar tara
   atual=o; toast('✅ Tara registrada!'); updHome(); irAg();
 }
@@ -3784,6 +3807,9 @@ var _timerAg=null;
 /* ══ PESO BRUTO ════════════════════════════════════════════════ */
 function irBruto(id){
   atual=DB.ordens.find(o=>o.id===id)||cloud.find(o=>o.id===id); if(!atual)return;
+  // Trabalha com as fotos DESTE caminhão (as da entrada, se ainda estiverem aqui).
+  // As fotos da balança tiradas agora se somam a elas.
+  fotos=Object.assign({}, atual.fotos||{}); _fotosDe=atual.id;
 
   // ── Confirmação de dados (motorista/carreta pode ter mudado) ──
   const tol=(DB.cfg.tol||7)/100;
@@ -4106,6 +4132,8 @@ function finalizar(){
   atual.dataHoraFim=now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   // Salvar assinatura no localStorage indexada pelo id (disponível em outros momentos)
   try{ localStorage.setItem('sig_'+atual.id, atual.assinatura); }catch(e){}
+  // Guarda no ticket as fotos da balança tiradas agora (junto com as da entrada)
+  if(_fotosDe===atual.id) atual.fotos=Object.assign({}, atual.fotos||{}, fotos);
   const idx=DB.ordens.findIndex(o=>o.id===atual.id);
   if(idx>=0)DB.ordens[idx]={...atual};
   saveDB(); _refletirNoCloud(atual);
@@ -4622,7 +4650,10 @@ async function carregarDaPlanilha(){
         if(i<0) cloud.unshift(normOrdem(p.ordem));
         else cloud[i]={...cloud[i],...normOrdem(p.ordem)};
       });
-      DB.ordens=[...cloud];
+      // Preserva as fotos locais (a planilha não guarda foto) ao trocar a lista
+      var _fotosAntes={};
+      (DB.ordens||[]).forEach(function(o){ if(o&&o.id&&o.fotos&&Object.keys(o.fotos).length) _fotosAntes[o.id]=o.fotos; });
+      DB.ordens=cloud.map(function(o){ return _fotosAntes[o.id]?Object.assign({},o,{fotos:_fotosAntes[o.id]}):o; });
       saveCloud(); // salvar para acesso offline imediato
       addLog(`☁️ ${j.ordens.length} registro(s) carregados da planilha`,'ok');
       return true;
