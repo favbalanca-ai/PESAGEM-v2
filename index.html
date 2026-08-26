@@ -1406,7 +1406,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v120"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v121"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2993,25 +2993,41 @@ function loadContratosDaPlanilha(){
 }
 
 /* Adm libera/bloqueia um contrato para carregamento. Enquanto bloqueado, o
-   operador não vê o contrato na hora de registrar a pesagem. */
-function toggleLiberaContrato(n){
+   operador não vê o contrato na hora de registrar a pesagem.
+   O mesmo contrato aparece em duas listas — contratosNFA (tela Contratos NFA,
+   campo 'liberado') e contratosCloud (seletor da pesagem, campo 'lib') —
+   então os dois caches são atualizados juntos. */
+function _marcarLiberado(id,val){
+  var achou=false;
+  (contratosNFA||[]).forEach(function(c){ if(String(c.id)===String(id)){ c.liberado=val; achou=true; } });
+  (contratosCloud||[]).forEach(function(o){ if(String(o.n)===String(id)){ o.lib=val; achou=true; } });
+  try{ salvarContratosLocal(); }catch(e){}
+  try{ rContratosNFA(); }catch(e){}
+  try{ rOC(); }catch(e){}
+  return achou;
+}
+function _estaLiberado(id){
+  var c=(contratosNFA||[]).find(function(x){return String(x.id)===String(id);});
+  if(c && c.liberado!==undefined) return !!c.liberado;
+  var o=(contratosCloud||[]).find(function(x){return String(x.n)===String(id);});
+  return !!(o && o.lib);
+}
+function toggleLiberaContrato(id){
   if(!(usr && usr.nivel==='admin')){ toast('🔒 Só o administrador libera contratos'); return; }
-  var o=contratosCloud.find(function(x){return x.n===n;});
-  if(!o) return;
-  var novo=!o.lib;
-  if(!novo && !confirm('Bloquear o contrato '+n+'?\n\nOs operadores deixam de ver este contrato ao registrar a pesagem.')) return;
+  var novo=!_estaLiberado(id);
+  if(!novo && !confirm('Bloquear o contrato '+id+'?\n\nOs operadores deixam de ver este contrato ao registrar a pesagem.')) return;
   if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — a liberação precisa de internet'); return; }
-  o.lib=novo; salvarContratosLocal(); rOC();          // resposta imediata na tela
-  toast(novo?'⏳ Liberando '+n+'...':'⏳ Bloqueando '+n+'...');
+  _marcarLiberado(id,novo);                       // resposta imediata na tela
+  toast(novo?'⏳ Liberando '+id+'...':'⏳ Bloqueando '+id+'...');
   fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({acao:'liberarContrato',id:n,liberado:novo,por:(usr&&usr.nome)||'',token:TOKEN})})
+    body:JSON.stringify({acao:'liberarContrato',id:id,liberado:novo,por:(usr&&usr.nome)||'',token:TOKEN})})
     .then(function(r){return r.json();})
     .then(function(j){
-      if(j&&j.ok){ toast(novo?('🔓 '+n+' liberado para carregamento'):('🔒 '+n+' bloqueado')); }
-      else { o.lib=!novo; salvarContratosLocal(); rOC();
-             toast('❌ '+((j&&j.erro)||'não consegui salvar — reimplante o backend')); }
+      if(j&&j.ok){ toast(novo?('🔓 '+id+' liberado para carregamento'):('🔒 '+id+' bloqueado')); }
+      else { _marcarLiberado(id,!novo);
+             toast('❌ '+((j&&j.erro)||'ação não encontrada — publique a versão nova do backend')); }
     })
-    .catch(function(){ o.lib=!novo; salvarContratosLocal(); rOC(); toast('❌ Erro de conexão'); });
+    .catch(function(){ _marcarLiberado(id,!novo); toast('❌ Erro de conexão'); });
 }
 function salvarContratosLocal(){
   localStorage.setItem('poc',JSON.stringify(contratosCloud));
@@ -3213,7 +3229,14 @@ function rContratosNFA(){
       '<div style="font-size:12px;color:var(--ink2);margin-top:3px">'+c.emitente+' → '+c.destinatario_nome+'</div>'+
       '<div style="font-size:11px;color:var(--ink3);margin-top:2px">'+(c.produto||'')+' · R$ '+Number(c.valor_unitario||0).toFixed(4)+'/'+(c.unidade||'KG')+
       ' · Saldo: '+Number(c.saldo||0).toLocaleString('pt-BR')+'</div>'+
-      (adm ? '<button onclick="abrirEditarContrato('+i+')" class="btn btns" style="margin-top:9px;padding:8px;font-size:12px">✏️ Editar contrato</button>' : '')+
+      // Liberação para carregamento — o operador só vê os contratos liberados
+      (adm
+        ? '<button onclick="toggleLiberaContrato(\''+String(c.id).replace(/'/g,"\\'")+'\')" style="width:100%;margin-top:9px;padding:9px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif;'+
+          (c.liberado?'background:var(--g3);color:var(--g1)':'background:#fff3cd;color:#856404')+'">'+
+          (c.liberado?'🔓 Liberado para carregamento — toque para bloquear':'🔒 Bloqueado — toque para liberar')+'</button>'
+        : '<div style="margin-top:8px;font-size:11px;font-weight:700;color:'+(c.liberado?'var(--g1)':'var(--a1)')+'">'+
+          (c.liberado?'🔓 Liberado para carregamento':'🔒 Bloqueado')+'</div>')+
+      (adm ? '<button onclick="abrirEditarContrato('+i+')" class="btn btns" style="margin-top:7px;padding:8px;font-size:12px">✏️ Editar contrato</button>' : '')+
       '</div>';
   }).join('');
 }
