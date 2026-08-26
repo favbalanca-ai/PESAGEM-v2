@@ -264,6 +264,33 @@ async function procurarPDFnaPagina() {
   }
   return null;
 }
+// Conversa com o background: ler um PDF blob: (só a aba que criou consegue) e
+// mostrar no painel o resultado do registro automático do PDF baixado.
+if (!window.__FAV_NFA_MSG__) {
+  window.__FAV_NFA_MSG__ = true;
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (!msg || !msg.action) return;
+    if (msg.action === 'FETCH_PDF') {
+      fetch(msg.url, { credentials: 'include' })
+        .then(r => r.arrayBuffer())
+        .then(b => sendResponse({ ok: true, b64: bufferParaBase64(b) }))
+        .catch(e => sendResponse({ ok: false, erro: e.message }));
+      return true; // resposta assíncrona
+    }
+    if (msg.action === 'NFA_REGISTRADA') {
+      definirEtapa('registrar');
+      logFAV('NFA registrada automaticamente do PDF baixado: nº ' + (msg.numero_nfa || '?'));
+      atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (msg.numero_nfa || '—') +
+        '<div style="font-size:11px;margin-top:5px">Salva no Drive e na planilha. Já aparece no app.</div>', 'ok');
+    }
+    if (msg.action === 'NFA_FALHOU') {
+      logFAV('Registro automático falhou: ' + (msg.erro || '?'));
+      atualizarStatus('⚠️ Não consegui registrar sozinho (' + (msg.erro || 'erro') + ').' +
+        '<div style="font-size:11px;margin-top:5px">Clique em <b>"📄 Registrar NFA emitida"</b> e anexe o PDF baixado.</div>', 'aviso');
+    }
+  });
+}
+
 async function etapa_Registrar(dados) {
   const txt = document.body.innerText || '';
   const pareceEmitida = /sucesso|emitida|autoriza|protocolo|n[uú]mero da nota/i.test(txt);
