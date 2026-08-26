@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.5 (registra a nota emitida: PDF -> Drive + planilha)
+// FAV NFA - Background Service Worker v7.6 (pega o PDF baixado e registra: Drive + planilha)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.5' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.6' });
     return true;
   }
   return false;
@@ -115,6 +115,109 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(['nfa_aba_' + tabId, 'nfa_nova_' + tabId]);
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CAPTURA AUTOMÁTICA DO PDF BAIXADO
+// Quando o operador clica "Enviar Nota", a SEFAZ baixa o PDF na pasta Downloads.
+// Aqui pegamos esse arquivo e mandamos para o backend, que salva renomeado no
+// Drive (EMITENTE/ANO/MÊS · NFA-<nº>-<DESTINATÁRIO>-<data>.pdf), grava na aba
+// NFAs_Emitidas e avisa o destinatário. Sem isso, a nota saía e o app não sabia.
+// ═══════════════════════════════════════════════════════════════════════════
+function ehPDF(item) {
+  const mime = String(item.mime || '').toLowerCase();
+  const nome = String(item.filename || '');
+  const url  = String(item.url || '');
+  return /pdf/.test(mime) || /\.pdf$/i.test(nome) ||
+         /\.pdf(\?|$)|pdf=|imprimir|impressao|danfe|relatorio|documento/i.test(url);
+}
+function nomeLocalNFA(dados) {
+  const so = (v) => String(v || '').replace(/[^A-Za-z0-9-]/g, '');
+  const d = new Date();
+  const data = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
+  return ['NFA', so(dados.emitente) || 'FAV', so(dados.ticket_id) || 'ticket', so(dados.placa), data]
+    .filter(Boolean).join('-') + '.pdf';
+}
+// Renomeia o arquivo na pasta Downloads enquanto há uma NFA em andamento
+chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+  chrome.storage.local.get('nfa_pendente', (d) => {
+    if (d.nfa_pendente && ehPDF(item)) suggest({ filename: nomeLocalNFA(d.nfa_pendente), conflictAction: 'uniquify' });
+    else suggest();
+  });
+  return true; // resposta assíncrona
+});
+
+const _downloadsVistos = new Set();
+chrome.downloads.onCreated.addListener((item) => capturarPDFbaixado(item));
+chrome.downloads.onChanged.addListener((delta) => {
+  if (delta && delta.state && delta.state.current === 'complete') {
+    chrome.downloads.search({ id: delta.id }, (its) => { if (its && its[0]) capturarPDFbaixado(its[0]); });
+  }
+});
+
+function arrayBufferParaBase64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+// blob: só pode ser lido pela aba que o criou — peça ao content script de lá
+function lerPDFpelaAba(url) {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ url: ['https://nfw.sefaz.go.gov.br/*', 'https://sistemas.sefaz.go.gov.br/*'] }, (abas) => {
+      const aba = (abas || [])[0];
+      if (!aba) return resolve(null);
+      try {
+        chrome.tabs.sendMessage(aba.id, { action: 'FETCH_PDF', url }, (r) => {
+          if (chrome.runtime.lastError) return resolve(null);
+          resolve(r && r.ok ? r.b64 : null);
+        });
+      } catch (e) { resolve(null); }
+    });
+  });
+}
+async function lerPDFbase64(url) {
+  if (/^blob:/i.test(url)) return await lerPDFpelaAba(url);
+  try {
+    const r = await fetch(url, { credentials: 'include' });
+    if (!r.ok) return await lerPDFpelaAba(url);
+    const buf = await r.arrayBuffer();
+    const cab = String.fromCharCode.apply(null, new Uint8Array(buf.slice(0, 5)));
+    if (cab !== '%PDF-') return await lerPDFpelaAba(url);
+    return arrayBufferParaBase64(buf);
+  } catch (e) { return await lerPDFpelaAba(url); }
+}
+function avisarAbasSefaz(msg) {
+  chrome.tabs.query({ url: ['https://nfw.sefaz.go.gov.br/*', 'https://sistemas.sefaz.go.gov.br/*'] }, (abas) => {
+    (abas || []).forEach((t) => { try { chrome.tabs.sendMessage(t.id, msg, () => chrome.runtime.lastError); } catch (e) {} });
+  });
+}
+async function capturarPDFbaixado(item) {
+  try {
+    if (!item || !item.url || _downloadsVistos.has(item.id)) return;
+    if (!ehPDF(item)) return;
+    const store = await chrome.storage.local.get('nfa_pendente');
+    const dados = store.nfa_pendente;
+    if (!dados) return;                       // nenhuma emissão em andamento
+    _downloadsVistos.add(item.id);
+    console.log('[FAV BG] PDF baixado detectado — registrando NFA...', item.url);
+    const b64 = await lerPDFbase64(item.url);
+    if (!b64) {
+      console.log('[FAV BG] não consegui ler o PDF baixado — use o botão de anexar no painel');
+      avisarAbasSefaz({ action: 'NFA_FALHOU', erro: 'não consegui ler o PDF baixado' });
+      return;
+    }
+    const data = await processarPDF({ pdf_base64: b64, dados_nfa: dados });
+    if (data && data.ok) {
+      console.log('[FAV BG] NFA registrada automaticamente: nº', data.numero_nfa);
+      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa, drive_url: data.drive_url });
+    } else {
+      avisarAbasSefaz({ action: 'NFA_FALHOU', erro: (data && data.erro) || 'o servidor recusou' });
+    }
+  } catch (e) {
+    console.error('[FAV BG] captura do PDF falhou:', e);
+    avisarAbasSefaz({ action: 'NFA_FALHOU', erro: e.message });
+  }
+}
 
 async function processarPDF(msg) {
   const { pdf_base64, pdf_url, dados_nfa } = msg;
