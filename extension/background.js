@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.7 (recorta o PDF do Downloads e arquiva na pasta da placa)
+// FAV NFA - Background Service Worker v7.8 (recarrega a aba quando a SEFAZ nao abre)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.7' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.8' });
     return true;
   }
   return false;
@@ -60,6 +60,9 @@ function obterDados(tabId, cb) {
     cb(data[chave] || data.nfa_pendente || null);
   });
 }
+
+// Quantas vezes já recarregamos cada aba por página de erro da SEFAZ (evita laço)
+const _recargasPorAba = new Map();
 
 function injetarComDados(tabId, tentativa) {
   tentativa = tentativa || 1;
@@ -83,13 +86,19 @@ function injetarComDados(tabId, tentativa) {
         if (ehNova) chrome.storage.local.remove('nfa_nova_' + tabId);
         return chrome.scripting.executeScript({ target: { tabId: tabId }, files: ['content.js'] });
       }).then(() => {
+        _recargasPorAba.delete(tabId);   // carregou bem: zera o contador de recargas
         console.log('[FAV BG] injetado na aba', tabId, ehNova ? '(emissão nova - parada limpa)' : '');
       }).catch(err => {
-        // A SEFAZ recarrega a página no meio da injeção ("Frame with ID 0 was removed").
-        // Se a aba ainda existir e continuar no SEFAZ, re-tenta em ~1,2s (até 3x).
         const msg = String(err && err.message || err);
-        const transitorio = /Frame with ID|No frame with|was removed|No tab with id|cannot be scripted/i.test(msg);
-        if (transitorio && tentativa < 3) {
+        // Dois casos bem diferentes:
+        // 1) "showing error page" — a página da SEFAZ NÃO carregou (site fora do ar,
+        //    conexão instável). Insistir na injeção não adianta: o certo é recarregar
+        //    a aba (até 2x) e deixar o onUpdated injetar de novo.
+        // 2) "was removed"/"No frame with" — a SEFAZ recarregou no meio da injeção;
+        //    aí sim vale re-tentar em ~1,2s.
+        const paginaComErro = /showing error page|chrome-error|cannot be scripted/i.test(msg);
+        const corrida = !paginaComErro && /Frame with ID|No frame with|was removed|No tab with id/i.test(msg);
+        if (corrida && tentativa < 3) {
           console.log('[FAV BG] Injeção interrompida por reload (tentativa ' + tentativa + ') — re-tentando...');
           setTimeout(() => {
             chrome.tabs.get(tabId, (tab) => {
@@ -97,9 +106,25 @@ function injetarComDados(tabId, tentativa) {
               if (tab.url.includes('sefaz.go.gov.br')) injetarComDados(tabId, tentativa + 1);
             });
           }, 1200);
-        } else {
-          console.error('[FAV BG] Falha ao injetar:', err);
+          return;
         }
+        if (paginaComErro) {
+          const n = _recargasPorAba.get(tabId) || 0;
+          if (n < 2) {
+            _recargasPorAba.set(tabId, n + 1);
+            console.log('[FAV BG] A página da SEFAZ não carregou — recarregando a aba (' + (n + 1) + '/2)...');
+            setTimeout(() => {
+              chrome.tabs.get(tabId, (tab) => {
+                if (chrome.runtime.lastError || !tab || !tab.url) return;
+                if (tab.url.includes('sefaz.go.gov.br')) chrome.tabs.reload(tabId);
+              });
+            }, 2500);
+          } else {
+            console.log('[FAV BG] A página da SEFAZ segue fora do ar. Recarregue a aba (F5) quando o site voltar — a automação continua sozinha.');
+          }
+          return;
+        }
+        console.error('[FAV BG] Falha ao injetar:', err);
       });
     });
   });
@@ -114,6 +139,7 @@ chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.local.remove(['nfa_aba_' + tabId, 'nfa_nova_' + tabId]);
+  _recargasPorAba.delete(tabId);
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
