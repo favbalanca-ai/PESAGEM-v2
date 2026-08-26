@@ -1234,6 +1234,13 @@ body.dark .card{background:#1a2d22}
     </div>
   </div>
 
+  <!-- Manutenção do Drive -->
+  <div class="card adm-only" style="display:none">
+    <div class="ct">🗂️ Arquivos no Drive</div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Junta pastas repetidas de fotos/tickets criadas por envios simultâneos. Move o conteúdo para a pasta mais antiga.</div>
+    <button onclick="consolidarPastasDrive()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🗂️ Consolidar pastas duplicadas</button>
+  </div>
+
   <!-- Log de eventos -->
   <div class="card">
     <div class="ct">📋 Log de sincronização</div>
@@ -1406,7 +1413,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v122"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v123"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3560,6 +3567,16 @@ function comprimirImagem(b64full, callback){
   img.src=b64full;
 }
 
+/* Fila de envios ao Drive: um de cada vez. Envios simultâneos faziam o Apps
+   Script criar pastas repetidas (duas execuções procuram, nenhuma acha, as duas
+   criam) e os arquivos se espalhavam entre as cópias. */
+let _filaDriveP=Promise.resolve();
+function _filaDrive(fn){
+  _filaDriveP=_filaDriveP.then(fn).catch(function(e){
+    try{ addLog('❌ Envio ao Drive falhou: '+(e&&e.message||e),'erro'); }catch(_){}
+  });
+  return _filaDriveP;
+}
 async function uploadFotosDrive(ordem){
   if(!SHEETS_URL||!navigator.onLine||!ordem) return;
   const contrato=(ordem.numOrdem||'SEM-CONTRATO').replace(/[^a-zA-Z0-9.\-]/g,'');
@@ -3728,7 +3745,7 @@ function salvar(){
   // Arquiva JÁ as fotos da entrada (placa, CNH, contrato, tara). Antes só subiam
   // ao finalizar o peso — e a essa altura o objeto 'fotos' já tinha sido zerado
   // ou trocado pelo próximo caminhão, então elas nunca chegavam ao Drive.
-  uploadFotosDrive(o);
+  _filaDrive(function(){ return uploadFotosDrive(o); });
   beep('ok'); // bip ao registrar tara
   atual=o; toast('✅ Tara registrada!'); updHome(); irAg();
 }
@@ -4142,8 +4159,12 @@ function finalizar(){
   enviar(atual,'atualizar').then(function(ok){
     if(!ok) toast('⚠️ Peso salvo no aparelho, mas NÃO chegou na planilha ('+(_ultimoErroEnvio||'erro')+') — veja Diagnóstico');
   });
-  uploadFotosDrive(atual);
-  uploadTicketDrive(atual);
+  // Em SEQUÊNCIA, nunca em paralelo: dois envios ao mesmo tempo faziam o Drive
+  // criar a mesma pasta duas vezes (cada execução procurava, não achava, criava).
+  (function(o){
+    _filaDrive(function(){ return uploadFotosDrive(o); });
+    _filaDrive(function(){ return uploadTicketDrive(o); });
+  })(atual);
   // som de alerta conforme status
   beep(atual.statusPeso==='EXCEDIDO'?'erro':atual.statusPeso==='ATENÇÃO'?'warn':'ok');
   // WhatsApp automático
@@ -4492,6 +4513,26 @@ function addLog(msg,tipo){
   syncLog.unshift({t:agora,m:msg,tipo:tipo||'info'});
   if(syncLog.length>100) syncLog=syncLog.slice(0,100);
   localStorage.setItem('syncLog',JSON.stringify(syncLog));
+}
+/* Junta no Drive as pastas repetidas criadas antes da correção (envios
+   simultâneos). O conteúdo vai para a pasta mais antiga; as vazias vão p/ lixeira. */
+function consolidarPastasDrive(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  if(!confirm('Juntar as pastas repetidas no Drive?\n\nOs arquivos vão para a pasta mais antiga de cada nome e as vazias vão para a lixeira.')) return;
+  toast('⏳ Organizando o Drive — pode demorar um pouco...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'consolidarPastas',token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){
+        toast(j.pastas>0?('✅ '+j.pastas+' pasta(s) repetida(s) juntada(s)'):'✅ Nenhuma pasta repetida');
+        addLog('🗂️ Consolidação do Drive: '+(j.pastas||0)+' pasta(s) juntada(s)','ok');
+      } else {
+        toast('❌ '+((j&&j.erro)||'ação não encontrada — publique a versão nova do backend'));
+      }
+    })
+    .catch(function(){ toast('❌ Erro de conexão'); });
 }
 function limparLog(){
   syncLog=[];localStorage.removeItem('syncLog');
