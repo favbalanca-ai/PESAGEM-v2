@@ -866,6 +866,12 @@ body.dark .card{background:#1a2d22}
              width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
       ✅ Autorizar emissão de NFA
     </button>
+    <!-- Enviar NFA + Ticket (admin, quando a nota já foi emitida) -->
+    <button id="btn-enviar-docs" onclick="abrirEnviarDocs()"
+      style="margin-top:4px;display:none;background:#0e7c66;color:white;border:none;
+             width:100%;padding:13px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer">
+      📤 Enviar NFA + Ticket
+    </button>
     <!-- Botão Imprimir NFA (quando já emitida) -->
     <button id="btn-imprimir-nfa"
       style="margin-top:4px;display:none;background:#2a4d7a;color:white;border:none;
@@ -1413,7 +1419,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v123"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v124"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -6997,8 +7003,120 @@ function atualizarBotoesNFA(o){
     btnNFA.textContent=temSaldo?('📄 Emitir NF de complemento ('+(pesoTicketKg-jaKg).toLocaleString('pt-BR')+' kg)')
       :(!finalizado?'📄 Emitir NFA (informar peso)':'📄 Emitir NFA');
   }
+  // Enviar NFA + Ticket — admin, com a nota já emitida
+  const btnEnv=document.getElementById('btn-enviar-docs');
+  if(btnEnv) btnEnv.style.display=(isAdm && emitida)?'block':'none';
   // Botão de autorização removido
   if(btnAut) btnAut.style.display='none';
+}
+
+/* ══ ENVIAR NFA + TICKET (Adm) ═════════════════════════════════
+   Busca os dois PDFs na pasta da placa no Drive; manda por e-mail com
+   anexo e monta a mensagem de WhatsApp com os links. */
+function _dadosEnvioDocs(){
+  const o=(cloud||[]).find(x=>x.id===_nfaTicketAtual)||atual;
+  if(!o) return null;
+  const ct=(contratosNFA||[]).find(c=>String(c.id)===String(o.numOrdem))||{};
+  return {
+    ticket_id:o.id, contrato:o.numOrdem||'', placa:o.placa||'',
+    data:(o.dataEntrada||'').replace(/\//g,'-'),
+    motorista:o.motorista||'',
+    email:ct.destinatario_email||'',
+    wa:(ct.destinatario_whatsapp||'').replace(/\D/g,''),
+    dest:ct.destinatario_nome||'',
+    kg:Math.round((parseFloat(o.cargaLiquida)||0)*1000)
+  };
+}
+function abrirEnviarDocs(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  const d=_dadosEnvioDocs();
+  if(!d){ toast('Ticket não encontrado'); return; }
+  let m=document.getElementById('modal-env-docs');
+  if(m) m.remove();
+  m=document.createElement('div');
+  m.id='modal-env-docs';
+  m.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:170;display:flex;align-items:flex-end;justify-content:center';
+  m.innerHTML=
+    '<div style="background:var(--card);width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:18px;max-height:90vh;overflow-y:auto">'+
+      '<div style="font-weight:800;font-size:16px;margin-bottom:2px">📤 Enviar NFA + Ticket</div>'+
+      '<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">'+d.placa+' · '+(d.contrato||'sem contrato')+' · '+d.kg.toLocaleString('pt-BR')+' kg</div>'+
+      '<div class="f"><label>E-mail do destinatário</label><input id="env-email" value="'+String(d.email).replace(/"/g,'&quot;')+'" placeholder="nome@empresa.com.br"></div>'+
+      '<button onclick="enviarDocsEmail()" style="width:100%;margin-top:4px;padding:12px;border:none;border-radius:10px;background:#1a3a6c;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">✉️ Enviar por e-mail (com anexos)</button>'+
+      '<div style="font-size:11px;color:var(--ink3);margin:14px 0 6px">WhatsApp — abre a conversa com os links dos documentos</div>'+
+      '<div id="env-wa-btns"></div>'+
+      '<div id="env-status" style="font-size:11px;color:var(--ink3);margin-top:10px;text-align:center"></div>'+
+      '<button onclick="document.getElementById(\'modal-env-docs\').remove()" style="width:100%;margin-top:12px;padding:11px;border:1px solid var(--brd);border-radius:10px;background:none;color:var(--ink3);font-size:13px;cursor:pointer;font-family:\'Inter\',sans-serif">Fechar</button>'+
+    '</div>';
+  document.body.appendChild(m);
+  _envLinks=null; _envWaEsc='';
+  _renderAlvosWA(d);
+  _buscarLinksDocs().then(function(){ _renderAlvosWA(d); });  // já busca os links no Drive
+}
+let _envAlvos=[], _envLinks=null, _envWaEsc='';
+// O número do escritório mora só no backend (não fica publicado no app), então
+// o botão aparece depois que a consulta ao Drive o devolve.
+function _renderAlvosWA(d){
+  const btns=document.getElementById('env-wa-btns'); if(!btns) return;
+  const alvos=[];
+  if(d.wa) alvos.push({n:'📱 Destinatário'+(d.dest?' — '+d.dest:''),num:d.wa});
+  if(_envWaEsc) alvos.push({n:'📱 Escritório FAV',num:_envWaEsc});
+  alvos.push({n:'📱 Escolher contato no WhatsApp',num:''});
+  _envAlvos=alvos;
+  btns.innerHTML=alvos.map(function(a,i){
+    return '<button onclick="enviarDocsWA('+i+')" style="width:100%;margin-bottom:6px;padding:11px;border:none;border-radius:10px;background:#25d366;color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">'+a.n+'</button>';
+  }).join('');
+}
+function _statusEnv(t){ const el=document.getElementById('env-status'); if(el) el.textContent=t; }
+function _buscarLinksDocs(){
+  const d=_dadosEnvioDocs(); if(!d) return Promise.resolve(null);
+  if(_envLinks) return Promise.resolve(_envLinks);
+  if(!SHEETS_URL||!navigator.onLine){ _statusEnv('📵 sem conexão'); return Promise.resolve(null); }
+  _statusEnv('⏳ procurando os arquivos no Drive...');
+  return fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'enviarDocsTicket',dados:{contrato:d.contrato,placa:d.placa,data:d.data,motorista:d.motorista,email:''},token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok){
+        _envLinks=j.links||{}; if(j.wa_escritorio) _envWaEsc=j.wa_escritorio;
+        _statusEnv('✅ '+j.arquivos+' arquivo(s) na pasta da placa');
+        return _envLinks;
+      }
+      _statusEnv('⚠️ '+((j&&j.erro)||'não achei os arquivos'));
+      return null;
+    })
+    .catch(function(){ _statusEnv('❌ erro de conexão'); return null; });
+}
+function enviarDocsEmail(){
+  const d=_dadosEnvioDocs(); if(!d) return;
+  const em=(document.getElementById('env-email').value||'').trim();
+  if(!em){ toast('⚠️ Informe o e-mail'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  _statusEnv('⏳ enviando...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'enviarDocsTicket',dados:{contrato:d.contrato,placa:d.placa,data:d.data,motorista:d.motorista,email:em},token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(j&&j.ok&&j.enviado_email){ _envLinks=j.links||_envLinks; _statusEnv('✅ enviado para '+em); toast('✉️ NFA + Ticket enviados'); }
+      else { _statusEnv('❌ '+((j&&j.erro)||'não consegui enviar')); toast('❌ '+((j&&j.erro)||'falha no envio')); }
+    })
+    .catch(function(){ _statusEnv('❌ erro de conexão'); });
+}
+function enviarDocsWA(i){
+  const d=_dadosEnvioDocs(); if(!d) return;
+  const alvo=_envAlvos[i]||{num:''};
+  Promise.resolve(_envLinks||_buscarLinksDocs()).then(function(links){
+    links=links||_envLinks||{};
+    const txt='📄 *NFA + Ticket — '+d.placa+'*\n'+
+      (d.contrato?('Contrato: '+d.contrato+'\n'):'')+
+      (d.motorista?('Motorista: '+d.motorista+'\n'):'')+
+      'Carga: '+d.kg.toLocaleString('pt-BR')+' kg\n\n'+
+      (links.nfa?('📄 NFA: '+links.nfa+'\n'):'')+
+      (links.ticket?('🎫 Ticket: '+links.ticket+'\n'):'')+
+      (!links.nfa&&!links.ticket&&links.pasta?('📂 Documentos: '+links.pasta+'\n'):'')+
+      '\n_Fazenda Água Viva_';
+    const url='https://wa.me/'+(alvo.num||'')+'?text='+encodeURIComponent(txt);
+    window.open(url,'_blank');
+  });
 }
 
 // Verifica se o ticket tem UF/Município (obrigatórios na NFA). Se faltar,

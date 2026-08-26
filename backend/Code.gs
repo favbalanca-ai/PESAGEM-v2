@@ -80,6 +80,7 @@ function doPost(e){
     if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
     if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
     if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
+    if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
@@ -400,11 +401,76 @@ function processarNFA(payload){
 
     registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas,pesoKg);
 
-    return{ok:true,drive_url:drive_url,numero_nfa:numero_nfa,links_whatsapp:links_wa,sacas_registradas:sacas};
+    // Guarda a nota TAMBÉM na pasta da placa (junto das fotos e do ticket)
+    var naPlaca=_arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa);
+
+    return{ok:true,drive_url:drive_url,numero_nfa:numero_nfa,links_whatsapp:links_wa,
+      sacas_registradas:sacas,drive_url_placa:naPlaca.url||"",pasta_url:naPlaca.pasta||""};
   }catch(e){
     Logger.log("processarNFA erro: "+e.message);
     return{ok:false,erro:e.message};
   }
+}
+
+/* Arquiva a NFA na pasta da PLACA (a mesma pesagem das fotos e do ticket):
+   Fotos/<contrato>/<data>_<placa>/NFA-<nº>.pdf
+   O arquivo fiscal por EMITENTE/ANO/MÊS continua existindo. */
+function _arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa){
+  try{
+    var contrato=s(payload.contrato_id)||"SEM-CONTRATO";
+    var placa=s(payload.placa).replace(/[^A-Za-z0-9]/g,"")||"SEM-PLACA";
+    var data=s(payload.data_transporte).replace(/\//g,"-")||
+             Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd-MM-yyyy");
+    var r=salvarFoto({contrato:contrato,data:data,placa:placa,pesagem:data+"_"+placa,
+      tipo:"NFA-"+s(numero_nfa),base64:pdf_base64,mime:"application/pdf"},"Fotos");
+    return{url:(r&&r.url)||"",pasta:(r&&r.pasta_url)||""};
+  }catch(e){ Logger.log("arquivar NFA na pasta da placa: "+e.message); return{url:"",pasta:""}; }
+}
+
+/* Envia NFA + ticket da pesagem por e-mail (anexos) e devolve os links do Drive
+   para o Adm mandar por WhatsApp. Busca os arquivos na pasta da placa. */
+function enviarDocsTicket(p){
+  try{
+    var contrato=s(p.contrato)||"SEM-CONTRATO";
+    var placa=s(p.placa).replace(/[^A-Za-z0-9]/g,"")||"SEM-PLACA";
+    var data=s(p.data).replace(/\//g,"-");
+    var chave=(s(p.pesagem)||(data+"_"+placa)).replace(/[\/\\:*?"<>|]/g,"-");
+    var raiz=DriveApp.getFolderById(DRIVE_ID);
+    var pFotos=_pastaMaisAntiga(raiz,"Fotos");
+    var pCtr=pFotos?_pastaMaisAntiga(pFotos,contrato):null;
+    var pasta=pCtr?_pastaMaisAntiga(pCtr,chave):null;
+    if(!pasta) return{ok:false,erro:"Pasta da pesagem não encontrada: "+contrato+"/"+chave};
+
+    var anexos=[], links={pasta:pasta.getUrl(),nfa:"",ticket:""};
+    var it=pasta.getFiles();
+    while(it.hasNext()){
+      var f=it.next(), nm=f.getName();
+      if(/^NFA/i.test(nm)){ links.nfa=f.getUrl(); anexos.push(f.getBlob()); }
+      else if(/^TICKET/i.test(nm)){ links.ticket=f.getUrl(); anexos.push(f.getBlob()); }
+    }
+    if(!anexos.length) return{ok:false,erro:"Nenhum NFA/TICKET nesta pasta ainda"};
+
+    var enviado=false;
+    var para=s(p.email);
+    if(para){
+      var html="<div style='font-family:Arial,sans-serif;max-width:600px'>"+
+        "<div style='background:#1a3a6c;padding:18px;border-radius:8px 8px 0 0'>"+
+        "<h2 style='color:#fff;margin:0'>📄 Documentos da carga</h2>"+
+        "<p style='color:#aac4e8;margin:4px 0 0'>Placa "+s(p.placa)+" · Contrato "+contrato+"</p></div>"+
+        "<div style='background:#fff;padding:20px;border:1px solid #ddd;border-top:none'>"+
+        "<p>Seguem em anexo a <b>Nota Fiscal Avulsa</b> e o <b>ticket de pesagem</b>.</p>"+
+        (s(p.motorista)?"<p>Motorista: <b>"+s(p.motorista)+"</b></p>":"")+
+        (links.nfa?"<p>📄 <a href='"+links.nfa+"'>Abrir NFA no Drive</a></p>":"")+
+        (links.ticket?"<p>🎫 <a href='"+links.ticket+"'>Abrir ticket no Drive</a></p>":"")+
+        "<p style='color:#888;font-size:12px;margin-top:18px'>Fazenda Água Viva — enviado pelo sistema de pesagem</p>"+
+        "</div></div>";
+      MailApp.sendEmail({to:para,subject:"NFA + Ticket — Placa "+s(p.placa)+" — Contrato "+contrato,
+        htmlBody:html,attachments:anexos});
+      enviado=true;
+    }
+    return{ok:true,enviado_email:enviado,links:links,arquivos:anexos.length,
+      wa_escritorio:s(FAV_WA_ESCRITORIO)};
+  }catch(e){ return{ok:false,erro:e.message}; }
 }
 
 function salvarPDFnfa(pdf_base64,emitente,dest_nome){

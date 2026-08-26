@@ -281,7 +281,10 @@ if (!window.__FAV_NFA_MSG__) {
       definirEtapa('registrar');
       logFAV('NFA registrada automaticamente do PDF baixado: nº ' + (msg.numero_nfa || '?'));
       atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (msg.numero_nfa || '—') +
-        '<div style="font-size:11px;margin-top:5px">Salva no Drive e na planilha. Já aparece no app.</div>', 'ok');
+        '<div style="font-size:11px;margin-top:5px">Arquivada na pasta da placa ' + (msg.placa || '') +
+        ', junto das fotos e do ticket. Removida da pasta Downloads.' +
+        (msg.pasta_url ? ' <a href="' + msg.pasta_url + '" target="_blank" style="color:#cfe9ff">abrir pasta</a>' : '') +
+        '<br>No app, use <b>📤 Enviar NFA + Ticket</b> para mandar por e-mail/WhatsApp.</div>', 'ok');
     }
     if (msg.action === 'NFA_FALHOU') {
       logFAV('Registro automático falhou: ' + (msg.erro || '?'));
