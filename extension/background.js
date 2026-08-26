@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.6 (pega o PDF baixado e registra: Drive + planilha)
+// FAV NFA - Background Service Worker v7.7 (recorta o PDF do Downloads e arquiva na pasta da placa)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -45,7 +45,7 @@ function tratarMensagem(msg, sendResponse) {
     return true;
   }
   if (msg.action === 'PING') {
-    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.6' });
+    sendResponse({ ok: true, ext: 'FAV-NFA', version: '7.7' });
     return true;
   }
   return false;
@@ -209,7 +209,14 @@ async function capturarPDFbaixado(item) {
     const data = await processarPDF({ pdf_base64: b64, dados_nfa: dados });
     if (data && data.ok) {
       console.log('[FAV BG] NFA registrada automaticamente: nº', data.numero_nfa);
-      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa, drive_url: data.drive_url });
+      // "Recortar": a nota já está no Drive (pasta da placa + arquivo fiscal),
+      // então some com a cópia solta da pasta Downloads.
+      try {
+        chrome.downloads.removeFile(item.id, () => chrome.runtime.lastError);
+        chrome.downloads.erase({ id: item.id }, () => chrome.runtime.lastError);
+      } catch (e) { console.log('[FAV BG] não consegui limpar o Downloads:', e); }
+      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa,
+        drive_url: data.drive_url, pasta_url: data.pasta_url, placa: dados.placa });
     } else {
       avisarAbasSefaz({ action: 'NFA_FALHOU', erro: (data && data.erro) || 'o servidor recusou' });
     }
@@ -224,6 +231,8 @@ async function processarPDF(msg) {
   const payload = {
     action: 'processarNFA', pdf_base64, pdf_url,
     ticket_id: dados_nfa.ticket_id, contrato_id: dados_nfa.contrato_id,
+    // placa e data → a nota é arquivada também na pasta da placa, junto das fotos
+    placa: dados_nfa.placa, data_transporte: dados_nfa.data_transporte,
     emitente: dados_nfa.emitente, emitente_nome: dados_nfa.emitente_nome,
     destinatario_nome: dados_nfa.destinatario_nome,
     destinatario_email: dados_nfa.destinatario_email,
