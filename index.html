@@ -1419,7 +1419,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v124"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v125"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5695,10 +5695,22 @@ function irNovaRec() {
     <div class="card">
       <div class="ct">Pesagem e qualidade</div>
 
+      <!-- Caminhão longo (rodotrem): pesa em 2 partes -->
+      <label style="display:flex;align-items:center;gap:9px;padding:9px 11px;border:1.5px solid var(--brd);border-radius:9px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="rec-longo" onchange="toggleLongoRec()" style="width:20px;height:20px;flex-shrink:0">
+        <span style="font-size:12px;font-weight:700;color:var(--ink2)">🚛 Caminhão longo — pesar em 2 partes<br><span style="font-size:10px;font-weight:400;color:var(--ink3)">Marcado sozinho para o FH540 (RODO)</span></span>
+      </label>
+
       <!-- 1º PASSO: BRUTO (caminhão cheio vindo do campo) -->
       <div style="font-size:11px;font-weight:700;color:var(--g1);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">1. Peso bruto — caminhão cheio</div>
       <div class="f">
+        <div class="lbl-parte" style="display:none;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:2px">1ª PARTE</div>
         <div class="pw"><input type="number" id="rec-bruto" placeholder="0" step="1" min="0" max="200000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
+      </div>
+      <div class="f" id="rec-bruto2-wrap" style="display:none">
+        <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:2px">2ª PARTE</div>
+        <div class="pw"><input type="number" id="rec-bruto2" placeholder="0" step="1" min="0" max="200000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
+        <div id="rec-bruto-total" style="font-size:11px;font-weight:700;color:var(--g1);margin-top:3px"></div>
       </div>
       <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
         <span style="font-size:18px">📊</span>
@@ -5722,7 +5734,13 @@ function irNovaRec() {
       <!-- 3º PASSO: TARA (caminhão vazio após descarregar) -->
       <div style="font-size:11px;font-weight:700;color:var(--g1);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">3. Tara — caminhão vazio (após descarregar)</div>
       <div class="f">
+        <div class="lbl-parte" style="display:none;font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:2px">1ª PARTE</div>
         <div class="pw"><input type="number" id="rec-tara" placeholder="0" step="1" min="0" max="50000" oninput="calcDescRec();this.removeAttribute('data-prefill')" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
+      </div>
+      <div class="f" id="rec-tara2-wrap" style="display:none">
+        <div style="font-size:10px;font-weight:700;color:var(--ink3);margin-bottom:2px">2ª PARTE</div>
+        <div class="pw"><input type="number" id="rec-tara2" placeholder="0" step="1" min="0" max="50000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
+        <div id="rec-tara-total" style="font-size:11px;font-weight:700;color:var(--g1);margin-top:3px"></div>
       </div>
       <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
         <span style="font-size:18px">📊</span>
@@ -5880,7 +5898,8 @@ function selCaminhaoProprio(id) {
   selTipoCaminhao('proprio');
   _realcaCaminhaoProprio(id);
   autocompletePlacaRec(id);
-  toast('🚛 ' + id + ' selecionado');
+  _ajustarLongoPorPlaca(id);   // FH540 (RODO) já abre os campos de 2 partes
+  toast('🚛 ' + id + ' selecionado' + (CAMINHOES_LONGOS.indexOf(id)>=0 ? ' — pesagem em 2 partes' : ''));
 }
 
 function cloudRecFiltrado() {
@@ -5894,6 +5913,9 @@ function cloudRecFiltrado() {
 // Tara pode ser substituída se estiver vazia OU se veio do prefill do último registro
 // (assim a tara real do caminhão/placa sempre vence o valor sugerido)
 function _taraSubstituivel() {
+  // Caminhão longo pesa a tara em 2 partes: sugerir um total no campo da 1ª
+  // parte daria peso errado, então nunca preenche sozinho nesse caso.
+  if (typeof recEhLongo==='function' && recEhLongo()) return false;
   const ta = document.getElementById('rec-tara');
   return !!ta && (!ta.value || ta.dataset.prefill === '1');
 }
@@ -5908,6 +5930,7 @@ function autocompletePlacaRec(val) {
   const v = val.toUpperCase().trim();
   // Mantém os botões de caminhão próprio em sincronia com a placa
   _realcaCaminhaoProprio(CAMINHOES_PROPRIOS.some(c => c.id === v) ? v : null);
+  _ajustarLongoPorPlaca(v);   // digitou FH540 → já abre a pesagem em 2 partes
   if (v.length < 3) return;
 
   // Mostrar hint de tara (sempre, independente de ter salvo ou não)
@@ -5973,9 +5996,46 @@ function autocompletePlacaRec(val) {
   }
 }
 
+/* ══ CAMINHÃO LONGO NA RECEPÇÃO (rodotrem) ═════════════════════
+   O FH540 (RODO) não cabe de uma vez na balança: pesa a 1ª e a 2ª parte,
+   tanto no bruto quanto na tara. O peso considerado é a soma. */
+const CAMINHOES_LONGOS = ['FH540'];
+function recEhLongo(){
+  const c=document.getElementById('rec-longo');
+  return !!(c && c.checked);
+}
+function _recKg(id){ return parseFloat(document.getElementById(id)?.value)||0; }
+function recBrutoKg(){ return _recKg('rec-bruto') + (recEhLongo()?_recKg('rec-bruto2'):0); }
+function recTaraKg(){  return _recKg('rec-tara')  + (recEhLongo()?_recKg('rec-tara2') :0); }
+function toggleLongoRec(){
+  const lg=recEhLongo();
+  const b2=document.getElementById('rec-bruto2-wrap');
+  const t2=document.getElementById('rec-tara2-wrap');
+  if(b2) b2.style.display=lg?'block':'none';
+  if(t2) t2.style.display=lg?'block':'none';
+  document.querySelectorAll('#pg-nova-rec .lbl-parte').forEach(function(el){ el.style.display=lg?'block':'none'; });
+  if(!lg){ // volta ao normal: zera as 2ªs partes para não somarem escondido
+    const eb=document.getElementById('rec-bruto2'), et=document.getElementById('rec-tara2');
+    if(eb) eb.value=''; if(et) et.value='';
+  }
+  calcDescRec();
+}
+// Marca/desmarca sozinho conforme o caminhão próprio escolhido
+function _ajustarLongoPorPlaca(placa){
+  const c=document.getElementById('rec-longo'); if(!c) return;
+  const p=String(placa||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  const ehLongo=CAMINHOES_LONGOS.some(function(id){ return p.indexOf(id)>=0; });
+  if(ehLongo!==c.checked){ c.checked=ehLongo; toggleLongoRec(); }
+}
 function calcDescRec() {
-  const bruto = parseFloat(document.getElementById('rec-bruto')?.value)||0;
-  const tara  = parseFloat(document.getElementById('rec-tara')?.value)||0;
+  const bruto = recBrutoKg();
+  const tara  = recTaraKg();
+  // Mostra o total das partes quando é caminhão longo
+  if(recEhLongo()){
+    const tb=document.getElementById('rec-bruto-total'), tt=document.getElementById('rec-tara-total');
+    if(tb) tb.textContent=bruto>0?('Bruto total: '+bruto.toLocaleString('pt-BR')+' kg'):'';
+    if(tt) tt.textContent=tara>0?('Tara total: '+tara.toLocaleString('pt-BR')+' kg'):'';
+  }
   const u     = parseFloat(document.getElementById('rec-umidade')?.value)||0;
   const imp   = parseFloat(document.getElementById('rec-impureza')?.value)||0;
   const el    = document.getElementById('rec-resultado');
@@ -6015,10 +6075,15 @@ function calcDescRec() {
 function registrarRecepcao() {
   const placa = (document.getElementById('rec-placa')?.value||'').trim().toUpperCase();
   const motorista = (document.getElementById('rec-motorista')?.value||'').trim().toUpperCase();
-  const bruto = parseFloat(document.getElementById('rec-bruto')?.value)||0;
-  const tara  = parseFloat(document.getElementById('rec-tara')?.value)||0;
+  const bruto = recBrutoKg();
+  const tara  = recTaraKg();
   if (!placa || !motorista || bruto <= 0 || tara <= 0) {
     toast('⚠️ Preencha todos os campos obrigatórios');
+    return;
+  }
+  // Caminhão longo: as duas partes precisam estar pesadas, senão o peso sai pela metade
+  if (recEhLongo() && (_recKg('rec-bruto')<=0 || _recKg('rec-bruto2')<=0 || _recKg('rec-tara')<=0 || _recKg('rec-tara2')<=0)) {
+    toast('⚠️ Caminhão longo: preencha a 1ª e a 2ª parte do bruto e da tara');
     return;
   }
   const cod = document.getElementById('rec-talhao')?.value;
@@ -6771,7 +6836,9 @@ async function iaLerDisplay(campo,input){
 
 async function iaLerDisplayRec(campo,input){
   if(!input.files||!input.files[0])return;
-  const campoId=campo==='tara'?'rec-tara':'rec-bruto';
+  // Caminhão longo: a 1ª foto preenche a 1ª parte, a 2ª foto vai para a 2ª parte
+  let campoId=campo==='tara'?'rec-tara':'rec-bruto';
+  if(recEhLongo() && _recKg(campoId)>0 && document.getElementById(campoId+'2')) campoId=campoId+'2';
   const statusId='ia-status-rec-'+campo;
   iaStatus(statusId,'load','🤖 IA lendo o display...');
   try{
@@ -6788,10 +6855,12 @@ async function iaLerDisplayRec(campo,input){
       iaStatus(statusId,'ok',`✅ Peso: ${Number(peso).toLocaleString('pt-BR')} kg`);
       if(campo==='tara'&&recAtual?.tipo==='proprio'){
         const placa=document.getElementById('rec-placa')?.value?.trim().toUpperCase();
-        if(placa){
+        // Caminhão longo: guarda a tara TOTAL (as duas partes), nunca só a parte lida
+        const taraGuardar=recEhLongo()?recTaraKg():peso;
+        if(placa && !(recEhLongo() && (_recKg('rec-tara')<=0 || _recKg('rec-tara2')<=0))){
           const taras=JSON.parse(localStorage.getItem('taras-rec-v2')||'{}');
           if(!taras[placa]){
-            taras[placa]={tara:peso,motorista:document.getElementById('rec-motorista')?.value||'',cpf:document.getElementById('rec-cpf')?.value||'',atualizado:new Date().toLocaleString('pt-BR')};
+            taras[placa]={tara:taraGuardar,motorista:document.getElementById('rec-motorista')?.value||'',cpf:document.getElementById('rec-cpf')?.value||'',atualizado:new Date().toLocaleString('pt-BR')};
             localStorage.setItem('taras-rec-v2',JSON.stringify(taras));
           }
         }
