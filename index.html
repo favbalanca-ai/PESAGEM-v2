@@ -63,6 +63,13 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .tbl-est .sf{font-size:9px;font-weight:400;color:var(--ink3)}
 .tbl-est .mini{width:58px}
 .tbl-est .mini div{display:flex;height:5px;border-radius:3px;overflow:hidden;background:var(--brd)}
+/* Celular: fora a safra e as colunas de R$ — o resumo em R$ vai abaixo da tabela */
+.tbl-resumo{display:none}
+@media (max-width:680px){
+  .tbl-est .col-rs{display:none}
+  .tbl-est .sf{display:none}
+  .tbl-resumo{display:block;background:var(--g3);border-radius:9px;padding:9px 11px;margin-top:10px;text-align:center}
+}
 
 /* FIELD */
 .f{margin-bottom:9px}
@@ -1434,7 +1441,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v129"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v130"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2225,8 +2232,8 @@ function renderGcEstoque(elId){
       <td style="color:var(--g1);font-weight:700">${nSc(disp)}</td>
       <td style="font-weight:800;color:var(--ink)">${pctCom}%</td>
       <td class="mini">${miniBarra(pctV,pctC)}</td>
-      <td style="color:var(--g1)">${valorD>0?nR$c(valorD):'—'}</td>
-      <td style="color:${valorV>0?'#1a5c9e':'var(--ink3)'}">${valorV>0?nR$c(valorV):'—'}</td>
+      <td class="col-rs" style="color:var(--g1)">${valorD>0?nR$c(valorD):'—'}</td>
+      <td class="col-rs" style="color:${valorV>0?'#1a5c9e':'var(--ink3)'}">${valorV>0?nR$c(valorV):'—'}</td>
     </tr>`;
   }).join('');
   // Sacas de produtos diferentes não se somam — só totalizamos os VALORES (R$).
@@ -2237,16 +2244,24 @@ function renderGcEstoque(elId){
       <td colspan="5" style="text-align:left;font-weight:400;color:var(--ink3);font-size:10px;white-space:normal">sacas de produtos diferentes não se somam</td>
       <td>${pctTot}%</td>
       <td class="mini"></td>
-      <td style="color:var(--g1)">${nR$c(tValD)}</td>
-      <td style="color:#1a5c9e">${nR$c(tVal)}</td>
+      <td class="col-rs" style="color:var(--g1)">${nR$c(tValD)}</td>
+      <td class="col-rs" style="color:#1a5c9e">${nR$c(tVal)}</td>
     </tr></tfoot>`:'';
   let html=`<div class="tbl-wrap"><table class="tbl-est">
     <thead><tr>
       <th>Produto</th><th>Colhido</th><th>Em estoque</th><th>Vendido</th><th>Comprom.</th>
-      <th>Livre</th><th>Comerc.</th><th class="mini"></th><th>Disponível R$</th><th>Vendido R$</th>
+      <th>Livre</th><th>Comerc.</th><th class="mini"></th>
+      <th class="col-rs">Disponível R$</th><th class="col-rs">Vendido R$</th>
     </tr></thead>
     <tbody>${linhas}</tbody>${rodape}
   </table></div>`;
+  // No celular as colunas de R$ saem da tabela — o dinheiro aparece aqui embaixo
+  if(tVal>0||tValD>0){
+    html+=`<div class="tbl-resumo">
+      <div style="font-size:12px;color:var(--ink2)">Disponível <b style="color:var(--g1)">${nR$(tValD)}</b> · Vendido <b style="color:#1a5c9e">${nR$(tVal)}</b></div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:3px">${pctTot}% da colheita já comercializada</div>
+    </div>`;
+  }
   if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções · toque em 🔄 Recalcular para consolidar no servidor</div>';
   el.innerHTML=html;
 }
