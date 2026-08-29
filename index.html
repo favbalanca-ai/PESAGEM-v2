@@ -1419,7 +1419,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v125"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v126"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2185,14 +2185,20 @@ function renderGcEstoque(elId){
   Object.keys(comp).forEach(k=>{const c=k.split('|')[1], g=_grupoKey(c); if(prod[g])prod[g].comprometido+=comp[k]?.comprometido_sc||0;});
   const lista=Object.values(prod).sort((a,b)=>b.estoque-a.estoque);
   const mc=(lbl,val,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px"><div style="font-weight:800;color:${cor};font-size:12px">${val}</div><div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div></div>`;
-  let tE=0,tV=0,tC=0,tD=0,tVal=0;
+  let tE=0,tV=0,tC=0,tD=0,tVal=0,tValD=0;
   let html=lista.map(p=>{
     const disp=Math.max(0,p.estoque-p.comprometido);
     const preco=precoMap[_grupoKey(p.cultura)]?.precoSc||0;
     const valorV=p.vendido*preco;
-    const pct=p.estoque>0?Math.round(p.comprometido/p.estoque*100):0;
+    const valorD=disp*preco;                       // quanto ainda vale o que está livre
     const safras=Object.keys(p.safras).sort().join(', ');
-    tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;
+    // Percentuais sobre a COLHEITA (entradas): quanto já saiu e quanto está comprometido
+    const colhido=p.entradas||0;
+    const pctV=colhido>0?Math.min(100,Math.round(p.vendido/colhido*100)):0;
+    // Arredondar o total (e não cada parte) — senão 62,5% + 12,5% viravam 76% em vez de 75%
+    const pctCom=colhido>0?Math.min(100,Math.round((p.vendido+p.comprometido)/colhido*100)):0;
+    const pctC=Math.max(0,pctCom-pctV);            // fatia comprometida da barra
+    tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;tValD+=valorD;
     return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:.5px solid var(--brd)">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
@@ -2204,17 +2210,28 @@ function renderGcEstoque(elId){
         ${mc('Disponível (sc)',nSc(disp),'var(--g1)','var(--g3)')}
         ${mc('Vendido (sc)',nSc(p.vendido),'#1a5c9e','#e8f0fb')}
       </div>
-      <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden;margin-top:7px"><div style="height:100%;width:${pct}%;background:var(--a1);border-radius:4px" title="${pct}% comprometido"></div></div>
-      <div style="font-size:10px;color:var(--ink3);margin-top:4px;display:flex;justify-content:space-between">
-        <span>Entradas: ${nSc(p.entradas)} sc</span>
+      <!-- Barra sobre a colheita: azul = vendido · âmbar = comprometido · resto = livre -->
+      <div style="display:flex;background:var(--brd);border-radius:4px;height:7px;overflow:hidden;margin-top:8px" title="${pctV}% vendido · ${pctC}% comprometido">
+        <div style="width:${pctV}%;background:#1a5c9e"></div>
+        <div style="width:${pctC}%;background:var(--a1)"></div>
+      </div>
+      <div style="font-size:10px;color:var(--ink3);margin-top:5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+        <span>Colhido: <b>${nSc(colhido)} sc</b></span>
+        <span>Comercializado: <b style="color:#1a5c9e">${pctCom}%</b>${pctC>0?' <span style="color:var(--ink3)">(vendido '+pctV+'%)</span>':''}</span>
+      </div>
+      <div style="font-size:10px;color:var(--ink3);margin-top:3px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+        <span>${valorD>0?'Disponível: <b style="color:var(--g1)">'+nR$(valorD)+'</b>':''}</span>
         <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':''}</span>
       </div>
     </div>`;
   }).join('');
-  // Sacas de produtos diferentes não se somam — só totalizamos o VALOR (R$) vendido.
-  if(lista.length>1 && tVal>0){
+  // Sacas de produtos diferentes não se somam — só totalizamos os VALORES (R$).
+  if(lista.length>1 && (tVal>0||tValD>0)){
+    const colhTot=lista.reduce((s,p)=>s+(p.entradas||0),0);
+    const pctTot=colhTot>0?Math.min(100,Math.round((tV+tC)/colhTot*100)):0;
     html+=`<div style="background:var(--g3);border-radius:9px;padding:10px 12px;margin-top:2px;text-align:center">
-      <span style="font-size:12px;color:var(--ink2)">Valor vendido total (todos os produtos): <b style="color:#1a5c9e">${nR$(tVal)}</b></span>
+      <div style="font-size:12px;color:var(--ink2)">Vendido <b style="color:#1a5c9e">${nR$(tVal)}</b> · Disponível <b style="color:var(--g1)">${nR$(tValD)}</b></div>
+      <div style="font-size:11px;color:var(--ink3);margin-top:3px">${pctTot}% da colheita já comercializada (todos os produtos)</div>
     </div>`;
   }
   if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções · toque em 🔄 Recalcular para consolidar no servidor</div>';
