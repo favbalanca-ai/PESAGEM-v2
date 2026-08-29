@@ -1419,7 +1419,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v127"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v128"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2184,7 +2184,20 @@ function renderGcEstoque(elId){
   });
   Object.keys(comp).forEach(k=>{const c=k.split('|')[1], g=_grupoKey(c); if(prod[g])prod[g].comprometido+=comp[k]?.comprometido_sc||0;});
   const lista=Object.values(prod).sort((a,b)=>b.estoque-a.estoque);
-  const mc=(lbl,val,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px"><div style="font-weight:800;color:${cor};font-size:12px">${val}</div><div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div></div>`;
+  // Item numérico do bloco ao lado do anel
+  const mi=(lbl,val,cor)=>`<div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);line-height:1.2">${lbl}</div><div style="font-size:14px;font-weight:800;color:${cor};font-variant-numeric:tabular-nums">${val}</div></div>`;
+  /* Anel de comercialização: âmbar = comercializado (vendido + comprometido),
+     azul por cima = a parte já entregue. Raio 30 → circunferência 188,5. */
+  const anel=(pctCom,pctV,titulo)=>{
+    const C=188.5, ac=(pctCom*C/100).toFixed(1), av=(pctV*C/100).toFixed(1);
+    return `<svg viewBox="0 0 76 76" width="76" height="76" role="img" aria-label="${titulo}" style="flex-shrink:0">
+      <circle cx="38" cy="38" r="30" fill="none" stroke="var(--brd)" stroke-width="9"></circle>
+      ${pctCom>0?`<circle cx="38" cy="38" r="30" fill="none" stroke="var(--a1)" stroke-width="9" stroke-dasharray="${ac} ${C}" transform="rotate(-90 38 38)"></circle>`:''}
+      ${pctV>0?`<circle cx="38" cy="38" r="30" fill="none" stroke="#1a5c9e" stroke-width="9" stroke-dasharray="${av} ${C}" transform="rotate(-90 38 38)"></circle>`:''}
+      <text x="38" y="40" text-anchor="middle" font-size="18" font-weight="800" fill="var(--ink)" font-family="Inter,sans-serif">${pctCom}%</text>
+      <text x="38" y="51" text-anchor="middle" font-size="8" fill="var(--ink3)" font-family="Inter,sans-serif">comerc.</text>
+    </svg>`;
+  };
   let tE=0,tV=0,tC=0,tD=0,tVal=0,tValD=0;
   let html=lista.map(p=>{
     const disp=Math.max(0,p.estoque-p.comprometido);
@@ -2197,33 +2210,25 @@ function renderGcEstoque(elId){
     const pctV=colhido>0?Math.min(100,Math.round(p.vendido/colhido*100)):0;
     // Arredondar o total (e não cada parte) — senão 62,5% + 12,5% viravam 76% em vez de 75%
     const pctCom=colhido>0?Math.min(100,Math.round((p.vendido+p.comprometido)/colhido*100)):0;
-    const pctC=Math.max(0,pctCom-pctV);            // fatia comprometida da barra
     tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;tValD+=valorD;
-    return `<div style="margin-bottom:14px;padding-bottom:12px;border-bottom:.5px solid var(--brd)">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
-        <span style="font-size:11px;color:var(--ink3)">preço médio <b style="color:var(--g1)">${preco>0?nR$(preco)+'/sc':'—'}</b></span>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:5px;text-align:center">
-        ${mc('Em estoque (sc)',nSc(p.estoque),'var(--g1)','var(--g3)')}
-        ${mc('Comprometido (sc)',nSc(p.comprometido),'#854F0B','#fff8e1')}
-        ${mc('Disponível (sc)',nSc(disp),'var(--g1)','var(--g3)')}
-        ${mc('Vendido (sc)',nSc(p.vendido),'#1a5c9e','#e8f0fb')}
-      </div>
-      <!-- Barra sobre a colheita: azul = vendido · âmbar = comprometido · resto = livre -->
-      <div style="display:flex;background:var(--brd);border-radius:4px;height:7px;overflow:hidden;margin-top:8px" title="${pctV}% vendido · ${pctC}% comprometido">
-        <div style="width:${pctV}%;background:#1a5c9e"></div>
-        <div style="width:${pctC}%;background:var(--a1)"></div>
-      </div>
-      <!-- Resumo destacado (leve) — o que mais se lê no dia a dia -->
-      <div style="background:var(--bg);border:.5px solid var(--brd);border-radius:8px;padding:7px 9px;margin-top:7px">
-        <div style="font-size:11px;color:var(--ink2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
-          <span>Colhido: <b style="color:var(--ink)">${nSc(colhido)} sc</b></span>
-          <span>Comercializado: <b style="color:#1a5c9e">${pctCom}%</b>${pctC>0?' <span style="color:var(--ink3)">(vendido '+pctV+'%)</span>':''}</span>
+    const tit=p.cultura+': '+pctCom+'% comercializado'+(pctV>0?', '+pctV+'% já entregue':', nada entregue ainda');
+    return `<div style="display:flex;gap:13px;align-items:center;padding:13px 0;border-bottom:.5px solid var(--brd)">
+      ${anel(pctCom,pctV,tit)}
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span style="font-weight:400;color:var(--ink3);font-size:10px">· '+safras+'</span>':''}</span>
+          <span style="font-size:11px;color:var(--ink3)">preço médio <b style="color:var(--g1)">${preco>0?nR$(preco)+'/sc':'—'}</b></span>
         </div>
-        <div style="font-size:11px;color:var(--ink2);margin-top:4px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
-          <span>${valorD>0?'Disponível: <b style="color:var(--g1)">'+nR$(valorD)+'</b>':''}</span>
-          <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':''}</span>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:8px;margin-top:8px">
+          ${mi('Colhido',nSc(colhido),'var(--ink)')}
+          ${mi('Em estoque',nSc(p.estoque),'var(--ink2)')}
+          ${mi('Vendido',nSc(p.vendido),p.vendido>0?'#1a5c9e':'var(--ink3)')}
+          ${mi('Comprometido',nSc(p.comprometido),p.comprometido>0?'#854F0B':'var(--ink3)')}
+          ${mi('Livre',nSc(disp),'var(--g1)')}
+        </div>
+        <div style="background:var(--bg);border:.5px solid var(--brd);border-radius:8px;padding:6px 9px;margin-top:9px;font-size:11px;color:var(--ink2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+          <span>${valorD>0?'Disponível: <b style="color:var(--g1)">'+nR$(valorD)+'</b>':'<span style="color:var(--ink3)">sem saldo livre</span>'}</span>
+          <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':'<span style="color:var(--ink3)">nenhuma entrega</span>'}</span>
         </div>
       </div>
     </div>`;
