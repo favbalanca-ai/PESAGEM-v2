@@ -1419,7 +1419,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v126"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v127"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2215,13 +2215,16 @@ function renderGcEstoque(elId){
         <div style="width:${pctV}%;background:#1a5c9e"></div>
         <div style="width:${pctC}%;background:var(--a1)"></div>
       </div>
-      <div style="font-size:10px;color:var(--ink3);margin-top:5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
-        <span>Colhido: <b>${nSc(colhido)} sc</b></span>
-        <span>Comercializado: <b style="color:#1a5c9e">${pctCom}%</b>${pctC>0?' <span style="color:var(--ink3)">(vendido '+pctV+'%)</span>':''}</span>
-      </div>
-      <div style="font-size:10px;color:var(--ink3);margin-top:3px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
-        <span>${valorD>0?'Disponível: <b style="color:var(--g1)">'+nR$(valorD)+'</b>':''}</span>
-        <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':''}</span>
+      <!-- Resumo destacado (leve) — o que mais se lê no dia a dia -->
+      <div style="background:var(--bg);border:.5px solid var(--brd);border-radius:8px;padding:7px 9px;margin-top:7px">
+        <div style="font-size:11px;color:var(--ink2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+          <span>Colhido: <b style="color:var(--ink)">${nSc(colhido)} sc</b></span>
+          <span>Comercializado: <b style="color:#1a5c9e">${pctCom}%</b>${pctC>0?' <span style="color:var(--ink3)">(vendido '+pctV+'%)</span>':''}</span>
+        </div>
+        <div style="font-size:11px;color:var(--ink2);margin-top:4px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+          <span>${valorD>0?'Disponível: <b style="color:var(--g1)">'+nR$(valorD)+'</b>':''}</span>
+          <span>${valorV>0?'Vendido: <b style="color:#1a5c9e">'+nR$(valorV)+'</b>':''}</span>
+        </div>
       </div>
     </div>`;
   }).join('');
