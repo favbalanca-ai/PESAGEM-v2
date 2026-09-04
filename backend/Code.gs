@@ -27,6 +27,8 @@ var EMITENTES = {
 // ── Helpers ──────────────────────────────────────────────────
 function resposta(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);}
 function s(v){return v!=null?String(v):"";}
+// Nº de contrato normalizado ("CS-15", "cs 15", "CS15" → "CS15")
+function _ctKey(v){return String(v==null?"":v).toUpperCase().replace(/[^A-Z0-9]/g,"");}
 function n(v){return parseFloat(v)||0;}
 function b(v){return v===true||v==="Sim"||v==="sim";}
 function fmtD(v){if(!v)return"";if(v instanceof Date)return Utilities.formatDate(v,Session.getScriptTimeZone(),"dd/MM/yyyy");return s(v);}
@@ -1051,12 +1053,14 @@ function recalcularVolumeContratos(){
   try{
     var ss=SpreadsheetApp.openById(PLANILHA_ID);
     // 1) kg expedidos por contrato (col 4 = nº do contrato, 17 = carga em t, 18 = status)
+    // Chave tolerante: "CS-15", "cs 15" e "CS15" são o mesmo contrato — sem isso
+    // uma diferença de grafia no ticket zerava o entregue do contrato.
     var entregue={};
     var shP=ss.getSheetByName("Pesagem");
     if(shP&&shP.getLastRow()>1){
       var dp=shP.getRange(2,1,shP.getLastRow()-1,18).getValues();
       for(var i=0;i<dp.length;i++){
-        var ct=s(dp[i][3]);
+        var ct=_ctKey(dp[i][3]);
         if(!ct) continue;
         if(s(dp[i][17]).toLowerCase().indexOf("finalizado")<0) continue;
         entregue[ct]=(entregue[ct]||0)+n(dp[i][16])*1000;
@@ -1074,7 +1078,7 @@ function recalcularVolumeContratos(){
         out.push([n(dados[r][COL.VOL_ENTREGUE-1]), n(dados[r][COL.SALDO-1])]);
         continue;
       }
-      var ent=entregue[id]||0;
+      var ent=entregue[_ctKey(id)]||0;
       out.push([ent, n(dados[r][COL.VOL_TOTAL-1])-ent]);
       qt++;
     }
