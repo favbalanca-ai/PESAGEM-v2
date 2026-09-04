@@ -1084,9 +1084,10 @@ body.dark .card{background:#1a2d22}
   </div>
 
   <!-- Tabs -->
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px">
+  <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:6px;margin-bottom:14px">
     <button id="tab-exp" onclick="dashTab('exp')" style="padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;border:none;background:var(--g1);color:#fff">📤 Expedição</button>
     <button id="tab-geral" onclick="dashTab('geral')" style="padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid var(--brd);background:var(--bg);color:var(--ink3)">🌐 Consolidado</button>
+    <button id="btn-dash-att" onclick="atualizarDash(true)" title="Atualizar dados da planilha" style="padding:9px 12px;border-radius:9px;font-size:13px;cursor:pointer;border:1px solid var(--brd);background:var(--bg);color:var(--g1)">🔄</button>
   </div>
 
   <!-- ABA EXPEDIÇÃO (igual ao v1) -->
@@ -1442,7 +1443,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v133"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v134"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2447,13 +2448,28 @@ function irDash(){
   document.getElementById('pg-dash').style.display='block';
   // Sempre abre na aba expedição (comportamento v1 preservado)
   dashTab('exp');
-  // Carregar dados de recepção e estoque em paralelo (para aba consolidado)
-  if(navigator.onLine){
-    Promise.all([carregarRecepcoes(), carregarEstoque(), carregarContratosNFAP()]).then(()=>{
-      renderEstoqueProdutos();
-      if(_dashTab==='geral') renderDashGeral();
-    });
-  }
+  atualizarDash();
+}
+/* Recarrega TUDO que o dashboard mostra e redesenha.
+   Antes só recepção/estoque eram recarregados aqui: as pesagens (cloud) e os
+   contratos (contratosCloud) ficavam com o que veio na abertura do app, então
+   corrigir um ticket ou cadastrar um contrato não aparecia no dashboard até
+   sincronizar pela Home. */
+function atualizarDash(manual){
+  if(!navigator.onLine){ if(manual) toast('📵 Sem conexão'); return Promise.resolve(); }
+  const btn=document.getElementById('btn-dash-att');
+  if(btn){ btn.disabled=true; btn.textContent='⏳'; }
+  if(manual) toast('🔄 Atualizando dashboard...');
+  return Promise.all([
+    carregarDaPlanilha(),        // pesagens
+    loadContratosDaPlanilha(),   // contratos (card Contratos e saldos)
+    carregarRecepcoes(), carregarEstoque(), carregarContratosNFAP()
+  ]).then(()=>{
+    if(_dashTab==='geral') renderDashGeral(); else renderDash();
+    renderEstoqueProdutos();
+    if(manual) toast('✅ Dashboard atualizado');
+  }).catch(()=>{ if(manual) toast('❌ Erro ao atualizar'); })
+    .then(()=>{ if(btn){ btn.disabled=false; btn.textContent='🔄'; } });
 }
 // Carrega os contratos NFA (para o preço médio de venda no dashboard)
 function carregarContratosNFAP(){
