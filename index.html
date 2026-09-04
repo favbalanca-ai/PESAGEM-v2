@@ -1442,7 +1442,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v131"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v132"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2097,12 +2097,18 @@ function _precoMedioPorGrupo(){
   Object.keys(map).forEach(function(g){ map[g].precoSc=map[g].volSc>0?map[g].valorTotal/map[g].volSc:0; });
   return map;
 }
+/* Chave de comparação do nº do contrato. O ticket é digitado (ou escolhido) e o
+   contrato é cadastrado à parte: "CS-15", "cs 15", "CS15 " e "CS - 15" são a
+   mesma coisa para quem olha, mas eram contratos diferentes na comparação exata
+   — e o contrato sumia dos relatórios sem avisar. */
+function _ctKey(v){ return String(v==null?'':v).toUpperCase().replace(/[^A-Z0-9]/g,''); }
+function _mesmoContrato(a,b){ var k=_ctKey(a); return k!=='' && k===_ctKey(b); }
 // Volume já entregue (kg) de um contrato de venda, medido pelas expedições
 // finalizadas (cloud) ligadas a ele — mesmo critério do card "Contratos".
 function _entregueContrato(ctN){
   var kg=0;
   (cloud||[]).forEach(function(o){
-    if(o.numOrdem===ctN && String(o.status||'').indexOf('Finalizado')>=0)
+    if(_mesmoContrato(o.numOrdem,ctN) && String(o.status||'').indexOf('Finalizado')>=0)
       kg+=parseFloat(o.cargaLiquida||0)*1000;
   });
   return kg;
@@ -2323,7 +2329,7 @@ function _nfPorContrato(){
     if(kg-nfKg>=NFA_TOL_KG) map[ct].pend++;
   });
   return Object.values(map).map(r=>{
-    const c=(contratosCloud||[]).find(x=>String(x.n||'').trim()===r.ct);
+    const c=(contratosCloud||[]).find(x=>_mesmoContrato(x.n,r.ct));
     r.produto=c?(c.p||''):''; r.volKg=c?(parseFloat(c.vol)||0):0;
     r.faltaKg=Math.max(0,r.expKg-r.nfKg);
     if(r.faltaKg<NFA_TOL_KG) r.faltaKg=0;
@@ -2458,13 +2464,21 @@ function renderDash(){
   // Popular select de contratos para PDF
   const sel=document.getElementById('dash-sel-ct');
   if(sel){
-    const nums=[...new Set(todos.map(o=>o.numOrdem).filter(Boolean))].sort();
+    // Contratos das pesagens + os cadastrados (um contrato sem pesagem ainda
+    // precisa aparecer na lista), sem repetir por diferença de grafia
+    const vistos={}, nums=[];
+    [...todos.map(o=>o.numOrdem), ...contratosCloud.map(c=>c.n)].forEach(n=>{
+      const v=String(n||'').trim(); if(!v) return;
+      const k=_ctKey(v); if(vistos[k]) return;
+      vistos[k]=1; nums.push(v);
+    });
+    nums.sort();
     sel.innerHTML='<option value="">Selecione um contrato...</option>'+
       nums.map(n=>`<option value="${n}">${n}</option>`).join('');
     sel.onchange=function(){
       const n=this.value;
       if(!n){document.getElementById('dash-ct-info').textContent='';return;}
-      const arr=todos.filter(o=>o.numOrdem===n);
+      const arr=todos.filter(o=>_mesmoContrato(o.numOrdem,n));
       const fin=arr.filter(o=>(o.status||'').includes('Finalizado'));
       const carga=fin.reduce((s,o)=>s+parseFloat(o.cargaLiquida||0),0);
       document.getElementById('dash-ct-info').textContent=
@@ -2516,9 +2530,19 @@ function renderDashContratos(todos){
   let html='';
   contratosCloud.forEach(ct=>{
     const vol=parseFloat(ct.vol)||0;
-    if(!vol) return;
-    const entregues=todos.filter(o=>o.numOrdem===ct.n&&(o.status||'').includes('Finalizado'))
+    const entregues=todos.filter(o=>_mesmoContrato(o.numOrdem,ct.n)&&(o.status||'').includes('Finalizado'))
                          .reduce((s,o)=>s+parseFloat(o.cargaLiquida||0)*1000,0);
+    // Contrato sem volume cadastrado NÃO some mais do relatório: aparece com o
+    // entregue e um aviso, em vez de desaparecer sem explicação.
+    if(!vol){
+      html+=`<div style="margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;font-weight:600;margin-bottom:3px">
+          <span>${ct.n}</span><span style="color:var(--a1);font-size:11px">volume não informado</span>
+        </div>
+        <div style="font-size:10px;color:var(--ink3)">${Math.round(entregues).toLocaleString('pt-BR')} kg entregues · cadastre o Volume Total para ver o saldo</div>
+      </div>`;
+      return;
+    }
     const pct=Math.min(100,Math.round(entregues/vol*100));
     const cor=pct>=100?'var(--r1)':pct>=90?'var(--a1)':'var(--g1)';
     html+=`<div style="margin-bottom:10px">
@@ -2531,7 +2555,24 @@ function renderDashContratos(todos){
       <div style="font-size:10px;color:var(--ink3);margin-top:2px">${Math.round(entregues).toLocaleString('pt-BR')} kg / ${vol.toLocaleString('pt-BR')} kg</div>
     </div>`;
   });
-  el.innerHTML=html||'<p style="color:var(--ink3)">Sem contratos com volume definido.</p>';
+  // Pesagens cujo contrato não existe no cadastro (erro de digitação, contrato
+  // não cadastrado): antes sumiam de todo relatório por contrato, caladas.
+  const orfaos={};
+  todos.forEach(o=>{
+    const n=String(o.numOrdem||'').trim();
+    if(!n) return;
+    if(contratosCloud.some(ct=>_mesmoContrato(ct.n,n))) return;
+    orfaos[n]=(orfaos[n]||0)+1;
+  });
+  const listaOrf=Object.keys(orfaos).sort();
+  if(listaOrf.length){
+    html+=`<div style="background:#fff8e1;border:.5px solid var(--a1);border-radius:9px;padding:8px 10px;margin-top:4px">
+      <div style="font-size:11px;font-weight:700;color:#854F0B">⚠️ Pesagens com contrato não cadastrado</div>
+      <div style="font-size:11px;color:#854F0B;margin-top:3px">${listaOrf.map(n=>n+' ('+orfaos[n]+')').join(' · ')}</div>
+      <div style="font-size:10px;color:var(--ink3);margin-top:3px">Cadastre o contrato ou corrija o número no ticket para ele entrar nos relatórios.</div>
+    </div>`;
+  }
+  el.innerHTML=html||'<p style="color:var(--ink3)">Nenhum contrato cadastrado.</p>';
 }
 
 function renderDashBalancas(todos){
@@ -2899,7 +2940,7 @@ function infoOC(v){
   const el=document.getElementById('oc-info');
   if(!o){el.style.display='none';return;}
   var entregues=0;
-  for(var j=0;j<cloud.length;j++){var x=cloud[j];if(x.numOrdem===v&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
+  for(var j=0;j<cloud.length;j++){var x=cloud[j];if(_mesmoContrato(x.numOrdem,v)&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
   const vol=parseFloat(o.vol)||0;
   const saldo=vol>0?vol-entregues:null;
   var balNum=parseInt(o.bal)||1;
@@ -3007,7 +3048,7 @@ function rOC(){
     var entregues=0;
     for(var j=0;j<cloud.length;j++){
       var x=cloud[j];
-      if(x.numOrdem===o.n&&(x.status||'').indexOf('Finalizado')>=0)
+      if(_mesmoContrato(x.numOrdem,o.n)&&(x.status||'').indexOf('Finalizado')>=0)
         entregues+=parseFloat(x.cargaLiquida||0)*1000;
     }
     var saldo=vol>0?vol-entregues:null;
@@ -4481,7 +4522,7 @@ function rHist(){
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
   // filtro de contrato
-  if(contratoFil) ls=ls.filter(o=>o.numOrdem===contratoFil);
+  if(contratoFil) ls=ls.filter(o=>_mesmoContrato(o.numOrdem,contratoFil));
   // busca texto
   if(bsc) ls=ls.filter(o=>(o.placa||'').toLowerCase().includes(bsc)||(o.motorista||'').toLowerCase().includes(bsc)||(o.numOrdem||'').toLowerCase().includes(bsc));
   const el=document.getElementById('lst-hist');
@@ -5314,7 +5355,7 @@ function fecharPDF(){ document.getElementById('pdf-frame').classList.remove('sho
 function pdfContrato(){
   const numCt=document.getElementById('dash-sel-ct')?.value;
   if(!numCt){alert('Selecione um contrato.');return;}
-  const todos=[...cloud].filter(o=>o.numOrdem===numCt);
+  const todos=[...cloud].filter(o=>_mesmoContrato(o.numOrdem,numCt));
   if(!todos.length){alert('Nenhuma pesagem encontrada para este contrato.');return;}
 
   const fin=todos.filter(o=>(o.status||'').includes('Finalizado'));
