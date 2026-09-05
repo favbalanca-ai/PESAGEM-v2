@@ -1422,6 +1422,12 @@ body.dark .card{background:#1a2d22}
     <span style="font-size:15px;font-weight:700;flex:1">📄 Ticket PDF</span>
     <button onclick="imprimirPDF()" style="background:rgba(255,255,255,.15);border:none;color:#fff;padding:7px 14px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🖨️ Imprimir</button>
   </div>
+  <!-- Modelo de impressão: 2 vias (motorista + arquivo) ou 1 via -->
+  <div style="display:flex;align-items:center;gap:7px;padding:9px 12px;background:var(--card);border-bottom:.5px solid var(--brd)">
+    <span style="font-size:11px;color:var(--ink3);font-weight:700">Modelo</span>
+    <button id="btn-vias-2" onclick="setTicketVias('2')" style="flex:1;padding:8px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">📄📄 2 vias</button>
+    <button id="btn-vias-1" onclick="setTicketVias('1')" style="flex:1;padding:8px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">📄 1 via</button>
+  </div>
   <div id="pdf-content">
     <div class="pdf-page" id="pdf-page"></div>
   </div>
@@ -1443,7 +1449,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v136"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v137"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5309,7 +5315,8 @@ function gerarPDF(){
   if(_faltaTk.length && !confirm('⚠️ O ticket está sem: '+_faltaTk.join(', ')+'.\n\nGerar o PDF mesmo assim?')) return;
   document.getElementById('pdf-page').innerHTML=_ticketHTML(atual);
   document.getElementById('pdf-frame').classList.add('show');
-  // prepara a folha de impressão (PDF 2 vias) p/ abrir na hora ao tocar em Imprimir
+  _pintarBotoesVias();
+  // prepara a folha de impressão (1 ou 2 vias) p/ abrir na hora ao tocar em Imprimir
   _ticketImg=null; _ticketPdfUrl=null;
   setTimeout(_prepararImpressao,250);
 }
@@ -5521,7 +5528,7 @@ function pdfContrato(){
     document.getElementById('print-relatorio').style.display='none';
   },4000);
 }
-// Impressão via PDF REAL (2 vias cima/baixo + linha de corte) em vez de
+// Impressão via PDF REAL (1 via na folha, ou 2 vias cima/baixo com linha de corte) em vez de
 // window.print() — que no iPhone/PWA simplesmente não funciona. O PDF é
 // montado quando o preview abre e guardado pronto; ao tocar em Imprimir,
 // abre o PDF (no PC já chama a caixa de impressão; no celular abre o
@@ -5530,6 +5537,27 @@ var _ticketImg=null;
 var _ticketPdfUrl=null;
 var _ticketPdfBlob=null;
 function _ehToque(){ return (navigator.maxTouchPoints||0)>0 || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent||''); }
+/* Modelo do ticket: '2' = duas vias na folha com linha de corte (motorista +
+   arquivo); '1' = uma via só, ocupando a folha inteira. Fica guardado no
+   aparelho, então cada balança mantém o seu jeito de imprimir. */
+var _ticketVias=(function(){ try{ return localStorage.getItem('ticket-vias')==='1'?'1':'2'; }catch(e){ return '2'; } })();
+function setTicketVias(v){
+  _ticketVias=(v==='1')?'1':'2';
+  try{ localStorage.setItem('ticket-vias',_ticketVias); }catch(e){}
+  _pintarBotoesVias();
+  _ticketPdfUrl=null; _ticketPdfBlob=null;      // o PDF pronto era do outro modelo
+  toast(_ticketVias==='1'?'📄 Ticket em 1 via':'📄 Ticket em 2 vias');
+  _prepararImpressao();
+}
+function _pintarBotoesVias(){
+  [['btn-vias-2','2'],['btn-vias-1','1']].forEach(function(par){
+    var b=document.getElementById(par[0]); if(!b) return;
+    var on=(_ticketVias===par[1]);
+    b.style.background=on?'var(--g1)':'var(--bg)';
+    b.style.color=on?'#fff':'var(--ink3)';
+    b.style.border=on?'none':'1px solid var(--brd)';
+  });
+}
 async function _prepararImpressao(){
   try{
     const page=document.getElementById('pdf-page');
@@ -5542,17 +5570,26 @@ async function _prepararImpressao(){
     const pgH=pdf.internal.pageSize.getHeight();   // 297
     const props=pdf.getImageProperties(_ticketImg);
     const ratio=props.width/props.height;
-    const margin=8, half=pgH/2;
-    const maxW=pgW-2*margin, maxH=half-2*margin;
-    // ajusta a via p/ caber na metade da folha preservando o aspecto (não corta)
-    let w=maxW, h=w/ratio;
-    if(h>maxH){ h=maxH; w=h*ratio; }
-    const x=(pgW-w)/2;
-    pdf.addImage(_ticketImg,'JPEG',x,(half-h)/2,w,h);            // via de cima
-    pdf.addImage(_ticketImg,'JPEG',x,half+(half-h)/2,w,h);       // via de baixo
-    try{ pdf.setLineDashPattern([1.5,1.5],0); }catch(e){}
-    pdf.setDrawColor(150);
-    pdf.line(margin,half,pgW-margin,half);                       // linha de corte no meio
+    const margin=8;
+    if(_ticketVias==='1'){
+      // UMA VIA: usa a folha inteira, preservando o aspecto (ticket maior)
+      const maxW=pgW-2*margin, maxH=pgH-2*margin;
+      let w=maxW, h=w/ratio;
+      if(h>maxH){ h=maxH; w=h*ratio; }
+      pdf.addImage(_ticketImg,'JPEG',(pgW-w)/2,margin,w,h);
+    } else {
+      // DUAS VIAS: uma em cada metade, com linha de corte no meio
+      const half=pgH/2;
+      const maxW=pgW-2*margin, maxH=half-2*margin;
+      let w=maxW, h=w/ratio;
+      if(h>maxH){ h=maxH; w=h*ratio; }
+      const x=(pgW-w)/2;
+      pdf.addImage(_ticketImg,'JPEG',x,(half-h)/2,w,h);            // via de cima
+      pdf.addImage(_ticketImg,'JPEG',x,half+(half-h)/2,w,h);       // via de baixo
+      try{ pdf.setLineDashPattern([1.5,1.5],0); }catch(e){}
+      pdf.setDrawColor(150);
+      pdf.line(margin,half,pgW-margin,half);                       // linha de corte no meio
+    }
     if(!_ehToque()) pdf.autoPrint();                             // PC: abre a caixa de impressão
     if(_ticketPdfUrl){ try{ URL.revokeObjectURL(_ticketPdfUrl); }catch(e){} }
     _ticketPdfBlob=pdf.output('blob');
