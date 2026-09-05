@@ -910,6 +910,14 @@ body.dark .card{background:#1a2d22}
         style="flex:1;padding:9px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;background:#fff;font-family:'Inter',sans-serif">
       <button onclick="loadCl()" style="padding:9px 11px;border-radius:var(--r2px);border:1.5px solid var(--brd);background:#fff;font-size:17px;cursor:pointer">☁️</button>
     </div>
+    <!-- Filtro por período -->
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:9px">
+      <label style="font-size:11px;color:var(--ink3);font-weight:700;flex-shrink:0">📅 De</label>
+      <input type="date" id="h-de" onchange="onPeriodoHist()" style="flex:1;min-width:0;padding:8px 9px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:12px;background:#fff;color:var(--ink);font-family:'Inter',sans-serif">
+      <label style="font-size:11px;color:var(--ink3);font-weight:700;flex-shrink:0">até</label>
+      <input type="date" id="h-ate" onchange="onPeriodoHist()" style="flex:1;min-width:0;padding:8px 9px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:12px;background:#fff;color:var(--ink);font-family:'Inter',sans-serif">
+      <button onclick="limparPeriodoHist()" title="Limpar período" style="flex-shrink:0;padding:8px 10px;border-radius:var(--r2px);border:1.5px solid var(--brd);background:#fff;font-size:13px;cursor:pointer">✕</button>
+    </div>
     <!-- Filtro de contrato -->
     <div style="margin-bottom:9px">
       <select id="h-contrato" onchange="rHist()" style="width:100%;padding:9px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:'Inter',sans-serif;background:#fff;color:var(--ink);-webkit-appearance:none;background-image:url('data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22><path fill=%22%237a9e8a%22 d=%22M7 10l5 5 5-5z%22/></svg>');background-repeat:no-repeat;background-position:right 12px center">
@@ -1449,7 +1457,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v137"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v138"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4565,9 +4573,38 @@ function sendWA(){
 
 /* ══ HISTÓRICO ═════════════════════════════════════════════════ */
 function setF(btn,f){filAtivo=f;document.querySelectorAll('.fil').forEach(b=>b.classList.remove('on'));btn.classList.add('on');rHist();}
+/* Período do histórico. A data do registro é dd/MM/yyyy e o campo de data do
+   navegador devolve yyyy-mm-dd — converte para yyyymmdd, que compara direto. */
+function _dataOrd(v){
+  const s=String(v||'').trim();
+  let m=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);          // dd/MM/yyyy (registro)
+  if(m) return m[3]+m[2]+m[1];
+  m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);                // yyyy-mm-dd (input date)
+  if(m) return m[1]+m[2]+m[3];
+  return '';
+}
+function limparPeriodoHist(){
+  const de=document.getElementById('h-de'), ate=document.getElementById('h-ate');
+  if(de) de.value=''; if(ate) ate.value='';
+  rHist();
+}
+function onPeriodoHist(){
+  // "Hoje" e um período escolhido brigam entre si (dariam lista vazia):
+  // ao escolher o período, o filtro de status volta para Todos.
+  const temPeriodo=(document.getElementById('h-de')?.value||'')||(document.getElementById('h-ate')?.value||'');
+  if(temPeriodo && filAtivo==='hj'){
+    filAtivo='all';
+    const btns=document.querySelectorAll('#pg-hist .fil');
+    btns.forEach(b=>b.classList.remove('on'));
+    if(btns[0]) btns[0].classList.add('on');
+  }
+  rHist();
+}
 function rHist(){
   const bsc=(document.getElementById('h-bsc')?.value||'').toLowerCase();
   const contratoFil=(document.getElementById('h-contrato')?.value||'');
+  const de=_dataOrd(document.getElementById('h-de')?.value);
+  const ate=_dataOrd(document.getElementById('h-ate')?.value);
   const hj=new Date().toLocaleDateString('pt-BR');
   const bal=usr?.bal||0;
   let ls=[...cloud].reverse();
@@ -4581,6 +4618,9 @@ function rHist(){
   else if(filAtivo==='nfa-ok') ls=ls.filter(o=>o.nfa_emitida);
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
+  // filtro por período (data de entrada)
+  if(de)  ls=ls.filter(o=>{ const d=_dataOrd(o.dataEntrada); return d && d>=de; });
+  if(ate) ls=ls.filter(o=>{ const d=_dataOrd(o.dataEntrada); return d && d<=ate; });
   // filtro de contrato
   if(contratoFil) ls=ls.filter(o=>_mesmoContrato(o.numOrdem,contratoFil));
   // busca texto
@@ -4590,7 +4630,14 @@ function rHist(){
     el.innerHTML='<div class="emp"><div class="ei">📊</div><p>Nenhuma pesagem</p>'+(navigator.onLine?'':'<p style="font-size:11px;margin-top:6px">Sem internet — conecte para ver o histórico</p>')+'</div>';
     return;
   }
-  el.innerHTML=ls.map(o=>{
+  // Resumo do que está filtrado (útil ao escolher um período)
+  const _fin=ls.filter(o=>(o.status||'').includes('Finalizado'));
+  const _kg=_fin.reduce((s,o)=>s+parseFloat(o.cargaLiquida||0)*1000,0);
+  const _resumo=`<div style="background:var(--g3);border-radius:9px;padding:8px 11px;margin-bottom:9px;font-size:11px;color:var(--ink2);display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px">
+      <span><b>${ls.length}</b> pesagem${ls.length>1?'s':''}${_fin.length!==ls.length?' · <b>'+_fin.length+'</b> finalizada'+(_fin.length>1?'s':''):''}</span>
+      ${_kg>0?'<span>Carga: <b style="color:var(--g1)">'+Math.round(_kg).toLocaleString('pt-BR')+' kg</b> ('+(_kg/1000).toFixed(1)+' t)</span>':''}
+    </div>`;
+  el.innerHTML=_resumo+ls.map(o=>{
     const st=o.statusPeso||(o.status==='Aguardando'?'Aguardando':'CONFORME');
     const bc=st==='EXCEDIDO'?'exc':st==='ATENÇÃO'?'atc':'';
     const bg=st==='EXCEDIDO'?'ber':st==='ATENÇÃO'?'bwn':st==='Aguardando'||st.toLowerCase().includes('aguardando')?'bag':'bok';
