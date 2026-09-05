@@ -1443,7 +1443,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v134"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v135"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1585,6 +1585,16 @@ window.addEventListener('load',()=>{
     document.getElementById('offb').style.display='block';
     addLog('📵 Sem conexão — dados serão salvos localmente','aviso');
     updS();
+  });
+  /* Reenvio automático da fila.
+     Antes a fila só era processada no evento 'online' — que NÃO dispara quando
+     a falha é do servidor (o celular continua online). Uma pesagem ficava horas
+     parada com 0 tentativas até alguém tocar em Sincronizar. */
+  const _temPendente=()=>Array.isArray(pend)&&pend.some(p=>p&&!p.falhou);
+  setInterval(()=>{ if(navigator.onLine&&_temPendente()) syncP().then(updS); },60000);
+  // Celular suspende timers em segundo plano: tenta de novo ao voltar para o app
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible'&&navigator.onLine&&_temPendente()) syncP().then(updS);
   });
   if(!navigator.onLine) document.getElementById('offb').style.display='block';
   document.addEventListener('touchmove',e=>{if(document.body.getAttribute('data-sig')==='1')e.preventDefault();},{passive:false});
@@ -4770,10 +4780,28 @@ function addP(o,a){
 /* ── Sync: enviar fila com retry e limite de tentativas ──────── */
 const MAX_TENTATIVAS=3;
 let _syncAtivo=false;
+// Conta a tentativa do item e marca como falhado ao chegar no limite
+function _marcarTentativa(id,rot,motivo){
+  const item=pend.find(x=>x&&x.ordem&&x.ordem.id===id);
+  if(!item) return;
+  item.tentativas=(item.tentativas||0)+1;
+  if(item.tentativas>=MAX_TENTATIVAS){
+    item.falhou=true;
+    addLog(`🔴 Falhou ${MAX_TENTATIVAS}x — ${rot}: ${motivo||'erro'}`,'erro');
+  } else {
+    addLog(`⚠️ Tentativa ${item.tentativas}/${MAX_TENTATIVAS} — ${rot}: ${motivo||'erro'}`,'aviso');
+  }
+}
 async function syncP(){
   if(!SHEETS_URL||!navigator.onLine||!pend.length){updS();return;}
   if(_syncAtivo) return; // evitar sync simultâneo
   _syncAtivo=true;
+  // try/finally: qualquer erro inesperado aqui dentro deixava _syncAtivo travado
+  // em true e a fila NUNCA mais era processada, sem nenhum aviso.
+  try{ await _syncPcorpo(); }
+  finally{ _syncAtivo=false; }
+}
+async function _syncPcorpo(){
   addLog(`🔄 Iniciando sync — ${pend.length} pendente(s)`,'info');
 
   const ps=[...pend];
@@ -4781,47 +4809,29 @@ async function syncP(){
 
   for(const p of ps){
     if(p.falhou) continue; // pular os que já falharam demais
+    const _id=(p.ordem&&p.ordem.id)||'', _rot=(p.ordem&&(p.ordem.placa||p.ordem.id))||'item';
+    if(!_id){ continue; }   // item inválido: não derruba o resto da fila
     try{
       const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({acao:p.acao,ordem:p.ordem,token:TOKEN})});
       const j=JSON.parse(await r.text());
       if(j.ok){
         // Remover da fila
-        pend=pend.filter(x=>x.ordem.id!==p.ordem.id);
-        await idbRemover(p.ordem.id); // remover do IDB também
+        pend=pend.filter(x=>!(x.ordem&&x.ordem.id===_id));
+        await idbRemover(_id); // remover do IDB também
         ok++;
-        addLog(`✅ Enviado — ${p.ordem.placa||p.ordem.id}`,'ok');
+        addLog(`✅ Enviado — ${_rot}`,'ok');
       } else {
-        // Incrementar tentativas
-        const item=pend.find(x=>x.ordem.id===p.ordem.id);
-        if(item){
-          item.tentativas=(item.tentativas||0)+1;
-          if(item.tentativas>=MAX_TENTATIVAS){
-            item.falhou=true;
-            addLog(`🔴 Falhou ${MAX_TENTATIVAS}x — ${p.ordem.placa||p.ordem.id}: ${j.erro||'erro API'}`,'erro');
-          } else {
-            addLog(`⚠️ Tentativa ${item.tentativas}/${MAX_TENTATIVAS} — ${p.ordem.placa||p.ordem.id}`,'aviso');
-          }
-        }
+        _marcarTentativa(_id,_rot,j.erro||'erro API');
         falhou++;
       }
     }catch(e){
-      const item=pend.find(x=>x.ordem.id===p.ordem.id);
-      if(item){
-        item.tentativas=(item.tentativas||0)+1;
-        if(item.tentativas>=MAX_TENTATIVAS){
-          item.falhou=true;
-          addLog(`🔴 Falhou ${MAX_TENTATIVAS}x — ${p.ordem.placa||p.ordem.id}: ${e.message}`,'erro');
-        } else {
-          addLog(`⚠️ Tentativa ${item.tentativas}/${MAX_TENTATIVAS} — ${p.ordem.placa||p.ordem.id}`,'aviso');
-        }
-      }
+      _marcarTentativa(_id,_rot,e.message);
       falhou++;
     }
   }
 
   saveDB();
-  _syncAtivo=false;
 
   if(ok>0){
     localStorage.setItem('syncUlt-v2',new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
