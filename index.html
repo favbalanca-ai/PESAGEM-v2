@@ -1443,7 +1443,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v135"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v136"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4501,7 +4501,7 @@ async function gerarEBaixarPDF(o, role, destino, tipo, texto){
     heightLeft -= (pgH - 20);
   }
 
-  const nomeArq=`Ticket-${o.numOrdem||'FAV'}-${o.placa}-${(o.dataEntrada||'').replace(/\//g,'-')}.pdf`;
+  const nomeArq=_nomeArqTicket(o);   // Ticket-PLACA-MOTORISTA.pdf
 
   if(tipo==='wa'){
     // Baixar PDF + abrir WhatsApp com mensagem
@@ -5289,6 +5289,19 @@ function salvarEdicao(){
 }
 
 /* ══ PDF ════════════════════════════════════════════════════════ */
+/* Nome do arquivo do ticket: PLACA + MOTORISTA.
+   Todos os PDFs saíam como "Ticket-2vias.pdf" e ficavam indistinguíveis no
+   WhatsApp de quem recebe. Sem acento e sem espaço, que viajam mal em
+   nome de arquivo entre celular, WhatsApp e computador. */
+function _nomeArqTicket(o){
+  const limpa=(v,max)=>String(v||'')
+    .normalize('NFD').replace(/[̀-ͯ]/g,'')   // á → a
+    .replace(/[^A-Za-z0-9]+/g,'-').replace(/^-+|-+$/g,'').substring(0,max)
+    .replace(/-+$/,'');
+  const placa=limpa(o&&o.placa,12)||'SEM-PLACA';
+  const mot=limpa(o&&o.motorista,45);
+  return 'Ticket-'+placa+(mot?'-'+mot:'')+'.pdf';
+}
 function gerarPDF(){
   if(!atual) return;
   // Validação do ticket antes de gerar o PDF (placa, motorista, contrato)
@@ -5564,9 +5577,9 @@ function imprimirPDF(){
   // Celular: compartilhar o arquivo PDF → o iOS mostra "Imprimir" (AirPrint)
   if(_ehToque() && _ticketPdfBlob && navigator.canShare){
     try{
-      const arq=new File([_ticketPdfBlob], 'Ticket-2vias.pdf', {type:'application/pdf'});
+      const arq=new File([_ticketPdfBlob], _nomeArqTicket(atual), {type:'application/pdf'});
       if(navigator.canShare({files:[arq]})){
-        navigator.share({files:[arq], title:'Ticket — 2 vias'})
+        navigator.share({files:[arq], title:'Ticket '+((atual&&atual.placa)||'')+(atual&&atual.motorista?' — '+atual.motorista:'')})
           .catch(()=>{ if(_ticketPdfUrl){ const w=window.open(_ticketPdfUrl,'_blank'); if(!w) location.href=_ticketPdfUrl; } });
         toast('🖨️ Escolha "Imprimir" para usar o AirPrint');
         return;
