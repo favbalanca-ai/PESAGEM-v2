@@ -83,6 +83,7 @@ function doPost(e){
     if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
     if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
+    if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
@@ -645,6 +646,42 @@ function registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa
     aba.appendRow([numero_nfa,ticket_id,contrato_id,emitente,dest_nome,sacas,
       Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy"),drive_url,agora(),Math.round(n(peso_kg))]);
   }catch(e){Logger.log("registrarNFAEmitida: "+e.message);}
+}
+
+/* Nota fiscal lançada à mão pelo Adm (emitida fora do robô). Grava na mesma
+   aba NFAs_Emitidas, então o ticket passa a contar como "com NF" em qualquer
+   aparelho, igual às notas do robô. Regravar o mesmo ticket ATUALIZA a linha
+   em vez de duplicar. */
+function registrarNFmanual(p){
+  try{
+    var ticket=s(p.ticket_id), numero=s(p.numero);
+    if(!ticket) return{ok:false,erro:"Ticket não informado"};
+    if(!numero) return{ok:false,erro:"Nº da nota não informado"};
+    var kg=n(p.peso_kg), sacas=Math.round(kg/60);
+    var ss=SpreadsheetApp.openById(PLANILHA_ID);
+    var aba=ss.getSheetByName("NFAs_Emitidas");
+    if(!aba){
+      aba=ss.insertSheet("NFAs_Emitidas");
+      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg"];
+      aba.getRange(1,1,1,cab.length).setValues([cab]).setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
+      aba.setFrozenRows(1);
+    }
+    if(aba.getMaxColumns()<10) aba.insertColumnsAfter(aba.getMaxColumns(),10-aba.getMaxColumns());
+    var hoje=Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy");
+    var linha=[numero,ticket,s(p.contrato),"MANUAL",s(p.motorista),sacas,hoje,"",agora()+" · "+s(p.por),Math.round(kg)];
+    // Já existe linha manual deste ticket? Atualiza, para o Adm poder corrigir.
+    if(aba.getLastRow()>1){
+      var rows=aba.getRange(2,1,aba.getLastRow()-1,4).getValues();
+      for(var i=0;i<rows.length;i++){
+        if(s(rows[i][1])===ticket && s(rows[i][3])==="MANUAL"){
+          aba.getRange(i+2,1,1,linha.length).setValues([linha]);
+          return{ok:true,ticket:ticket,numero:numero,atualizado:true};
+        }
+      }
+    }
+    aba.appendRow(linha);
+    return{ok:true,ticket:ticket,numero:numero,atualizado:false};
+  }catch(e){ return{ok:false,erro:e.message}; }
 }
 
 function criarAbaContratos(ss){
