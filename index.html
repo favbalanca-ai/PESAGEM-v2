@@ -49,10 +49,11 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .card{background:var(--card);border-radius:var(--r);padding:13px 15px;margin-bottom:11px;box-shadow:var(--sh);border:.5px solid var(--brd)}
 .ct{font-size:10px;font-weight:700;color:var(--g1);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
 
-/* Leitura por IA desligada no Adm: some com os botões de foto-IA e seus avisos.
-   As fotos comuns (placa, caminhão, balança) continuam funcionando. */
-body[data-ia="off"] .ia-ctl,
-body[data-ia="off"] .ia-status{display:none!important}
+/* Leitura por IA desligada no Adm: os botões CONTINUAM ali — o operador segue
+   fotografando e a foto vai para o Drive; o que some é a leitura automática.
+   Sem a cor roxa da IA, para não prometer o que não vai acontecer. */
+body[data-ia="off"] .ia-ctl{background:var(--g3)!important;filter:none}
+body[data-ia="off"] .ia-tag{color:var(--ink3)!important}
 
 /* TABELA DO ESTOQUE — rola de lado no celular com o produto fixo à esquerda */
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -15px;padding:0 15px}
@@ -515,7 +516,7 @@ body.dark .card{background:#1a2d22}
           <span class="fl" id="fl-oc" style="font-size:12px;font-weight:600">Fotografar documento</span>
           <input type="file" accept="image/*" capture="environment" onchange="foto(this,'fb-oc','prev-oc-doc','oc','fi-oc','fl-oc','Documento ✓');wizLerDoc(this)">
           <img id="prev-oc-doc" style="display:none;width:56px;height:56px;object-fit:cover;border-radius:6px;margin-left:auto;flex-shrink:0">
-          <span style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
+          <span class="ia-tag" style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
         </label>
         <div id="ia-status-doc-exp" class="ia-status"></div>
 
@@ -560,7 +561,7 @@ body.dark .card{background:#1a2d22}
           <span class="fi" id="fi-cn" style="font-size:24px">🪪</span>
           <span class="fl" id="fl-cn" style="font-size:12px;font-weight:600">Fotografar CNH</span>
           <input type="file" accept="image/*" capture="environment" onchange="foto(this,'fb-cn',null,'cnh','fi-cn','fl-cn','CNH ✓');wizLerCNH(this)">
-          <span style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
+          <span class="ia-tag" style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
         </label>
         <div id="ia-status-cnh" class="ia-status"></div>
 
@@ -575,7 +576,7 @@ body.dark .card{background:#1a2d22}
             <span class="fi" id="fi-tr" style="font-size:24px">📄</span>
             <span class="fl" id="fl-tr" style="font-size:12px;font-weight:600">Fotografar doc. da transportadora</span>
             <input type="file" accept="image/*" capture="environment" onchange="foto(this,'fb-tr',null,'transp','fi-tr','fl-tr','Doc ✓');wizLerTransportadora(this)">
-            <span style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
+            <span class="ia-tag" style="font-size:11px;color:#8b5cf6;font-weight:700;flex-shrink:0">🤖 IA</span>
           </label>
           <div id="ia-status-transp" class="ia-status"></div>
           <div class="f"><label>CNPJ da Transportadora</label><input type="text" id="f-transp-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
@@ -1476,7 +1477,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v140"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v141"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1815,7 +1816,13 @@ function loadCfg(){
    Só o Adm muda, e vale para expedição e recepção. */
 function iaLigada(){ return DB.cfg.ia!==false; }
 function aplicarIA(){
-  document.body.setAttribute('data-ia', iaLigada()?'on':'off');
+  const on=iaLigada();
+  document.body.setAttribute('data-ia', on?'on':'off');
+  // Mesmo botão, outra promessa: com a IA desligada ele só guarda a foto
+  document.querySelectorAll('.ia-tag').forEach(function(el){
+    const soEmoji=el.textContent.trim()==='🤖'||el.textContent.trim()==='📸';
+    el.textContent = on ? (soEmoji?'🤖':'🤖 IA') : (soEmoji?'📸':'📸 Foto');
+  });
 }
 function saveCfg(){
   DB.cfg={
@@ -6180,7 +6187,7 @@ function irNovaRec() {
         <div style="display:flex;gap:6px;align-items:center">
           <input type="text" id="rec-placa" class="finput" placeholder="AAA-0000" oninput="autocompletePlacaRec(this.value)" style="text-transform:uppercase;font-family:'JetBrains Mono',monospace;font-weight:700;flex:1">
           <label class="ia-ctl" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;flex-shrink:0" title="Fotografar placa com IA">
-            🤖
+            <span class="ia-tag">🤖</span>
             <input type="file" accept="image/*" capture="environment" style="display:none" onchange="iaLerPlaca(this,'rec-placa','ia-status-placa-rec')">
           </label>
         </div>
@@ -6196,7 +6203,7 @@ function irNovaRec() {
           <div style="font-size:10px;color:var(--ink3)">IA preenche placa, motorista e peso</div>
         </div>
         <input type="file" accept="image/*" capture="environment" onchange="iaLerDocumentoRec(this)" style="display:none">
-        <span style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
+        <span class="ia-tag" style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
       </label>
       <div id="ia-status-doc-rec" class="ia-status"></div>
     </div>
@@ -6224,7 +6231,7 @@ function irNovaRec() {
         <span style="font-size:18px">📊</span>
         <span style="font-size:11px;color:var(--ink3)">Foto display — Bruto</span>
         <input type="file" accept="image/*" capture="environment" onchange="iaLerDisplayRec('bruto',this)" style="display:none">
-        <span style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
+        <span class="ia-tag" style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
       </label>
       <div id="ia-status-rec-bruto" class="ia-status"></div>
 
@@ -6254,7 +6261,7 @@ function irNovaRec() {
         <span style="font-size:18px">📊</span>
         <span style="font-size:11px;color:var(--ink3)">Foto display — Tara</span>
         <input type="file" accept="image/*" capture="environment" onchange="iaLerDisplayRec('tara',this)" style="display:none">
-        <span style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
+        <span class="ia-tag" style="margin-left:auto;font-size:10px;font-weight:700;color:#8b5cf6">🤖 IA</span>
       </label>
       <div id="ia-status-rec-tara" class="ia-status"></div>
       <div style="font-size:11px;color:var(--ink3);margin-top:4px" id="rec-tara-hint"></div>
@@ -6285,6 +6292,7 @@ function irNovaRec() {
   document.body.appendChild(div);
   recAtual = {tipo: 'proprio', id: gerarId('REC')};
   prefillUltimaRec();
+  aplicarIA();   // a tela é montada agora: acerta os rótulos 🤖 IA / 📸 Foto
 }
 
 // Preenche safra/talhão/variedade/umidade/impureza/tara com o último registro
@@ -7309,7 +7317,9 @@ function abrirConfPeso(res,aplicar){
 function fecharConfPeso(){ document.getElementById('modal-conf-peso').style.display='none'; _cpAplicar=null; }
 function confirmarConfPeso(){ const t=recalcConfPeso(); const fn=_cpAplicar; fecharConfPeso(); if(fn) fn(t); }
 async function iaLerDisplay(campo,input){
-  if(!iaLigada()) return;   // leitura por IA desligada no Adm
+  // Na expedição a foto já é guardada por foto(...), no mesmo onchange — aqui
+  // basta não ler. Na recepção é diferente: lá a foto só existe por causa da IA.
+  if(!iaLigada()) return;
   if(!input.files||!input.files[0])return;
   // Mapear campo → statusId e campoId
   const mapa = {
@@ -7345,16 +7355,25 @@ async function iaLerDisplay(campo,input){
 }
 
 async function iaLerDisplayRec(campo,input){
-  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   // Caminhão longo: a 1ª foto preenche a 1ª parte, a 2ª foto vai para a 2ª parte
   let campoId=campo==='tara'?'rec-tara':'rec-bruto';
   if(recEhLongo() && _recKg(campoId)>0 && document.getElementById(campoId+'2')) campoId=campoId+'2';
   const statusId='ia-status-rec-'+campo;
+  const _slot=campoId==='rec-bruto2'?'bruto2':campoId==='rec-tara2'?'tara2':campo;
+  // IA desligada: guarda a foto do display e o operador digita o peso
+  if(!iaLigada()){
+    try{
+      const f=await fileToBase64IA(input.files[0]);
+      _guardarFotoRec(_slot,f.base64,f.mime);
+      iaStatus(statusId,'ok','📸 Foto do display guardada — digite o peso');
+    }catch(e){ iaStatus(statusId,'err','❌ Não consegui guardar a foto'); }
+    return;
+  }
   iaStatus(statusId,'load','🤖 IA lendo o display...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    _guardarFotoRec(campoId==='rec-bruto2'?'bruto2':campoId==='rec-tara2'?'tara2':campo,base64,mime);
+    _guardarFotoRec(_slot,base64,mime);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
         contexto:(campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita')+' — '+IA_CTX_BALANCA})});
@@ -7390,9 +7409,17 @@ async function iaLerDisplayRec(campo,input){
 }
 
 async function iaLerPlaca(input,campoId,statusId){
-  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   const sid=statusId||('ia-status-placa-'+(campoId?.includes('rec')?'rec':'exp'));
+  // Com a IA desligada a foto continua sendo guardada — só não é lida
+  if(!iaLigada()){
+    try{
+      const f=await fileToBase64IA(input.files[0]);
+      if(campoId==='rec-placa') _guardarFotoRec('placa',f.base64,f.mime);
+      iaStatus(sid,'ok','📸 Foto da placa guardada');
+    }catch(e){ iaStatus(sid,'err','❌ Não consegui guardar a foto'); }
+    return;
+  }
   iaStatus(sid,'load','🤖 IA lendo a placa...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
@@ -7514,8 +7541,15 @@ function confirmarDadosIA() {
 }
 
 async function iaLerDocumentoRec(input){
-  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
+  if(!iaLigada()){
+    try{
+      const f=await fileToBase64IA(input.files[0]);
+      _guardarFotoRec('nf',f.base64,f.mime);
+      iaStatus('ia-status-doc-rec','ok','📸 Foto da NF/CT-e guardada');
+    }catch(e){ iaStatus('ia-status-doc-rec','err','❌ Não consegui guardar a foto'); }
+    return;
+  }
   iaStatus('ia-status-doc-rec','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
