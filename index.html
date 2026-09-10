@@ -49,6 +49,11 @@ html,body{height:100%;background:var(--bg);color:var(--ink);font-family:'Inter',
 .card{background:var(--card);border-radius:var(--r);padding:13px 15px;margin-bottom:11px;box-shadow:var(--sh);border:.5px solid var(--brd)}
 .ct{font-size:10px;font-weight:700;color:var(--g1);text-transform:uppercase;letter-spacing:.08em;margin-bottom:10px}
 
+/* Leitura por IA desligada no Adm: some com os botões de foto-IA e seus avisos.
+   As fotos comuns (placa, caminhão, balança) continuam funcionando. */
+body[data-ia="off"] .ia-ctl,
+body[data-ia="off"] .ia-status{display:none!important}
+
 /* TABELA DO ESTOQUE — rola de lado no celular com o produto fixo à esquerda */
 .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -15px;padding:0 15px}
 .tbl-est{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -1309,6 +1314,13 @@ body.dark .card{background:#1a2d22}
       </div>
       <input type="checkbox" id="cfg-wa-auto" style="width:22px;height:22px;cursor:pointer;accent-color:var(--g1)">
     </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-top:.5px solid var(--brd)">
+      <div>
+        <div style="font-size:13px;font-weight:600;color:var(--ink)">🤖 Leitura por IA</div>
+        <div style="font-size:11px;color:var(--ink3)">Ler placa, documentos e display da balança por foto</div>
+      </div>
+      <input type="checkbox" id="cfg-ia" style="width:22px;height:22px;cursor:pointer;accent-color:var(--g1)">
+    </div>
   </div>
   <div class="card" id="cfg-perm-card" style="display:none">
     <div class="ct">👥 Funcionários &amp; Permissões</div>
@@ -1464,7 +1476,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v139"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v140"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1795,16 +1807,27 @@ function loadCfg(){
   document.getElementById('cfg-tl').value=DB.cfg.tol||7;
   const cb=document.getElementById('cfg-wa-auto');
   if(cb) cb.checked=!!DB.cfg.waAuto;
+  const ci=document.getElementById('cfg-ia');
+  if(ci) ci.checked=iaLigada();
+  aplicarIA();
+}
+/* Leitura por IA ligada? Padrão: ligada (é como o app sempre funcionou).
+   Só o Adm muda, e vale para expedição e recepção. */
+function iaLigada(){ return DB.cfg.ia!==false; }
+function aplicarIA(){
+  document.body.setAttribute('data-ia', iaLigada()?'on':'off');
 }
 function saveCfg(){
   DB.cfg={
     empresa:document.getElementById('cfg-em').value,
     wa:document.getElementById('cfg-wa').value,
     tol:parseFloat(document.getElementById('cfg-tl').value)||7,
-    waAuto:document.getElementById('cfg-wa-auto').checked
+    waAuto:document.getElementById('cfg-wa-auto').checked,
+    ia:document.getElementById('cfg-ia')?document.getElementById('cfg-ia').checked:true
   };
   localStorage.setItem('pcfg',JSON.stringify(DB.cfg));
-  toast('✅ Configurações salvas!'); hideCfg();
+  aplicarIA();
+  toast(iaLigada()?'✅ Configurações salvas — IA ligada':'✅ Configurações salvas — IA desligada'); hideCfg();
 }
 
 /* ══ NAV ══════════════════════════════════════════════════════ */
@@ -6072,7 +6095,47 @@ function _fmtSafra(safra) {
 }
 
 /* ── RECEPÇÃO: Nova ── */
+/* ══ FOTOS DA RECEPÇÃO ═════════════════════════════════════════
+   As fotos tiradas na recepção (placa, NF/CT-e e os displays da balança)
+   eram lidas pela IA e descartadas — nada ia para o Drive. Agora ficam
+   guardadas e sobem renomeadas ao registrar:
+   Recepcao/<talhão>/<data>_<placa>/PLACA.jpg · NF-CTE.jpg ·
+   BALANCA-BRUTO.jpg · BALANCA-TARA.jpg (e as 2ªs partes do caminhão longo). */
+let fotosRec={};
+function _guardarFotoRec(slot,base64,mime){
+  if(!slot||!base64) return;
+  try{ fotosRec[slot]={b64:base64, mime:mime||'image/jpeg'}; }catch(e){}
+}
+const _TIPOS_FOTO_REC={placa:'PLACA', nf:'NF-CTE', bruto:'BALANCA-BRUTO', bruto2:'BALANCA-BRUTO-2',
+                       tara:'BALANCA-TARA', tara2:'BALANCA-TARA-2'};
+async function uploadFotosRec(rec){
+  if(!SHEETS_URL||!navigator.onLine||!rec) return;
+  const lista=Object.keys(_TIPOS_FOTO_REC).filter(k=>fotosRec[k]&&fotosRec[k].b64);
+  if(!lista.length) return;
+  const ref=(rec.talhaoCod||'SEM-TALHAO').replace(/[^a-zA-Z0-9.\-]/g,'');
+  const data=String(rec.data||new Date().toLocaleDateString('pt-BR')).replace(/\//g,'-');
+  const placa=String(rec.placa||'SEM-PLACA').replace(/[^a-zA-Z0-9]/g,'');
+  let ok=0;
+  toast('📤 Enviando '+lista.length+' foto(s) da recepção...');
+  for(const slot of lista){
+    try{
+      const f=fotosRec[slot];
+      const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({acao:'salvarFotoRec',token:TOKEN,dados:{
+          contrato:ref, data:data, placa:placa, pesagem:data+'_'+placa,
+          tipo:_TIPOS_FOTO_REC[slot], base64:f.b64, mime:f.mime
+        }})});
+      const j=await r.json();
+      if(j&&j.ok) ok++;
+      else addLog('❌ Foto '+_TIPOS_FOTO_REC[slot]+' da recepção recusada: '+((j&&j.erro)||'erro'),'erro');
+    }catch(e){ addLog('❌ Foto '+_TIPOS_FOTO_REC[slot]+' da recepção não subiu: '+e.message,'erro'); }
+  }
+  if(ok===lista.length) toast('✅ '+ok+' foto(s) da recepção no Drive');
+  else { toast('⚠️ '+ok+'/'+lista.length+' foto(s) no Drive — veja o Diagnóstico');
+         addLog('⚠️ Fotos da recepção incompletas ('+ok+'/'+lista.length+') — '+placa,'erro'); }
+}
 function irNovaRec() {
+  fotosRec={};   // fotos são de UMA recepção só
   // Montar tela de nova recepção dinâmica
   const safras = [...new Set(talhoes.map(t => t.safra).filter(Boolean))];
   const safraOpts = safras.map(s => `<option value="${String(s).replace(/"/g,'&quot;')}">${_fmtSafra(s)}</option>`).join('');
@@ -6116,7 +6179,7 @@ function irNovaRec() {
       <div class="f"><label>Placa</label>
         <div style="display:flex;gap:6px;align-items:center">
           <input type="text" id="rec-placa" class="finput" placeholder="AAA-0000" oninput="autocompletePlacaRec(this.value)" style="text-transform:uppercase;font-family:'JetBrains Mono',monospace;font-weight:700;flex:1">
-          <label style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;flex-shrink:0" title="Fotografar placa com IA">
+          <label class="ia-ctl" style="background:linear-gradient(135deg,#6366f1,#8b5cf6);border-radius:8px;padding:8px 10px;cursor:pointer;font-size:16px;flex-shrink:0" title="Fotografar placa com IA">
             🤖
             <input type="file" accept="image/*" capture="environment" style="display:none" onchange="iaLerPlaca(this,'rec-placa','ia-status-placa-rec')">
           </label>
@@ -6126,7 +6189,7 @@ function irNovaRec() {
       <div class="f"><label>Motorista</label><input type="text" id="rec-motorista" class="finput" placeholder="Nome completo" style="text-transform:uppercase"></div>
       <div class="f"><label>CPF</label><input type="text" id="rec-cpf" class="finput" placeholder="000.000.000-00"></div>
       <!-- Leitura de NF / CT-e com IA -->
-      <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-top:6px;cursor:pointer">
+      <label class="fb ia-ctl" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-top:6px;cursor:pointer">
         <span style="font-size:18px">📄</span>
         <div>
           <div style="font-size:12px;font-weight:600">Fotografar NF / CT-e</div>
@@ -6157,7 +6220,7 @@ function irNovaRec() {
         <div class="pw"><input type="number" id="rec-bruto2" placeholder="0" step="1" min="0" max="200000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
         <div id="rec-bruto-total" style="font-size:11px;font-weight:700;color:var(--g1);margin-top:3px"></div>
       </div>
-      <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
+      <label class="fb ia-ctl" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
         <span style="font-size:18px">📊</span>
         <span style="font-size:11px;color:var(--ink3)">Foto display — Bruto</span>
         <input type="file" accept="image/*" capture="environment" onchange="iaLerDisplayRec('bruto',this)" style="display:none">
@@ -6187,7 +6250,7 @@ function irNovaRec() {
         <div class="pw"><input type="number" id="rec-tara2" placeholder="0" step="1" min="0" max="50000" oninput="calcDescRec()" style="border:none;background:transparent;font-size:32px;font-weight:800;font-family:'JetBrains Mono',monospace;width:100%;outline:none"><span class="pu">kg</span></div>
         <div id="rec-tara-total" style="font-size:11px;font-weight:700;color:var(--g1);margin-top:3px"></div>
       </div>
-      <label class="fb" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
+      <label class="fb ia-ctl" style="width:100%;flex-direction:row;padding:9px 12px;gap:8px;justify-content:flex-start;min-height:48px;margin-bottom:4px">
         <span style="font-size:18px">📊</span>
         <span style="font-size:11px;color:var(--ink3)">Foto display — Tara</span>
         <input type="file" accept="image/*" capture="environment" onchange="iaLerDisplayRec('tara',this)" style="display:none">
@@ -6584,6 +6647,7 @@ function registrarRecepcao() {
   localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
   // Enviar para GAS — usar enviarRec separado do enviar de expedição
   enviarRec(rec);
+  uploadFotosRec(rec);   // fotos da recepção → Drive, renomeadas pela etapa
   fecharNovaRec();
   toast('✅ Recepção registrada!');
   atualizarRecHome();
@@ -7245,6 +7309,7 @@ function abrirConfPeso(res,aplicar){
 function fecharConfPeso(){ document.getElementById('modal-conf-peso').style.display='none'; _cpAplicar=null; }
 function confirmarConfPeso(){ const t=recalcConfPeso(); const fn=_cpAplicar; fecharConfPeso(); if(fn) fn(t); }
 async function iaLerDisplay(campo,input){
+  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   // Mapear campo → statusId e campoId
   const mapa = {
@@ -7280,6 +7345,7 @@ async function iaLerDisplay(campo,input){
 }
 
 async function iaLerDisplayRec(campo,input){
+  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   // Caminhão longo: a 1ª foto preenche a 1ª parte, a 2ª foto vai para a 2ª parte
   let campoId=campo==='tara'?'rec-tara':'rec-bruto';
@@ -7288,6 +7354,7 @@ async function iaLerDisplayRec(campo,input){
   iaStatus(statusId,'load','🤖 IA lendo o display...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    _guardarFotoRec(campoId==='rec-bruto2'?'bruto2':campoId==='rec-tara2'?'tara2':campo,base64,mime);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
         contexto:(campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita')+' — '+IA_CTX_BALANCA})});
@@ -7323,11 +7390,13 @@ async function iaLerDisplayRec(campo,input){
 }
 
 async function iaLerPlaca(input,campoId,statusId){
+  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   const sid=statusId||('ia-status-placa-'+(campoId?.includes('rec')?'rec':'exp'));
   iaStatus(sid,'load','🤖 IA lendo a placa...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(campoId==='rec-placa') _guardarFotoRec('placa',base64,mime);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerPlaca',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7349,6 +7418,7 @@ async function iaLerPlaca(input,campoId,statusId){
 
 // ── CNH — preenche motorista e CPF ──────────────────────────
 async function iaLerCNH(input) {
+  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
@@ -7444,10 +7514,12 @@ function confirmarDadosIA() {
 }
 
 async function iaLerDocumentoRec(input){
+  if(!iaLigada()) return;   // leitura por IA desligada no Adm
   if(!input.files||!input.files[0])return;
   iaStatus('ia-status-doc-rec','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    _guardarFotoRec('nf',base64,mime);
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
