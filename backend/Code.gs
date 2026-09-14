@@ -96,7 +96,15 @@ function doPost(e){
     if(d.acao==="listarContratosNFA") return resposta(listarContratosNFA(d.filtros||{}));
     if(d.acao==="montarDadosNFA")     return resposta(montarDadosNFA(d.ticket_id,d.contrato_id));
     return resposta({ok:false,erro:"Acao desconhecida: "+d.acao});
-  }catch(err){return resposta({ok:false,erro:err.message});}
+  // Nunca devolver {ok:false} sem motivo: quando err não é um Error comum
+  // (autorização pendente, por exemplo), err.message vem vazio, o JSON sai sem
+  // o campo e o app só conseguia dizer "Servidor recusou: erro".
+  }catch(err){
+    var m="";
+    try{ m=(err&&(err.message||err.toString()))||""; }catch(e2){ m=""; }
+    if(!m) m="erro sem mensagem no script — normalmente é autorização pendente: abra o Apps Script, execute uma função e aceite as permissões";
+    return resposta({ok:false,erro:m});
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -467,8 +475,11 @@ function enviarDocsTicket(p){
         (links.ticket?"<p>🎫 <a href='"+links.ticket+"'>Abrir ticket no Drive</a></p>":"")+
         "<p style='color:#888;font-size:12px;margin-top:18px'>Fazenda Água Viva — enviado pelo sistema de pesagem</p>"+
         "</div></div>";
-      MailApp.sendEmail({to:para,subject:"NFA + Ticket — Placa "+s(p.placa)+" — Contrato "+contrato,
-        htmlBody:html,attachments:anexos});
+      // GmailApp (e não MailApp): o resto do script já usa Gmail. MailApp pede
+      // um escopo de permissão A MAIS, e escopo novo faz o Apps Script recusar
+      // TODO o script até ser autorizado de novo — inclusive o ping.
+      GmailApp.sendEmail(para,"NFA + Ticket — Placa "+s(p.placa)+" — Contrato "+contrato,"",
+        {htmlBody:html,attachments:anexos,name:"FAV — Fazenda Água Viva"});
       enviado=true;
     }
     return{ok:true,enviado_email:enviado,links:links,arquivos:anexos.length,

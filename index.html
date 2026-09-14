@@ -1477,7 +1477,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v143"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v144"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5058,8 +5058,12 @@ async function pingBackend(){
       return {ok:false, ms:ms, msg:_explicarRespostaBackend(txt,r.status), bruto:String(txt||'').substring(0,300)};
     }
     if(j.ok) return {ok:true,msg:'Servidor OK',ms:ms};
-    // erro comum: token diferente entre app e Apps Script
-    return {ok:false,msg:(j.erro==='Token invalido'?'Token inválido (confira TOKEN_SECRET no Apps Script)':('Servidor recusou: '+(j.erro||'erro'))),ms:ms};
+    if(j.erro==='Token invalido') return {ok:false,msg:'Token inválido (confira TOKEN_SECRET no Apps Script)',ms:ms};
+    // Sem motivo nenhum: o script quebrou antes de conseguir explicar. Quase
+    // sempre é autorização pendente — escopo novo no Apps Script derruba tudo.
+    if(!j.erro) return {ok:false,ms:ms,
+      msg:'O servidor recusou sem dizer o motivo — quase sempre é autorização pendente: abra o Apps Script, execute uma função e aceite as permissões, depois Implantar → Nova versão'};
+    return {ok:false,msg:'Servidor recusou: '+j.erro,ms:ms};
   }catch(e){ return {ok:false,msg:'Sem resposta do servidor: '+e.message,ms:Date.now()-t0}; }
 }
 /* Traduz a página que o Apps Script devolveu no lugar do JSON */
