@@ -1477,7 +1477,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v141"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v142"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3781,22 +3781,38 @@ function sendWAauto(o){
   setTimeout(()=>{window.open('https://wa.me/5561999995351?text='+msg,'_blank');}, 1200);
 }
 
+/* Comprime a foto antes de subir. O callback SEMPRE é chamado — se a imagem
+   não decodificar (formato do celular, arquivo grande, pouca memória) vai a
+   original. Antes só existia onload: a foto que falhava travava o envio para
+   sempre, sem erro nenhum, e junto travava a fila do Drive. */
 function comprimirImagem(b64full, callback){
+  var respondeu=false;
+  var responder=function(v){ if(respondeu) return; respondeu=true; callback(v||b64full); };
   var img=new Image();
   img.onload=function(){
-    var max=800;
-    var w=img.width, h=img.height;
-    if(w>max||h>max){
-      if(w>h){h=Math.round(h*max/w);w=max;}
-      else{w=Math.round(w*max/h);h=max;}
+    try{
+      var max=800;
+      var w=img.width, h=img.height;
+      if(!w||!h) return responder(null);           // imagem sem dimensão: manda a original
+      if(w>max||h>max){
+        if(w>h){h=Math.round(h*max/w);w=max;}
+        else{w=Math.round(w*max/h);h=max;}
+      }
+      var canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      var ctx=canvas.getContext('2d');
+      ctx.drawImage(img,0,0,w,h);
+      responder(canvas.toDataURL('image/jpeg',0.7));
+    }catch(e){
+      try{ addLog('⚠️ Não consegui comprimir a foto ('+e.message+') — enviando original','aviso'); }catch(_){}
+      responder(null);
     }
-    var canvas=document.createElement('canvas');
-    canvas.width=w; canvas.height=h;
-    var ctx=canvas.getContext('2d');
-    ctx.drawImage(img,0,0,w,h);
-    var compressed=canvas.toDataURL('image/jpeg',0.7);
-    callback(compressed);
   };
+  img.onerror=function(){
+    try{ addLog('⚠️ Foto não pôde ser lida para compressão — enviando original','aviso'); }catch(_){}
+    responder(null);
+  };
+  setTimeout(function(){ if(!respondeu) responder(null); }, 8000);  // rede de segurança
   img.src=b64full;
 }
 
@@ -3826,16 +3842,24 @@ async function uploadFotosDrive(ordem){
   // o objeto global: as fotos da entrada se perdiam e, pior, as fotos do último
   // caminhão registrado iam parar na pasta de outro caminhão.
   const mapa=Object.assign({}, ordem.fotos||{}, (_fotosDe===ordem.id ? fotos : {}));
-  // Coletar fotos existentes
+  // Coletar fotos existentes, pulando as que já subiram (o envio acontece no
+  // registro da tara e de novo ao finalizar — sem isso o Drive ficaria com
+  // PLACA.jpg duas vezes na mesma pasta).
+  ordem.fotosEnviadas=ordem.fotosEnviadas||{};
   const lista=[];
   Object.keys(tipos).forEach(function(tipo){
-    if(mapa[tipo]) lista.push({tipo:tipo, nome:tipos[tipo], b64:mapa[tipo]});
+    if(mapa[tipo] && !ordem.fotosEnviadas[tipo]) lista.push({tipo:tipo, nome:tipos[tipo], b64:mapa[tipo]});
   });
   // Adicionar assinatura se existir
-  if(ordem.assinatura && ordem.assinatura.length>100){
+  if(ordem.assinatura && ordem.assinatura.length>100 && !ordem.fotosEnviadas.sig){
     lista.push({tipo:'sig', nome:'ASSINATURA', b64:ordem.assinatura});
   }
-  if(!lista.length) return;
+  if(!lista.length){
+    // Antes saía calado — e foto que não chegava ao Drive não deixava rastro
+    if(!Object.keys(ordem.fotosEnviadas).length)
+      addLog('⚠️ Nenhuma foto para arquivar — '+(ordem.placa||ordem.id),'aviso');
+    return;
+  }
   toast('📤 Enviando '+lista.length+' foto(s)...');
   var ok=0;
   for(var i=0;i<lista.length;i++){
@@ -3855,6 +3879,7 @@ async function uploadFotosDrive(ordem){
           var j=JSON.parse(await r.text());
           if(j.ok){
             ok++;
+            ordem.fotosEnviadas[item.tipo]=true;   // não sobe de novo no finalizar
             // Se for assinatura, salvar a URL do Drive no objeto da OS para outros dispositivos
             if(item.tipo==='sig' && j.url){
               ordem.assinaturaUrl = j.url;
