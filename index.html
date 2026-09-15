@@ -1001,6 +1001,8 @@ body.dark .card{background:#1a2d22}
               <option value="MILHO">MILHO</option>
               <option value="SORGO">SORGO</option>
               <option value="FEIJAO">FEIJAO</option>
+              <option value="LARANJA">LARANJA</option>
+              <option value="__DIGITAR__">✏️ outro produto — digitar...</option>
             </select>
           </div>
           <div class="f">
@@ -1009,10 +1011,11 @@ body.dark .card{background:#1a2d22}
           </div>
         </div>
         <div class="f"><label>Tipo de Operação *</label>
-          <select id="nc-tipoop" onchange="favPreencherDispLegal()"><option value="">-- escolha o grupo primeiro --</option></select>
+          <select id="nc-tipoop" onchange="favDigitarSefaz('tipoop')"><option value="">-- escolha o grupo primeiro --</option></select>
         </div>
         <div class="f"><label>Produto *</label>
-          <select id="nc-produto"><option value="">-- escolha o grupo primeiro --</option></select>
+          <select id="nc-produto" onchange="favDigitarSefaz('produto')"><option value="">-- escolha o grupo primeiro --</option></select>
+          <div style="font-size:10px;color:var(--ink3);margin-top:3px">Não achou o produto? Escolha <b>✏️ digitar</b> e cole o nome exato do portal SEFAZ.</div>
         </div>
         <div class="f" id="nc-displegal-wrap" style="display:none">
           <label>Dispositivo Legal <span style="font-weight:400;color:var(--ink3)">(benefício fiscal)</span></label>
@@ -1477,7 +1480,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v144"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v145"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2145,6 +2148,30 @@ function renderDashGeral(){
 function _normProd(x){return String(x||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();}
 function _grupoKey(x){return _normProd(x).split(/[\s\-]/)[0];}
 function _kgPorUnidade(u){u=_normProd(u);return u==='KG'?1:(u==='T'||u==='TON'||u==='TONELADA')?1000:60;/* SC/SACA/def=60 */}
+/* Saca de 60 kg é medida de GRÃO. Fruta (laranja, limão) é vendida por quilo —
+   "3.000 sacas de laranja" não diz nada a ninguém. Quem não está nesta lista
+   aparece nos painéis em kg (ou t, quando passa de 100 t). Por dentro a conta
+   continua toda em saca de 60 kg; só a exibição muda. */
+var GRUPOS_SACA=['SOJA','MILHO','SORGO','FEIJAO','TRIGO','ALGODAO','GIRASSOL','ARROZ','AVEIA','MILHETO','GERGELIM','CAFE','CEVADA','CANOLA','AMENDOIM'];
+function _ehSacaProd(p){ return GRUPOS_SACA.indexOf(_grupoKey(p))>=0; }
+/* Unidade de exibição do produto — escolhida UMA vez por linha, pelo maior
+   número dela. Se fosse por número, a mesma laranja apareceria "30.000 kg" num
+   campo e "170 t" no outro, e ninguém consegue comparar dois números assim. */
+function _unidQtd(emSaca,maiorSc){ return emSaca?'SC':(((maiorSc||0)*60>=100000)?'T':'KG'); }
+// Quantidade (guardada em sacas de 60 kg) no formato do produto
+function _fmtQtdProd(sc,unid){
+  if(unid==='SC') return Math.round(sc||0).toLocaleString('pt-BR')+' sc';
+  var kg=(sc||0)*60;
+  if(unid==='T') return (kg/1000).toLocaleString('pt-BR',{maximumFractionDigits:1})+' t';
+  return Math.round(kg).toLocaleString('pt-BR')+' kg';
+}
+// Preço (guardado em R$/saca) na MESMA unidade em que a quantidade aparece
+function _fmtPrecoProd(precoSc,unid){
+  if(!precoSc) return '';
+  var v=unid==='SC'?precoSc:(unid==='T'?precoSc/60*1000:precoSc/60);
+  var rot=unid==='SC'?'/sc':(unid==='T'?'/t':'/kg');
+  return 'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:unid==='KG'?4:2})+rot;
+}
 // Preço médio de venda (R$/saca) por grupo, ponderado pelo volume dos contratos NFA
 function _precoMedioPorGrupo(){
   var map={};
@@ -2190,6 +2217,21 @@ function _contratoParecido(num){
   });
   return (melhor && dist<=2) ? melhor : '';
 }
+/* Volume do contrato em KG. A planilha guarda o volume na UNIDADE do contrato e
+   listarContratos manda o número cru — até agora todo contrato era em kg e dava
+   no mesmo. Com produto novo (laranja) a unidade pode ser T ou SC, e aí o mesmo
+   número significa 1.000× ou 60× mais. Quando a lista de Contratos NFA está
+   carregada dá pra saber a unidade; sem ela, vale o comportamento antigo (kg). */
+function _unidContrato(n){
+  var c=(contratosNFA||[]).find(function(x){ return _mesmoContrato(x.id,n); });
+  return c?String(c.unidade||''):'';
+}
+function _volKgContrato(ct){
+  if(!ct) return 0;
+  var v=parseFloat(ct.vol)||0; if(!v) return 0;
+  var u=_unidContrato(ct.n);
+  return u?v*_kgPorUnidade(u):v;
+}
 // Volume já entregue (kg) de um contrato de venda, medido pelas expedições
 // finalizadas (cloud) ligadas a ele — mesmo critério do card "Contratos".
 function _entregueContrato(ctN){
@@ -2212,7 +2254,6 @@ function _estoqueLocal(){
     rows[k].entradas_sc+=sc;
     culturaTot[cultura]=(culturaTot[cultura]||0)+sc;
   });
-  if(!Object.keys(rows).length) return null;
   // Vendido = TUDO que já foi expedido (pesagens finalizadas), medido pelo peso real —
   // sem limitar ao volume do contrato. Comprometido = saldo do contrato ainda a entregar.
   // Ex.: contrato 10.000 sc, 50% atendido → 5.000 vendido + 5.000 comprometido.
@@ -2221,13 +2262,16 @@ function _estoqueLocal(){
   //   COMPROMETIDO = saldo dos contratos (volume − entregue)
   //   EM ESTOQUE   = colheita − vendido
   //   DISPONÍVEL   = estoque − comprometido (= colheita − vendido − saldo contratos)
-  var vendGrupo={}, compGrupo={};
+  var vendGrupo={}, compGrupo={}, nomeGrupo={};
   (contratosCloud||[]).forEach(function(ct){
     var g=_grupoKey(ct.p); if(!g)return;                 // produto do contrato → grupo
-    var volSc=(parseFloat(ct.vol)||0)/60;                // volume do contrato em kg → sacas
+    var volSc=_volKgContrato(ct)/60;                     // volume do contrato em kg → sacas
     var entSc=_entregueContrato(ct.n)/60;                // expedido em sacas (tickets finalizados)
     vendGrupo[g]=(vendGrupo[g]||0)+entSc;                // VENDIDO = expedido real
     compGrupo[g]=(compGrupo[g]||0)+Math.max(0,volSc-entSc); // COMPROMETIDO = falta entregar
+    // Nome curto p/ o painel: o contrato guarda o nome do SEFAZ inteiro
+    // ("LARANJA KG PRODUTOR/EXTRATOR"), que não cabe e não ajuda ninguém.
+    if(!nomeGrupo[g]) nomeGrupo[g]=g.charAt(0)+g.slice(1).toLowerCase();
   });
   // Total de entradas POR GRUPO (não por cultura) — para distribuir por grupo
   // sem contar em dobro quando 2 culturas caem no mesmo grupo (ex.: Milho e Milho Safrinha).
@@ -2240,13 +2284,25 @@ function _estoqueLocal(){
     row.saidas_sc=vend;                                  // VENDIDO = expedido (tickets finalizados)
     row.saldo_sc=Math.max(0,row.entradas_sc-vend);       // EM ESTOQUE = colheita − vendido
   });
+  /* Produto que é SÓ VENDA (não passa pela recepção — ex.: laranja, que sai
+     direto do pomar para o comprador) não tem linha nenhuma acima, porque as
+     linhas nascem das recepções. Sem isto o contrato existe, o ticket sai, a
+     NFA é emitida — e o painel de estoque simplesmente não mostra o produto.
+     Aqui ele entra com colheita 0: o que aparece é vendido e comprometido. */
+  Object.keys(compGrupo).forEach(function(g){
+    if(grupoTot[g]>0) return;                            // já tem linha vinda da recepção
+    var vend=vendGrupo[g]||0, comp1=compGrupo[g]||0;
+    if(vend<=0 && comp1<=0) return;
+    rows['|'+g]={safra:'',cultura:nomeGrupo[g]||g,entradas_sc:0,saidas_sc:vend,saldo_sc:0};
+  });
+  if(!Object.keys(rows).length) return null;
   // Comprometido POR GRUPO (uma vez por grupo, na 1ª linha daquele grupo)
   var comp={}, jaComp={};
   Object.keys(rows).forEach(function(k){
     var g=_grupoKey(rows[k].cultura); if(jaComp[g])return; jaComp[g]=1;
     comp[k]={comprometido_sc:compGrupo[g]||0};
   });
-  return {estoque:Object.values(rows), comprometido:comp};
+  return {estoque:Object.values(rows), comprometido:comp, temRec:Object.keys(grupoTot).length>0};
 }
 // Reconciliação: soma REAL das recepções (por cultura, deduplicada) vs aba Estoque
 // do backend. Serve pra achar divergências (duplicatas, drift do estoque incremental).
@@ -2284,10 +2340,17 @@ function renderGcEstoque(elId){
   let est=[],comp={},local=false;
   const loc=_estoqueLocal();
   if(loc){est=loc.estoque;comp=loc.comprometido;local=true;}
-  if(!est.length){est=estoqueCloud?.estoque||[];comp=estoqueCloud?.comprometido||{};}
+  const srvEst=estoqueCloud?.estoque||[];
+  /* Aparelho que ainda não baixou as recepções: a colheita vem da aba Estoque
+     do servidor, mas os produtos que só têm contrato (laranja) continuam na
+     lista — senão eles sumiriam justo em quem abriu o app pela 1ª vez. */
+  if(loc&&!loc.temRec&&srvEst.length){
+    const extras=est.filter(e=>!srvEst.some(x=>_grupoKey(x.cultura)===_grupoKey(e.cultura)));
+    est=srvEst.concat(extras); local=false;
+  }
+  if(!est.length){est=srvEst;comp=estoqueCloud?.comprometido||{};}
   if(!est.length){el.innerHTML='<div style="color:var(--ink3)">Nenhum dado de estoque.<br>Registre recepções ou toque em <b>🔄 Recalcular</b>.</div>';return;}
   const precoMap=_precoMedioPorGrupo();
-  const nSc=v=>Math.round(v||0).toLocaleString('pt-BR');
   const nR$=v=>'R$ '+(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
   // Consolida por PRODUTO (cultura), somando todas as safras
   // Consolida por GRUPO de produtos (soma culturas do mesmo grupo — ex.: Milho + Milho Safrinha)
@@ -2299,7 +2362,8 @@ function renderGcEstoque(elId){
     if(e.safra)prod[g].safras[e.safra]=1;
   });
   Object.keys(comp).forEach(k=>{const c=k.split('|')[1], g=_grupoKey(c); if(prod[g])prod[g].comprometido+=comp[k]?.comprometido_sc||0;});
-  const lista=Object.values(prod).sort((a,b)=>b.estoque-a.estoque);
+  // Produto só-venda (laranja) fica com estoque 0 — ordena pelo que ele tem: o contratado
+  const lista=Object.values(prod).sort((a,b)=>(b.estoque-a.estoque)||((b.vendido+b.comprometido)-(a.vendido+a.comprometido)));
   // Mini barra da linha: azul = entregue · âmbar = contratado a entregar
   const miniBarra=(pctV,pctC)=>`<div title="${pctV}% entregue · ${pctC}% a entregar"><i style="display:block;height:100%;width:${pctV}%;background:#1a5c9e"></i><i style="display:block;height:100%;width:${pctC}%;background:var(--a1)"></i></div>`;
   const nR$c=v=>(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2}); // sem "R$" (o cabeçalho já diz)
@@ -2307,17 +2371,18 @@ function renderGcEstoque(elId){
   const mi=(lbl,val,cor)=>`<div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink3);line-height:1.2">${lbl}</div><div style="font-size:14px;font-weight:800;color:${cor};font-variant-numeric:tabular-nums">${val}</div></div>`;
   /* Anel de comercialização (celular): âmbar = comercializado (vendido +
      comprometido), azul por cima = a parte já entregue. r=30 → circunf. 188,5. */
-  const anel=(pctCom,pctV,titulo)=>{
+  const anel=(pctCom,pctV,titulo,rot)=>{
     const C=188.5, ac=(pctCom*C/100).toFixed(1), av=(pctV*C/100).toFixed(1);
     return `<svg viewBox="0 0 76 76" width="76" height="76" role="img" aria-label="${titulo}" style="flex-shrink:0">
       <circle cx="38" cy="38" r="30" fill="none" stroke="var(--brd)" stroke-width="9"></circle>
       ${pctCom>0?`<circle cx="38" cy="38" r="30" fill="none" stroke="var(--a1)" stroke-width="9" stroke-dasharray="${ac} ${C}" transform="rotate(-90 38 38)"></circle>`:''}
       ${pctV>0?`<circle cx="38" cy="38" r="30" fill="none" stroke="#1a5c9e" stroke-width="9" stroke-dasharray="${av} ${C}" transform="rotate(-90 38 38)"></circle>`:''}
       <text x="38" y="40" text-anchor="middle" font-size="18" font-weight="800" fill="var(--ink)" font-family="Inter,sans-serif">${pctCom}%</text>
-      <text x="38" y="51" text-anchor="middle" font-size="8" fill="var(--ink3)" font-family="Inter,sans-serif">comerc.</text>
+      <text x="38" y="51" text-anchor="middle" font-size="8" fill="var(--ink3)" font-family="Inter,sans-serif">${rot||'comerc.'}</text>
     </svg>`;
   };
   let tE=0,tV=0,tC=0,tD=0,tVal=0,tValD=0,aneis='';
+  let tVcol=0,tCcol=0;   // vendido/comprometido SÓ dos produtos que têm colheita (p/ o % geral)
   let linhas=lista.map(p=>{
     const disp=Math.max(0,p.estoque-p.comprometido);
     const preco=precoMap[_grupoKey(p.cultura)]?.precoSc||0;
@@ -2326,49 +2391,70 @@ function renderGcEstoque(elId){
     const safras=Object.keys(p.safras).sort().join(', ');
     // Percentuais sobre a COLHEITA (entradas): quanto já saiu e quanto está comprometido
     const colhido=p.entradas||0;
-    const pctV=colhido>0?Math.min(100,Math.round(p.vendido/colhido*100)):0;
+    /* Produto que não passa pela recepção (laranja: vai do pomar direto pro
+       comprador) não tem colheita pesada aqui. Aí a régua deixa de ser a
+       colheita e passa a ser o CONTRATADO: quanto do que foi vendido já saiu. */
+    const soVenda=colhido<=0;
+    const contratado=p.vendido+p.comprometido;
+    // Unidade do produto: grão em saca, fruta em kg (o que veio da recepção é sempre saca)
+    const emSc=!soVenda||_ehSacaProd(p.cultura);
+    const unid=_unidQtd(emSc,Math.max(colhido,contratado,p.estoque,p.vendido,p.comprometido,disp));
+    const fq=v=>_fmtQtdProd(v,unid);
+    const pctV=soVenda
+      ? (contratado>0?Math.min(100,Math.round(p.vendido/contratado*100)):0)
+      : Math.min(100,Math.round(p.vendido/colhido*100));
     // Arredondar o total (e não cada parte) — senão 62,5% + 12,5% viravam 76% em vez de 75%
-    const pctCom=colhido>0?Math.min(100,Math.round((p.vendido+p.comprometido)/colhido*100)):0;
+    const pctCom=soVenda?(contratado>0?100:0):Math.min(100,Math.round((p.vendido+p.comprometido)/colhido*100));
     const pctC=Math.max(0,pctCom-pctV);
     tE+=p.estoque;tV+=p.vendido;tC+=p.comprometido;tD+=disp;tVal+=valorV;tValD+=valorD;
+    if(!soVenda){ tVcol+=p.vendido; tCcol+=p.comprometido; }
     // Bloco do celular (anel) — guardado para montar depois
-    const tit=p.cultura+': '+pctCom+'% comercializado'+(pctV>0?', '+pctV+'% já entregue':', nada entregue ainda');
+    const tit=soVenda
+      ? p.cultura+': '+pctV+'% do contratado já entregue'
+      : p.cultura+': '+pctCom+'% comercializado'+(pctV>0?', '+pctV+'% já entregue':', nada entregue ainda');
+    const itens=soVenda
+      ? mi('Contratado',fq(contratado),'var(--ink)')+
+        mi('Entregue',fq(p.vendido),p.vendido>0?'#1a5c9e':'var(--ink3)')+
+        mi('A entregar',fq(p.comprometido),p.comprometido>0?'#854F0B':'var(--ink3)')
+      : mi('Colhido',fq(colhido),'var(--ink)')+
+        mi('Em estoque',fq(p.estoque),'var(--ink2)')+
+        mi('Vendido',fq(p.vendido),p.vendido>0?'#1a5c9e':'var(--ink3)')+
+        mi('Comprometido',fq(p.comprometido),p.comprometido>0?'#854F0B':'var(--ink3)')+
+        mi('Livre',fq(disp),'var(--g1)');
     aneis+=`<div style="display:flex;gap:13px;align-items:center;padding:13px 0;border-bottom:.5px solid var(--brd)">
-      ${anel(pctCom,pctV,tit)}
+      ${anel(soVenda?pctV:pctCom,soVenda?0:pctV,tit,soVenda?'entregue':'comerc.')}
       <div style="flex:1;min-width:0">
         <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
-          <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}</span>
-          <span style="font-size:11px;color:var(--ink3)">${preco>0?nR$(preco)+'/sc':''}</span>
+          <span style="font-weight:800;font-size:14px">${_culturaIcon(p.cultura)} ${p.cultura}${soVenda?' <span class="sf">só venda</span>':''}</span>
+          <span style="font-size:11px;color:var(--ink3)">${_fmtPrecoProd(preco,unid)}</span>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:8px;margin-top:8px">
-          ${mi('Colhido',nSc(colhido),'var(--ink)')}
-          ${mi('Em estoque',nSc(p.estoque),'var(--ink2)')}
-          ${mi('Vendido',nSc(p.vendido),p.vendido>0?'#1a5c9e':'var(--ink3)')}
-          ${mi('Comprometido',nSc(p.comprometido),p.comprometido>0?'#854F0B':'var(--ink3)')}
-          ${mi('Livre',nSc(disp),'var(--g1)')}
+          ${itens}
         </div>
       </div>
     </div>`;
     return `<tr>
-      <td>${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span class="sf">'+safras+'</span>':''}</td>
-      <td>${nSc(colhido)}</td>
-      <td>${nSc(p.estoque)}</td>
-      <td style="color:${p.vendido>0?'#1a5c9e':'var(--ink3)'}">${nSc(p.vendido)}</td>
-      <td style="color:${p.comprometido>0?'#854F0B':'var(--ink3)'}">${nSc(p.comprometido)}</td>
-      <td style="color:var(--g1);font-weight:700">${nSc(disp)}</td>
-      <td style="font-weight:800;color:var(--ink)">${pctCom}%</td>
+      <td>${_culturaIcon(p.cultura)} ${p.cultura}${safras?' <span class="sf">'+safras+'</span>':''}${soVenda?' <span class="sf">só venda</span>':''}</td>
+      <td>${soVenda?'—':fq(colhido)}</td>
+      <td>${soVenda?'—':fq(p.estoque)}</td>
+      <td style="color:${p.vendido>0?'#1a5c9e':'var(--ink3)'}">${fq(p.vendido)}</td>
+      <td style="color:${p.comprometido>0?'#854F0B':'var(--ink3)'}">${fq(p.comprometido)}</td>
+      <td style="color:var(--g1);font-weight:700">${soVenda?'—':fq(disp)}</td>
+      <td style="font-weight:800;color:var(--ink)" title="${tit}">${soVenda?pctV+'%*':pctCom+'%'}</td>
       <td class="mini">${miniBarra(pctV,pctC)}</td>
       <td style="color:var(--g1)">${valorD>0?nR$c(valorD):'—'}</td>
       <td style="color:${valorV>0?'#1a5c9e':'var(--ink3)'}">${valorV>0?nR$c(valorV):'—'}</td>
     </tr>`;
   }).join('');
   // Sacas de produtos diferentes não se somam — só totalizamos os VALORES (R$).
+  // O % geral é sobre a colheita, então só entra produto que passou pela recepção.
   const colhTot=lista.reduce((s,p)=>s+(p.entradas||0),0);
-  const pctTot=colhTot>0?Math.min(100,Math.round((tV+tC)/colhTot*100)):0;
+  const temSoVenda=lista.some(p=>(p.entradas||0)<=0);
+  const pctTot=colhTot>0?Math.min(100,Math.round((tVcol+tCcol)/colhTot*100)):0;
   const rodape=lista.length>1?`<tfoot><tr>
       <td>Total</td>
-      <td colspan="5" style="text-align:left;font-weight:400;color:var(--ink3);font-size:10px;white-space:normal">sacas de produtos diferentes não se somam</td>
-      <td>${pctTot}%</td>
+      <td colspan="5" style="text-align:left;font-weight:400;color:var(--ink3);font-size:10px;white-space:normal">quantidades de produtos diferentes não se somam${temSoVenda?' · <b>*</b> produto só de venda: % é do contratado já entregue, não da colheita':''}</td>
+      <td>${colhTot>0?pctTot+'%':'—'}</td>
       <td class="mini"></td>
       <td style="color:var(--g1)">${nR$c(tValD)}</td>
       <td style="color:#1a5c9e">${nR$c(tVal)}</td>
@@ -2388,10 +2474,10 @@ function renderGcEstoque(elId){
   if(tVal>0||tValD>0){
     html+=`<div class="tbl-resumo">
       <div style="font-size:12px;color:var(--ink2)">Disponível <b style="color:var(--g1)">${nR$(tValD)}</b> · Vendido <b style="color:#1a5c9e">${nR$(tVal)}</b></div>
-      <div style="font-size:11px;color:var(--ink3);margin-top:3px">${pctTot}% da colheita já comercializada</div>
+      ${colhTot>0?`<div style="font-size:11px;color:var(--ink3);margin-top:3px">${pctTot}% da colheita já comercializada${temSoVenda?' (produto só de venda não entra nesta conta)':''}</div>`:''}
     </div>`;
   }
-  if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções · toque em 🔄 Recalcular para consolidar no servidor</div>';
+  if(local)html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Calculado das recepções e contratos · toque em 🔄 Recalcular para consolidar no servidor</div>';
   el.innerHTML=html;
 }
 // Renderiza o estoque por produto nos dois lugares (aba Expedição e Consolidado)
@@ -2417,7 +2503,7 @@ function _nfPorContrato(){
   });
   return Object.values(map).map(r=>{
     const c=(contratosCloud||[]).find(x=>_mesmoContrato(x.n,r.ct));
-    r.produto=c?(c.p||''):''; r.volKg=c?(parseFloat(c.vol)||0):0;
+    r.produto=c?(c.p||''):''; r.volKg=_volKgContrato(c);
     r.faltaKg=Math.max(0,r.expKg-r.nfKg);
     if(r.faltaKg<NFA_TOL_KG) r.faltaKg=0;
     return r;
@@ -2429,13 +2515,16 @@ function renderGcNFContratos(){
   if(!lista.length){ el.innerHTML='<div style="color:var(--ink3)">Nenhuma expedição finalizada ainda.</div>'; return; }
   const fkg=v=>Math.round(v||0).toLocaleString('pt-BR');
   const fsc=v=>Math.round((v||0)/60).toLocaleString('pt-BR');
-  const bx=(lbl,v,cor,bg)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px">
+  // Saca só faz sentido em grão. Contrato de fruta (laranja) mostra só o kg.
+  const bx=(lbl,v,cor,bg,emSc)=>`<div style="background:${bg};border-radius:7px;padding:6px 4px">
       <div style="font-weight:800;color:${cor};font-size:12px">${fkg(v)} kg</div>
-      <div style="font-size:10px;font-weight:700;color:${cor};opacity:.85">${fsc(v)} sc</div>
+      ${emSc?`<div style="font-size:10px;font-weight:700;color:${cor};opacity:.85">${fsc(v)} sc</div>`:''}
       <div style="color:var(--ink3);font-size:9px;line-height:1.1;margin-top:1px">${lbl}</div>
     </div>`;
+  const todoGrao=lista.every(r=>!r.produto||_ehSacaProd(r.produto));
   let tE=0,tN=0,tF=0,tP=0;
   let html=lista.map(r=>{
+    const emSc=!r.produto||_ehSacaProd(r.produto);
     tE+=r.expKg; tN+=r.nfKg; tF+=r.faltaKg; tP+=r.pend;
     const pct=r.expKg>0?Math.min(100,Math.round(r.nfKg/r.expKg*100)):0;
     const okTudo=r.faltaKg===0;
@@ -2445,20 +2534,20 @@ function renderGcNFContratos(){
         <span style="font-size:11px;color:${okTudo?'#1a6c3c':'#a15c00'};font-weight:700">${okTudo?'✅ tudo com NF':'⚠️ '+r.pend+' carga'+(r.pend>1?'s':'')+' sem NF'}</span>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:5px;text-align:center">
-        ${bx('Expedido',r.expKg,'var(--g1)','var(--g3)')}
-        ${bx('Com NF emitida',r.nfKg,'#1a5c9e','#e8f0fb')}
-        ${bx('Falta emitir NF',r.faltaKg,r.faltaKg>0?'#c0392b':'#1a6c3c',r.faltaKg>0?'#fdeaea':'var(--g3)')}
+        ${bx('Expedido',r.expKg,'var(--g1)','var(--g3)',emSc)}
+        ${bx('Com NF emitida',r.nfKg,'#1a5c9e','#e8f0fb',emSc)}
+        ${bx('Falta emitir NF',r.faltaKg,r.faltaKg>0?'#c0392b':'#1a6c3c',r.faltaKg>0?'#fdeaea':'var(--g3)',emSc)}
       </div>
       <div style="background:var(--brd);border-radius:4px;height:6px;overflow:hidden;margin-top:7px"><div style="height:100%;width:${pct}%;background:#1a5c9e;border-radius:4px" title="${pct}% com NF"></div></div>
       <div style="font-size:10px;color:var(--ink3);margin-top:4px;display:flex;justify-content:space-between">
         <span>${r.cargas} carga${r.cargas>1?'s':''} · ${pct}% com NF</span>
-        <span>${r.volKg>0?'Contrato: '+fkg(r.volKg)+' kg ('+fsc(r.volKg)+' sc)':''}</span>
+        <span>${r.volKg>0?'Contrato: '+fkg(r.volKg)+' kg'+(emSc?' ('+fsc(r.volKg)+' sc)':''):''}</span>
       </div>
     </div>`;
   }).join('');
   html+=`<div style="background:${tF>0?'#fdeaea':'var(--g3)'};border-radius:9px;padding:10px 12px;text-align:center">
-    <div style="font-size:11px;color:var(--ink2)">Total expedido <b>${fkg(tE)} kg</b> (${fsc(tE)} sc) · com NF <b style="color:#1a5c9e">${fkg(tN)} kg</b> (${fsc(tN)} sc)</div>
-    <div style="font-size:14px;font-weight:800;color:${tF>0?'#c0392b':'#1a6c3c'};margin-top:3px">${tF>0?'Falta emitir NF: '+fkg(tF)+' kg ('+fsc(tF)+' sc) · '+tP+' carga'+(tP>1?'s':''):'✅ Todo o expedido já tem NF'}</div>
+    <div style="font-size:11px;color:var(--ink2)">Total expedido <b>${fkg(tE)} kg</b>${todoGrao?' ('+fsc(tE)+' sc)':''} · com NF <b style="color:#1a5c9e">${fkg(tN)} kg</b>${todoGrao?' ('+fsc(tN)+' sc)':''}</div>
+    <div style="font-size:14px;font-weight:800;color:${tF>0?'#c0392b':'#1a6c3c'};margin-top:3px">${tF>0?'Falta emitir NF: '+fkg(tF)+' kg'+(todoGrao?' ('+fsc(tF)+' sc)':'')+' · '+tP+' carga'+(tP>1?'s':''):'✅ Todo o expedido já tem NF'}</div>
   </div>`;
   const temServ=(cloud||[]).some(o=>o.nfa_sacas!=null);
   if(!temServ) html+='<div style="font-size:9px;color:var(--ink3);margin-top:8px;text-align:center">Kg de NF deste aparelho · publique a versão nova do backend para somar as NFAs de todos os aparelhos</div>';
@@ -2631,7 +2720,7 @@ function renderDashContratos(todos){
   if(!contratosCloud.length){el.innerHTML='<p style="color:var(--ink3)">Nenhum contrato cadastrado.</p>';return;}
   let html='';
   contratosCloud.forEach(ct=>{
-    const vol=parseFloat(ct.vol)||0;
+    const vol=_volKgContrato(ct);
     const entregues=todos.filter(o=>_mesmoContrato(o.numOrdem,ct.n)&&(o.status||'').includes('Finalizado'))
                          .reduce((s,o)=>s+parseFloat(o.cargaLiquida||0)*1000,0);
     // Contrato sem volume cadastrado NÃO some mais do relatório: aparece com o
@@ -2988,7 +3077,7 @@ function renderSelContrato(ocs,lista){
   }
   for(var i=0;i<ocs.length;i++){
     var o=ocs[i];
-    var vol=parseFloat(o.vol)||0;
+    var vol=_volKgContrato(o);
     var entregues=0;
     for(var j=0;j<cloud.length;j++){var x=cloud[j];if(x.numOrdem===o.n&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
     var saldo=vol>0?vol-entregues:null;
@@ -3046,7 +3135,7 @@ function infoOC(v){
   if(!o){el.style.display='none';return;}
   var entregues=0;
   for(var j=0;j<cloud.length;j++){var x=cloud[j];if(_mesmoContrato(x.numOrdem,v)&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
-  const vol=parseFloat(o.vol)||0;
+  const vol=_volKgContrato(o);
   const saldo=vol>0?vol-entregues:null;
   var balNum=parseInt(o.bal)||1;
   var balNome=balNum===2?'Balança 2 — Espora':'Balança 1 — Água Viva';
@@ -3149,7 +3238,7 @@ function rOC(){
   var html='';
   for(var i=ocs.length-1;i>=0;i--){
     var o=ocs[i];
-    var vol=parseFloat(o.vol)||0;
+    var vol=_volKgContrato(o);
     var entregues=0;
     for(var j=0;j<cloud.length;j++){
       var x=cloud[j];
@@ -3297,18 +3386,100 @@ var FAV_SEFAZ = {
   SORGO:{tipoop:['VENDA INTERNA SORGO PRODUCAO PROPRIA - 5101','VENDA INTERNA SORGO ADQUIRIDO DE TERCEIROS - 5102','VENDA INTERNA ORIGINADA ENCOMENDA P ENTREGA FUTURA - 5116','TRANSFERENCIA INTERNA SORGO PROD PROPRIA - 5151','TRANSFERENCIA INTERNA SORGO ADQUIRIDO TERC - 5152','REMESSA SORGO INTERNA, FIM ESPECIFICO EXPORTACAO - 5501','REMESSA DE SORGO PARA DEPOSITO/ARMAZEM GERAL - 5905','REMESSA DE SORGO PARA INDUST. ECOMENDA - 5901','RETORNO DE SORGO PARA DEPOSITO/ARMAZEM GERAL - 5906','RETORNO/ENTRADA SORGO REMETIDO PARA DEP. FECHADO - 1906','SIMPLES FAT. SORGO INTERENA VENDA P/ ENT. FUTURA - 5922','REMESSA SORGO COMO PAGAMENTO - 5949'],produto:['SORGO EM GRAO A GRANEL SC 60 KG UN PRODUTOR/EXTRATOR','SORGO EM GRAO A GRANEL KG PRODUTOR/EXTRATOR','SORGO EM GRAO ORIUNDO DE CAMPO DE SEMENTES KG PRODUTOR/EXTRATOR','SORGO RESIDUO KG INDUSTRIA']},
   FEIJAO:{tipoop:['VENDA INTERNA FEIJAO PRODUCAO PROPRIA - 5101','VENDA INTERNA FEIJAO ADQUIRIDO TERCEIROS - 5102','REMESSA INTERNA DE FEIJAO PARA DEPOSITO/ARMAZEM - 5905','REMESSA DE FEIJAO PARA INDUSTRIALIZACAO ENCOMENDA - 5901','RETORNO DE FEIJAO DE DEPOSITO/ARMAZEM GERAL - 5906','RETORNO SIMBOLICO DE FEIJAO DE DEPOSITO/ARMAZEM GE - 5907','RETORNO/ENTRADA FEIJAO REMETIDO PARA DEP. FECHADO - 1906','RETORNO FEIJAO REMETIDO INDUSTRIALIZACAO - 1902','OUTRA SAIDA DE FEIJAO - NF PARA EFEITO DE TRANSITO - 5949'],produto:['FEIJAO CARIOQUINHA DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO AMARELO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO BRANCO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO APORE DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO CAUPI (OUTROS) DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO CAUPI (SEMPRE VERDE/CATADOR) DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO EMGOPA DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO JALO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO PEROLA DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO PRETO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO RAJADO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO ROSINHA DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO ROXO DO PRODUTOR P/ ATAC. E INDUST. SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO EM GRAO ORIUNDO DE CAMPO DE SEMENTES SC 60 KG UN PRODUTOR/EXTRATOR','FEIJAO EM GRAO ORIUNDO DE CAMPO DE SEMENTES KG PRODUTOR/EXTRATOR','FEIJAO EM SEMENTE SC 40 KG UN ATACADO','FEIJAO EM SEMENTE KG ATACADO','FEIJAO AMARELO TIPO 1 SC 60 KG UN ATACADO','FEIJAO AMARELO TIPO 1 FD 30 KG UN ATACADO','FEIJAO AMARELO TIPO 2 SC 60 KG UN ATACADO','FEIJAO AMARELO TIPO 2 FD 30 KG UN ATACADO','FEIJAO AMARELO TIPO 3 FD 30 KG UN ATACADO','FEIJAO BRANCO TIPO 1 SC 60 KG UN ATACADO','FEIJAO BRANCO TIPO 1 FD 30 KG UN ATACADO','FEIJAO BRANCO TIPO 2 SC 60 KG UN ATACADO','FEIJAO BRANCO TIPO 2 FD 30 KG UN ATACADO','FEIJAO BRANCO TIPO 3 FD 30 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 1 SC 60 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 1 FD 30 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 2 SC 60 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 2 FD 30 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 3 FD 30 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 4 FD 30 KG UN ATACADO','FEIJAO CARIOQUINHA TIPO 5 FD 30 KG UN ATACADO','FEIJAO EMGOPA TIPO 1 SC 60 KG UN ATACADO','FEIJAO EMGOPA TIPO 1 FD 30 KG UN ATACADO','FEIJAO EMGOPA TIPO 2 SC 60 KG UN ATACADO','FEIJAO EMGOPA TIPO 2 FD 30 KG UN ATACADO','FEIJAO EMGOPA TIPO 3 FD 30 KG UN ATACADO','FEIJAO JALO TIPO 1 SC 60 KG UN ATACADO','FEIJAO JALO TIPO 1 FD 30 KG UN ATACADO','FEIJAO JALO TIPO 2 SC 60 KG UN ATACADO','FEIJAO JALO TIPO 2 FD 30 KG UN ATACADO','FEIJAO JALO TIPO 3 FD 30 KG UN ATACADO','FEIJAO PEROLA TIPO 1 SC 60 KG UN ATACADO','FEIJAO PEROLA TIPO 1 FD 30 KG UN ATACADO','FEIJAO PEROLA TIPO 2 SC 60 KG UN ATACADO','FEIJAO PEROLA TIPO 2 FD 30 KG UN ATACADO','FEIJAO PEROLA TIPO 3 FD 30 KG UN ATACADO','FEIJAO PRETO TIPO 1 SC 60 KG UN ATACADO','FEIJAO PRETO TIPO 1 FD 30 KG UN ATACADO','FEIJAO PRETO TIPO 2 SC 60 KG UN ATACADO','FEIJAO PRETO TIPO 2 FD 30 KG UN ATACADO','FEIJAO PRETO TIPO 3 FD 30 KG UN ATACADO','FEIJAO RAJADO TIPO 1 SC 60 KG UN ATACADO','FEIJAO RAJADO TIPO 1 FD 30 KG UN ATACADO','FEIJAO RAJADO TIPO 2 SC 60 KG UN ATACADO','FEIJAO RAJADO TIPO 2 FD 30 KG UN ATACADO','FEIJAO RAJADO TIPO 3 FD 30 KG UN ATACADO','FEIJAO ROSINHA TIPO 1 SC 60 KG UN ATACADO','FEIJAO ROSINHA TIPO 1 FD 30 KG UN ATACADO','FEIJAO ROSINHA TIPO 2 SC 60 KG UN ATACADO','FEIJAO ROSINHA TIPO 2 FD 30 KG UN ATACADO','FEIJAO ROSINHA TIPO 3 FD 30 KG UN ATACADO','FEIJAO ROXO TIPO 1 SC 60 KG UN ATACADO','FEIJAO ROXO TIPO 1 FD 30 KG UN ATACADO','FEIJAO ROXO TIPO 2 SC 60 KG UN ATACADO','FEIJAO ROXO TIPO 2 FD 30 KG UN ATACADO','FEIJAO ROXO TIPO 3 FD 30 KG UN ATACADO']}
 };
+/* LARANJA — 1º produto fora de grão. As operações abaixo terminam no código
+   CFOP e é por ele que a extensão acha a opção no portal, então o texto não
+   precisa ser idêntico. Já o NOME DO PRODUTO tem que bater com o do SEFAZ:
+   se a lista abaixo não tiver o que aparece no portal, use a última opção
+   "✏️ digitar" e cole o texto exato — ele fica salvo para as próximas notas. */
+FAV_SEFAZ.LARANJA={tipoop:[
+  'VENDA INTERNA LARANJA PRODUCAO PROPRIA - 5101',
+  'VENDA INTERNA LARANJA ADQUIRIDA DE TERCEIROS - 5102',
+  'VENDA INTERNA LARANJA PROD PROP ENTREGUE AO DEST - 5118',
+  'VENDA INTERNA LARANJA PROD PROPRIA ENTREGA FUTURA - 5116',
+  'TRANSFERENCIA INTERNA LARANJA PROD PROPRIA - 5151',
+  'REMESSA DE LARANJA PARA INDUSTRIALIZACAO ENCOMENDA - 5901',
+  'RETORNO LARANJA REMETIDA INDUSTRIALIZACAO - 1902',
+  'OUTRA SAIDA DE LARANJA - NF PARA EFEITO DE TRANSITO - 5949'
+],produto:[
+  'LARANJA KG PRODUTOR/EXTRATOR',
+  'LARANJA T PRODUTOR/EXTRATOR'
+]};
+
+/* Catálogo digitado pelo Adm. O SEFAZ tem centenas de produtos e a fazenda vai
+   entrando em produto novo (a laranja foi o primeiro fora de grão). Em vez de
+   depender de versão nova do app, o Adm cola o texto exato do portal e ele fica
+   guardado neste aparelho, aparecendo junto com as opções oficiais. */
+var OPT_DIGITAR='__DIGITAR__';
+var FAV_SEFAZ_EXTRA='fav-sefaz-extra-v1';
+function _sefazExtra(){ try{ return JSON.parse(localStorage.getItem(FAV_SEFAZ_EXTRA)||'{}'); }catch(e){ return {}; } }
+function _sefazExtraSalvar(m){ try{ localStorage.setItem(FAV_SEFAZ_EXTRA,JSON.stringify(m)); }catch(e){} }
+function _sefazExtraGrupo(g){ var m=_sefazExtra(); if(!m[g]) { m[g]={tipoop:[],produto:[]}; _sefazExtraSalvar(m); } }
+function _sefazExtraAdd(g,campo,valor){
+  var m=_sefazExtra();
+  if(!m[g]) m[g]={tipoop:[],produto:[]};
+  if(!m[g][campo]) m[g][campo]=[];
+  if(m[g][campo].indexOf(valor)<0) m[g][campo].push(valor);
+  _sefazExtraSalvar(m);
+}
+function _sefazGrupos(){
+  var g=Object.keys(FAV_SEFAZ), ex=_sefazExtra();
+  Object.keys(ex).forEach(function(k){ if(g.indexOf(k)<0) g.push(k); });
+  return g;
+}
+function _sefazLista(grupo,campo){
+  var ofi=(FAV_SEFAZ[grupo]&&FAV_SEFAZ[grupo][campo])||[];
+  var ex=((_sefazExtra()[grupo]||{})[campo])||[];
+  return ofi.concat(ex.filter(function(v){ return ofi.indexOf(v)<0; }));
+}
+function _optSefaz(sel,v,txt){ var o=document.createElement('option'); o.value=v; o.textContent=txt||v; sel.appendChild(o); }
+// Monta a lista de grupos (oficiais + os que o Adm criou)
+function favPreencherGrupos(){
+  var sel=document.getElementById('nc-grupo'); if(!sel) return;
+  var cur=sel.value;
+  sel.innerHTML='';
+  _optSefaz(sel,'','-- selecione o grupo --');
+  _sefazGrupos().forEach(function(g){ _optSefaz(sel,g); });
+  _optSefaz(sel,OPT_DIGITAR,'✏️ outro produto — digitar...');
+  if(cur&&cur!==OPT_DIGITAR) sel.value=cur;
+}
 function favPreencherTipoOp(){
-  var grupo=document.getElementById('nc-grupo').value;
+  var selG=document.getElementById('nc-grupo');
   var selOp=document.getElementById('nc-tipoop'); var selProd=document.getElementById('nc-produto');
+  if(selG.value===OPT_DIGITAR){
+    var novo=(prompt('Grupo do produto, como aparece no portal SEFAZ (ex.: LARANJA):','')||'').trim().toUpperCase();
+    if(!novo){ selG.value=''; }
+    else { _sefazExtraGrupo(novo); favPreencherGrupos(); selG.value=novo; toast('✅ Grupo '+novo+' criado neste aparelho'); }
+  }
+  var grupo=selG.value;
+  // guarda o que já estava escolhido — a lista é remontada ao digitar uma opção nova
+  var curOp=selOp.value===OPT_DIGITAR?'':selOp.value, curPr=selProd.value===OPT_DIGITAR?'':selProd.value;
   selOp.innerHTML=''; selProd.innerHTML='';
-  if(!grupo||!FAV_SEFAZ[grupo]){
+  if(!grupo){
     selOp.innerHTML='<option value="">-- escolha o grupo primeiro --</option>';
     selProd.innerHTML='<option value="">-- escolha o grupo primeiro --</option>'; return;
   }
-  var o0=document.createElement('option'); o0.value=''; o0.textContent='-- selecione --'; selOp.appendChild(o0);
-  FAV_SEFAZ[grupo].tipoop.forEach(function(t){var o=document.createElement('option');o.value=t;o.textContent=t;selOp.appendChild(o);});
-  var p0=document.createElement('option'); p0.value=''; p0.textContent='-- selecione --'; selProd.appendChild(p0);
-  FAV_SEFAZ[grupo].produto.forEach(function(p){var o=document.createElement('option');o.value=p;o.textContent=p;selProd.appendChild(o);});
+  _optSefaz(selOp,'','-- selecione --');
+  _sefazLista(grupo,'tipoop').forEach(function(t){ _optSefaz(selOp,t); });
+  _optSefaz(selOp,OPT_DIGITAR,'✏️ digitar o texto exato do SEFAZ...');
+  _optSefaz(selProd,'','-- selecione --');
+  _sefazLista(grupo,'produto').forEach(function(p){ _optSefaz(selProd,p); });
+  _optSefaz(selProd,OPT_DIGITAR,'✏️ digitar o texto exato do SEFAZ...');
+  if(curOp) selOp.value=curOp;
+  if(curPr) selProd.value=curPr;
+}
+// Escolheu "✏️ digitar": pede o texto, guarda no aparelho e já deixa selecionado
+function favDigitarSefaz(campo){
+  var sel=document.getElementById(campo==='tipoop'?'nc-tipoop':'nc-produto');
+  if(sel.value!==OPT_DIGITAR){ if(campo==='tipoop') favPreencherDispLegal(); return; }
+  var grupo=document.getElementById('nc-grupo').value;
+  var rot=campo==='tipoop'?'Tipo de Operação':'Produto';
+  var txt=(prompt('Cole aqui o '+rot+' exatamente como aparece no portal SEFAZ:','')||'').trim();
+  if(!txt){ sel.value=''; if(campo==='tipoop') favPreencherDispLegal(); return; }
+  _sefazExtraAdd(grupo,campo,txt);
+  favPreencherTipoOp();
+  sel.value=txt;
+  if(campo==='tipoop') favPreencherDispLegal();
+  toast('✅ '+rot+' salvo neste aparelho');
 }
 // ── Dispositivo Legal por código de Tipo de Operação (SOJA mapeado do SEFAZ) ──
 // Chave = código da operação (últimos 4 díg). Vendas (5101 etc) NÃO entram aqui = campo desabilitado.
@@ -3462,6 +3633,7 @@ function loadContratosNFADaPlanilha(){
 
 function rContratosNFA(){
   var el=document.getElementById('lst-nc'); if(!el) return;
+  favPreencherGrupos();          // inclui os grupos que o Adm criou (ex.: LARANJA)
   var adm=!!(usr && usr.nivel==='admin');
   if(!contratosNFA.length){el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:14px">Nenhum contrato NFA.<br>Cadastre acima ou toque ☁️ para carregar.</div>';return;}
   el.innerHTML=contratosNFA.map(function(c,i){
@@ -5738,7 +5910,7 @@ function pdfContrato(){
   const cargaTotal=fin.reduce((s,o)=>s+parseFloat(o.cargaLiquida||0),0);
   const brutoTotal=fin.reduce((s,o)=>s+parseFloat(o.pesoBruto||0),0);
   const ct=contratosCloud.find(c=>c.n===numCt);
-  const vol=ct?parseFloat(ct.vol)||0:0;
+  const vol=_volKgContrato(ct);
   const saldo=vol>0?vol-cargaTotal*1000:null;
   const pct=vol>0?Math.min(100,(cargaTotal*1000/vol*100)).toFixed(1):null;
   const emp=ct?(parseInt(ct.bal)===2?'Fazenda Espora':'Fazenda Água Viva'):'Fazenda Água Viva';
@@ -7209,6 +7381,9 @@ function _culturaIcon(c){
   if(c.indexOf('TRIGO')>=0) return '🌾';
   if(c.indexOf('ALGOD')>=0) return '☁️';
   if(c.indexOf('GIRASSOL')>=0) return '🌻';
+  if(c.indexOf('LARANJA')>=0) return '🍊';
+  if(c.indexOf('LIMAO')>=0||c.indexOf('LIMÃO')>=0) return '🍋';
+  if(c.indexOf('CANA')>=0) return '🎋';
   return '🌿';
 }
 
