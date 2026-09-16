@@ -965,6 +965,9 @@ body.dark .card{background:#1a2d22}
             <label>Emitente *</label>
             <select id="nc-emit" onchange="preencherOrigemEmitente()">
               <option value="JOVANE">Jovane Gatto Cossul</option>
+              <!-- 2ª inscrição do Jovane: mesma pessoa, IE diferente. A IE fica
+                   no rótulo porque é a única coisa que distingue as duas. -->
+              <option value="JOVANE2">Jovane Gatto Cossul — IE 001170997.00-06</option>
               <option value="JOAQUIM">Joaquim Gatto Cossul</option>
               <option value="TAIS">Taís Gatto Cossul</option>
               <option value="JOAO">João Germano Cossul</option>
@@ -1057,7 +1060,9 @@ body.dark .card{background:#1a2d22}
           </div>
         </div>
         <div class="r2">
-          <div class="f"><label>Origem — Município</label><input type="text" id="nc-origem-mun" list="lista-mun" autocomplete="off" placeholder="Escolha a UF e digite..."></div>
+          <div class="f"><label>Origem — Município</label><input type="text" id="nc-origem-mun" list="lista-mun" autocomplete="off" placeholder="Escolha a UF e digite...">
+            <div id="nc-origem-hint" style="display:none;font-size:10px;color:var(--a1);font-weight:600;margin-top:3px">Informe o município desta inscrição — ele vai na NFA como origem da mercadoria.</div>
+          </div>
         </div>
         <div class="r2">
           <div class="f">
@@ -1484,7 +1489,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v146"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v147"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3531,14 +3536,21 @@ function favMascaraCNPJ(el){
   else if(v.length>2) v=v.replace(/^(\d{2})(\d{0,3})/,'$1.$2');
   el.value=v;
 }
-// Origem da mercadoria conforme o emitente (sede de cada produtor)
+/* Origem da mercadoria conforme o emitente (sede de cada produtor).
+   Inscrição nova entra com o município EM BRANCO de propósito: IE diferente é
+   estabelecimento diferente, e chutar a sede de outro produtor colocaria uma
+   origem errada na nota sem ninguém perceber. Quem cadastra escolhe uma vez e
+   fica gravado no contrato. */
+var MUN_EMITENTE={ JOVANE:'Alvorada do Norte', JOVANE2:'', JOAQUIM:"Sítio d'Abadia", TAIS:"Sítio d'Abadia", JOAO:"Sítio d'Abadia" };
 function preencherOrigemEmitente(){
   var em=document.getElementById('nc-emit').value;
-  var mun = em==='JOVANE' ? 'Alvorada do Norte' : "Sítio d'Abadia";
+  var mun = MUN_EMITENTE[em]!==undefined ? MUN_EMITENTE[em] : "Sítio d'Abadia";
   var selUf=document.getElementById('nc-origem-uf');
   if(selUf){ selUf.value='GO'; carregarMunicipios('GO'); }
   var inMun=document.getElementById('nc-origem-mun');
   if(inMun) inMun.value=mun;
+  var hint=document.getElementById('nc-origem-hint');
+  if(hint) hint.style.display=mun?'none':'block';
 }
 
 /* ── Texto fiscal adicional do contrato ──
@@ -3681,7 +3693,8 @@ function abrirEditarContrato(idx){
     '</div></div>'+
     '<div style="padding:12px"><div class="card">'+
       '<div class="f"><label>Número do Contrato</label><input id="ec-id" value="'+esc(c.id)+'" readonly style="background:var(--bg);color:var(--ink2)"></div>'+
-      '<div class="f"><label>Emitente</label><select id="ec-emit" style="'+selSty+'">'+opt(['JOVANE','JOAQUIM','TAIS','JOAO'],c.emitente)+'</select></div>'+
+      '<div class="f"><label>Emitente</label><select id="ec-emit" style="'+selSty+'">'+opt(['JOVANE','JOVANE2','JOAQUIM','TAIS','JOAO'],c.emitente)+'</select>'+
+        '<div style="font-size:10px;color:var(--ink3);margin-top:3px">JOVANE2 = Jovane Gatto Cossul, inscrição IE 001170997.00-06</div></div>'+
       '<div class="f"><label>Tipo de Nota</label><select id="ec-tipo" style="'+selSty+'">'+opt(['NORMAL','GADO'],c.tipo_nota||'NORMAL')+'</select></div>'+
       '<div class="f"><label>Destinatário — Nome</label><input id="ec-nome" value="'+esc(c.destinatario_nome)+'" style="text-transform:uppercase"></div>'+
       '<div class="f"><label>CNPJ</label><input id="ec-cnpj" value="'+esc(c.destinatario_cnpj)+'"></div>'+
