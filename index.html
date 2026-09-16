@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v152"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v153"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1979,7 +1979,7 @@ async function wizLerDoc(input){
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,'ia-status-doc-exp','placa, município e estado')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-doc-exp','placa, município e estado')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -2048,7 +2048,7 @@ async function wizLerCNH(input){
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,'ia-status-cnh','nome e CPF')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-cnh','nome e CPF')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,tipo:'CNH',frame:{base64,mime}})});
     const j=await r.json();
@@ -2080,7 +2080,7 @@ async function wizLerTransportadora(input){
   iaStatus('ia-status-transp','load','🤖 IA lendo o documento da transportadora...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,'ia-status-transp','CNPJ e nome da transportadora')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-transp','CNPJ e nome da transportadora')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerTransportadora',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7682,14 +7682,21 @@ function fileToBase64IA(file, maxDim, qualidade){
   });
 }
 
-/* A IA lê IMAGEM. Com PDF anexado ela devolveria erro e o operador ficaria
-   sem saber por quê — então o app diz o que aconteceu e pede os campos à mão.
-   O arquivo já foi guardado antes desta checagem e vai para o Drive igual. */
-function _pdfNaoLido(mime, statusId, oque){
+/* PDF agora É lido: o backend manda o anexo como bloco "document" para a IA,
+   em vez de tentar passá-lo como imagem. Aqui só avisamos que a leitura está
+   rodando (PDF costuma demorar mais que foto) e barramos o que não caberia no
+   POST — arquivo grande falharia lá na frente, sem explicar o motivo. */
+var IA_MAX_B64=4500000;   // ~3,3 MB de arquivo
+function _pdfAvisoIA(mime, base64, statusId, oque){
   if(String(mime||'').indexOf('pdf')<0) return false;
-  var msg='📄 PDF anexado e guardado — a IA lê só foto. Preencha '+(oque||'os campos')+' à mão.';
-  if(statusId) iaStatus(statusId,'err',msg); else toast(msg);
-  return true;
+  if(String(base64||'').length>IA_MAX_B64){
+    var mb=Math.round(String(base64).length/1400000*10)/10;
+    var msg='📄 PDF de '+mb+' MB é grande demais para a leitura — foi guardado no Drive; preencha '+(oque||'os campos')+' à mão.';
+    if(statusId) iaStatus(statusId,'err',msg); else toast(msg);
+    return true;                       // barra só o que não caberia
+  }
+  if(statusId) iaStatus(statusId,'load','📄 Lendo o PDF com a IA...');
+  return false;                        // segue para a leitura
 }
 function iaStatus(id,tipo,msg){
   const el=document.getElementById(id);if(!el)return;
@@ -7744,7 +7751,7 @@ async function iaLerDisplay(campo,input){
   iaStatus(m.status,'load','🤖 IA lendo o display...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,m.status,'o peso')) return;
+    if(_pdfAvisoIA(mime,base64,m.status,'o peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],contexto:m.ctx+' — '+IA_CTX_BALANCA})});
     const j=await r.json();
@@ -7787,7 +7794,7 @@ async function iaLerDisplayRec(campo,input){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     _guardarFotoRec(_slot,base64,mime);
-    if(_pdfNaoLido(mime,statusId,'o peso')) return;
+    if(_pdfAvisoIA(mime,base64,statusId,'o peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
         contexto:(campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita')+' — '+IA_CTX_BALANCA})});
@@ -7838,7 +7845,7 @@ async function iaLerPlaca(input,campoId,statusId){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     if(campoId==='rec-placa') _guardarFotoRec('placa',base64,mime);
-    if(_pdfNaoLido(mime,sid,'a placa')) return;
+    if(_pdfAvisoIA(mime,base64,sid,'a placa')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerPlaca',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7865,7 +7872,7 @@ async function iaLerCNH(input) {
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,'ia-status-cnh','nome e CPF')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-cnh','nome e CPF')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7890,7 +7897,7 @@ async function iaLerDocExp(input) {
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
-    if(_pdfNaoLido(mime,'ia-status-doc-exp','placa, município e estado')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-doc-exp','placa, município e estado')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7971,7 +7978,7 @@ async function iaLerDocumentoRec(input){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     _guardarFotoRec('nf',base64,mime);
-    if(_pdfNaoLido(mime,'ia-status-doc-rec','placa, motorista e peso')) return;
+    if(_pdfAvisoIA(mime,base64,'ia-status-doc-rec','placa, motorista e peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();

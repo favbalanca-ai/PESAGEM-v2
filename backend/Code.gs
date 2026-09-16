@@ -1312,14 +1312,30 @@ var ANTHROPIC_KEY = PropertiesService.getScriptProperties().getProperty("ANTHROP
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 var MODELO_IA     = "claude-haiku-4-5-20251001";
 
+/* NF, CT-e e CRLV chegam em PDF, e a API não recebe PDF como imagem: o bloco
+   tem que ser "document". Sem isto o PDF só podia ser arquivado, não lido.
+   Imagem continua indo exatamente como antes. */
+function _blocoIA(frame){
+  var mime=s(frame&&frame.mime)||"image/jpeg";
+  if(mime.indexOf("pdf")>=0)
+    return {type:"document",source:{type:"base64",media_type:"application/pdf",data:frame.base64}};
+  return {type:"image",source:{type:"base64",media_type:mime,data:frame.base64}};
+}
+// Tamanho do anexo (o base64 cresce ~33%). Devolve "" quando cabe.
+function _tamIA(frame,rot){
+  var n=(frame&&frame.base64)?frame.base64.length:0;
+  if(n>4500000) return (rot||"Arquivo")+" muito grande ("+(Math.round(n/1400000*10)/10)+" MB) — reduza a foto ou use um PDF menor";
+  return "";
+}
+
 function lerDisplay(frames,contexto){
   if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
   if(!frames||!frames.length)return{ok:false,erro:"Nenhum frame enviado"};
   frames=frames.slice(0,3);
-  for(var fi=0;fi<frames.length;fi++){if(frames[fi]&&frames[fi].base64&&frames[fi].base64.length>3000000)return{ok:false,erro:"Imagem muito grande (frame "+(fi+1)+") — reduza a resolução da foto"};}
+  for(var fi=0;fi<frames.length;fi++){var _e=_tamIA(frames[fi],"Arquivo do frame "+(fi+1));if(_e)return{ok:false,erro:_e};}
   var prompt="Você é um sistema especializado em leitura de balanças de caminhão. A imagem pode ser de DOIS tipos:\n\n(A) DISPLAY DIGITAL (LED/LCD): leia o número diretamente. Alguns dígitos podem piscar/apagar (efeito estroboscópio) — use o valor mais frequente entre os frames.\n\n(B) BALANÇA MECÂNICA DE BRAÇO (romana), com 3 réguas/cursores deslizantes. Neste caso SOME as três leituras, olhando a linha/seta indicadora de cada cursor (não os números vizinhos):\n1) Cursor PRINCIPAL (janela/régua superior, números grandes): valor em MILHARES de kg -> multiplique por 1000 (ex.: 37 -> 37000).\n2) Cursor das CENTENAS (régua do meio, marcas 0,100,...,900): use o valor apontado (ex.: 100).\n3) Cursor das DEZENAS (régua de baixo, marcas 0,10,20,...,90): use o valor apontado (ex.: 20).\nPeso = (principal x 1000) + centenas + dezenas. Exemplos REAIS desta balança: (a) 37 + 100 + 20 = 37120 kg; (b) 30 + 600 + 30 = 30630 kg; (c) 26 + 500 + 0 = 26500 kg.\n\nCONTEXTO: "+s(contexto||"Balança agrícola, peso em kg")+"\n\nREGRAS:\n- Retorne APENAS JSON, sem texto adicional\n- Peso em kg, número inteiro positivo\n- Valores típicos: entre 3.000 kg e 80.000 kg\n- Se a leitura for incerta (cursor entre marcas, foto ruim), retorne confianca: baixa\n\nFORMATO DE RESPOSTA (JSON puro, sem markdown):\n{\"peso_kg\": 37120, \"confianca\": \"alta\", \"tipo\": \"mecanica\", \"leituras\": [37120], \"obs\": \"\"}";
   var content=[];var framesValidos=0;
-  frames.forEach(function(frame){if(!frame||!frame.base64)return;content.push({type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}});framesValidos++;});
+  frames.forEach(function(frame){if(!frame||!frame.base64)return;content.push(_blocoIA(frame));framesValidos++;});
   if(framesValidos===0)return{ok:false,erro:"Nenhum frame válido"};
   content.push({type:"text",text:prompt});
   var payload={model:MODELO_IA,max_tokens:256,messages:[{role:"user",content:content}]};
@@ -1337,7 +1353,7 @@ function lerPlaca(frame){
   if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
   if(!frame||!frame.base64)return{ok:false,erro:"Nenhuma imagem enviada"};
   var prompt="Leia a placa do veículo na imagem.\nRetorne APENAS JSON puro, sem texto adicional:\n{\"placa\": \"ABC1D23\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Formato Mercosul: 3 letras + 1 número + 1 letra + 2 números (ex: ABC1D23)\n- Formato antigo: 3 letras + 4 números (ex: ABC1234)\n- Se não conseguir ler, retorne placa: null e confianca: baixa\n- Retorne apenas a placa, sem hífen ou espaço";
-  var payload={model:MODELO_IA,max_tokens:128,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}},{type:"text",text:prompt}]}]};
+  var payload={model:MODELO_IA,max_tokens:128,messages:[{role:"user",content:[_blocoIA(frame),{type:"text",text:prompt}]}]};
   var resp;
   try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});}
   catch(e){return{ok:false,erro:"Erro de rede: "+e.message};}
@@ -1349,7 +1365,7 @@ function lerPlaca(frame){
 function lerDocumento(frame, tipo){
   if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
   if(!frame||!frame.base64)return{ok:false,erro:"Nenhuma imagem enviada"};
-  if(frame.base64.length>3000000)return{ok:false,erro:"Imagem muito grande — reduza a resolução da foto"};
+  var _e=_tamIA(frame,"Arquivo");if(_e)return{ok:false,erro:_e};
   var prompt;
   if(String(tipo||"").toUpperCase()==="CNH"){
     // Prompt específico para CNH (Carteira Nacional de Habilitação)
@@ -1357,7 +1373,7 @@ function lerDocumento(frame, tipo){
   }else{
     prompt="Analise este documento de transporte agrícola (Nota Fiscal, CT-e, CRLV, Romaneio ou similar).\nExtraia as informações disponíveis e retorne APENAS JSON puro:\n{\"placa\": \"ABC1D23\", \"motorista\": \"NOME COMPLETO\", \"cpf\": \"000.000.000-00\", \"municipio\": \"Nome da cidade\", \"estado\": \"UF\", \"produto\": \"Soja\", \"peso_kg\": 25000, \"numero_doc\": \"000001\", \"emitente\": \"Nome da empresa\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Retorne null para campos não encontrados\n- Nome do motorista em MAIÚSCULAS\n- PLACA: a placa brasileira tem 7 caracteres — padrao Mercosul (3 letras + 1 numero + 1 letra + 2 numeros, ex. RCA2J70) ou antigo (3 letras + 4 numeros, ex. ABC1234). Leia EXATAMENTE o campo rotulado PLACA. NUNCA confunda a placa com: numero do MOTOR, RENAVAM, CHASSI, CODIGO DE SEGURANCA DO CLA, numero do CRV, ou POTENCIA/CILINDRADA (ex. 510CV). Ex.: se o campo PLACA mostra RCA2J70, a placa e RCA2J70 (NAO invente algo como RO82510 juntando motor com potencia).\n- Se for um CRLV (documento do veiculo): a placa vem do campo PLACA e o municipio/estado vem do campo LOCAL, formato 'CIDADE UF'. O municipio e o NOME DA CIDADE (a parte ANTES da sigla de 2 letras), NUNCA o nome do estado. Leia o nome da cidade com ATENCAO letra a letra: muitas comecam com SAO, SANTA, SANTO ou RIO — nao troque uma pela outra; preserve apostrofos (D'). Ex.: LOCAL 'SAO JOAO D'ALIANCA GO' -> municipio \"Sao Joao d'Alianca\", estado 'GO' (NAO leia 'RIO JOAO O ALIANCA'). Ex.: LOCAL 'CABECEIRAS GO' -> municipio 'Cabeceiras', estado 'GO' (municipio NAO e 'Goias'). Nao invente palavras nem troque letras.\n- Em NF/CT-e: municipio = cidade de origem ou destino do transporte\n- Estado: sempre a sigla de 2 letras (ex: GO, DF, MT)\n- Produto: nome genérico (Soja, Milho, etc)\n- Peso em kg como número inteiro\n- Não invente dados — null se não encontrar";
   }
-  var payload={model:MODELO_IA,max_tokens:512,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}},{type:"text",text:prompt}]}]};
+  var payload={model:MODELO_IA,max_tokens:512,messages:[{role:"user",content:[_blocoIA(frame),{type:"text",text:prompt}]}]};
   var resp;
   try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});}
   catch(e){return{ok:false,erro:"Erro de rede: "+e.message};}
@@ -1383,9 +1399,9 @@ function _aviso(msg){ try{ SpreadsheetApp.getUi().alert(msg); }catch(e){ Logger.
 function lerTransportadora(frame){
   if(!ANTHROPIC_KEY)return{ok:false,erro:"ANTHROPIC_KEY não configurada"};
   if(!frame||!frame.base64)return{ok:false,erro:"Nenhuma imagem enviada"};
-  if(frame.base64.length>3000000)return{ok:false,erro:"Imagem muito grande — reduza a resolução da foto"};
+  var _e=_tamIA(frame,"Arquivo");if(_e)return{ok:false,erro:_e};
   var prompt="Analise este documento de uma transportadora (cartão CNPJ, comprovante de inscrição, CT-e ou nota de serviço de transporte).\nExtraia os dados da TRANSPORTADORA e retorne APENAS JSON puro:\n{\"cnpj\": \"00.000.000/0000-00\", \"razao_social\": \"RAZAO SOCIAL\", \"confianca\": \"alta\", \"obs\": \"\"}\n\nREGRAS:\n- Retorne null para campos não encontrados\n- CNPJ com pontuação (00.000.000/0000-00)\n- Razão social em MAIÚSCULAS, sem abreviar\n- Se houver mais de um CNPJ, use o da TRANSPORTADORA (prestadora do transporte), não o do destinatário/remetente\n- Não invente dados";
-  var payload={model:MODELO_IA,max_tokens:300,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:frame.mime||"image/jpeg",data:frame.base64}},{type:"text",text:prompt}]}]};
+  var payload={model:MODELO_IA,max_tokens:300,messages:[{role:"user",content:[_blocoIA(frame),{type:"text",text:prompt}]}]};
   var resp;
   try{resp=UrlFetchApp.fetch(ANTHROPIC_URL,{method:"post",headers:{"x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","content-type":"application/json"},payload:JSON.stringify(payload),muteHttpExceptions:true});}
   catch(e){return{ok:false,erro:"Erro de rede: "+e.message};}
