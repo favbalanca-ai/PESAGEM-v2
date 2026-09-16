@@ -17,8 +17,12 @@ var DRIVE_PASTA_NFA   = "<<<ID_DA_PASTA_NFA>>>";
 var FAV_WA_ESCRITORIO = "<<<DDI_DDD_NUMERO>>>";
 
 // CPF/IE são dados sensíveis — preencha no editor do Apps Script.
+// JOVANE2 é a 2ª inscrição do Jovane: MESMA pessoa (mesmo nome e CPF do
+// JOVANE), inscrição estadual diferente. Cada chave vira uma pasta própria no
+// arquivo fiscal do Drive, então as notas das duas inscrições não se misturam.
 var EMITENTES = {
   "JOVANE":  { nome: "<<<NOME EMITENTE 1>>>", ie: "<<<IE_1>>>", cpf: "<<<CPF_1>>>" },
+  "JOVANE2": { nome: "<<<NOME EMITENTE 1>>>", ie: "001170997.00-06", cpf: "<<<CPF_1>>>" },
   "JOAQUIM": { nome: "<<<NOME EMITENTE 2>>>", ie: "<<<IE_2>>>", cpf: "<<<CPF_2>>>" },
   "TAIS":    { nome: "<<<NOME EMITENTE 3>>>", ie: "<<<IE_3>>>", cpf: "<<<CPF_3>>>" },
   "JOAO":    { nome: "<<<NOME EMITENTE 4>>>", ie: "<<<IE_4>>>", cpf: "<<<CPF_4>>>" }
