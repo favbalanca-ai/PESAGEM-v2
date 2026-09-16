@@ -103,6 +103,10 @@ body[data-ia="off"] .ia-tag{color:var(--ink3)!important}
 .fb .fi{font-size:20px;display:block;margin-bottom:2px}
 .fb .fl{font-size:9px;font-weight:600;color:var(--ink3)}
 .fb.ok .fl{color:var(--g1)}
+/* Botão "buscar no arquivo" — fica POR CIMA do input invisível que cobre o
+   quadro da foto (.fb input tem inset:0), senão o toque abriria a câmera. */
+.fb-arq{position:relative;z-index:3;flex-shrink:0;border:1px solid var(--brd);background:var(--card);color:var(--ink2);border-radius:7px;padding:4px 7px;font-size:13px;line-height:1;cursor:pointer;font-family:'Inter',sans-serif}
+.fb-arq:active{background:var(--g3);border-color:var(--g1)}
 .fgrid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
 
 /* EIXOS */
@@ -1480,7 +1484,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v145"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v146"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -7460,7 +7464,91 @@ document.addEventListener('DOMContentLoaded', () => {
   const style = document.createElement('style');
   style.textContent = '.finput{width:100%;background:var(--bg);border:1.5px solid var(--brd);border-radius:10px;padding:10px 13px;font-size:14px;font-family:"Inter",sans-serif;color:var(--ink);outline:none}.finput:focus{border-color:var(--g1)}';
   document.head.appendChild(style);
+  ativarBotoesArquivo();
 });
+
+/* ═══ BUSCAR FOTO NO ARQUIVO ══════════════════════════════════════
+   Todo campo de foto tem capture="environment": no celular isso abre a câmera
+   direto, num toque só — que é o certo para quem está na balança com o caminhão
+   parado. O preço é que a galeria/arquivo some do caminho. Em vez de tirar o
+   capture e cobrar dois toques de todo mundo, cada campo ganha um 📁 do lado.
+   O arquivo escolhido é ENTREGUE NO MESMO input da câmera, então a leitura da
+   IA, a prévia e o envio pro Drive continuam funcionando sem saber a diferença.
+   ═══════════════════════════════════════════════════════════════ */
+var _arqAlvo=null;
+function buscarArquivoFoto(inp){
+  var g=document.getElementById('file-galeria');
+  if(!g){
+    g=document.createElement('input');
+    g.type='file'; g.accept='image/*'; g.id='file-galeria'; g.style.display='none';
+    g.onchange=function(){
+      var f=g.files&&g.files[0], alvo=_arqAlvo;
+      _arqAlvo=null;
+      if(!f||!alvo){ g.value=''; return; }
+      try{
+        var dt=new DataTransfer(); dt.items.add(f);
+        alvo.files=dt.files;
+      }catch(e){
+        g.value='';
+        toast('❌ Este navegador não deixa anexar arquivo aqui — use a câmera');
+        return;
+      }
+      g.value='';   // libera para escolher o MESMO arquivo de novo depois
+      // dispara o onchange do campo original (foto/IA/prévia rodam igualzinho)
+      alvo.dispatchEvent(new Event('change',{bubbles:true}));
+    };
+    document.body.appendChild(g);
+  }
+  _arqAlvo=inp;
+  g.click();
+}
+function _addBotaoArquivo(inp){
+  var lab=inp.closest('label'); if(!lab) return;
+  var quadro=lab.classList.contains('fb');
+  var onde=quadro?lab:lab.parentNode;
+  if(!onde) return;
+  if(quadro ? lab.querySelector('.fb-arq') : (lab.nextElementSibling&&lab.nextElementSibling.classList.contains('fb-arq'))) return;
+  var b=document.createElement('button');
+  b.type='button'; b.className='fb-arq'; b.textContent='📁';
+  b.title='Buscar no arquivo / galeria';
+  b.setAttribute('aria-label','Buscar foto no arquivo');
+  b.onclick=function(e){ e.preventDefault(); e.stopPropagation(); buscarArquivoFoto(inp); };
+  if(quadro){
+    // Quadro em coluna (Placa/Cam/Extra) é estreito: o botão vai no cantinho.
+    // Quadro em linha tem espaço de sobra: entra no fim, depois da tag 🤖.
+    if(getComputedStyle(lab).flexDirection==='column'){
+      b.style.cssText+=';position:absolute;top:2px;right:2px;font-size:11px;padding:3px 5px;border-radius:6px';
+    }else{
+      b.style.marginLeft='6px';
+    }
+    lab.appendChild(b);
+  }else{
+    // Rótulo que não é quadro de foto (ex.: a pastilha 🤖 da placa) — o botão
+    // fica DO LADO, para não virar um 📁 dentro da pastilha roxa.
+    b.style.marginLeft='0';
+    onde.insertBefore(b,lab.nextSibling);
+  }
+}
+function ativarBotoesArquivo(){
+  var l=document.querySelectorAll('input[type=file][capture]');
+  for(var i=0;i<l.length;i++) _addBotaoArquivo(l[i]);
+}
+/* Recepção e vários cards são montados na hora. Em vez de lembrar de chamar em
+   cada render, um observador põe o botão assim que o campo aparece na tela. */
+if(window.MutationObserver){
+  var _arqPend=false;
+  new MutationObserver(function(muts){
+    if(_arqPend) return;
+    var novo=false;
+    for(var i=0;i<muts.length&&!novo;i++){
+      var ad=muts[i].addedNodes;
+      for(var j=0;j<ad.length;j++) if(ad[j].nodeType===1){ novo=true; break; }
+    }
+    if(!novo) return;
+    _arqPend=true;
+    requestAnimationFrame(function(){ _arqPend=false; ativarBotoesArquivo(); });
+  }).observe(document.documentElement,{childList:true,subtree:true});
+}
 
 /* ═══════════════════════════════════════════════════════════════
    MÓDULO IA — Leitura de display, placa e documentos
