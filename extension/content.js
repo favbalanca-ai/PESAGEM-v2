@@ -353,7 +353,12 @@ function formatarDocumento(doc) {
 function normalizarTexto(t) {
   return String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[´`'’.]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ')
-    .replace(/\s+go$/i, '').replace(/\bd\s+/g, 'd').replace(/\s+/g, ' ').trim();
+    // Tira a UF do fim ("Formoso / MG" e "FORMOSO" viram a mesma coisa). Antes
+    // só tirava " GO", o que bastava enquanto tudo saía de Goiás — a 2ª
+    // propriedade do produtor fica em Formoso-MG e não casava com a lista.
+    // A limpeza vale para os DOIS lados da comparação, então continua simétrica.
+    .replace(/\s+(ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|ro|rr|rs|sc|se|sp|to)\s*$/, '')
+    .replace(/\bd\s+/g, 'd').replace(/\s+/g, ' ').trim();
 }
 
 function aguardarSefazLivre(timeout = 15000) {
