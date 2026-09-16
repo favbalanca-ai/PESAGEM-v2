@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v151"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v152"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1979,6 +1979,7 @@ async function wizLerDoc(input){
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,'ia-status-doc-exp','placa, município e estado')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -2047,6 +2048,7 @@ async function wizLerCNH(input){
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,'ia-status-cnh','nome e CPF')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,tipo:'CNH',frame:{base64,mime}})});
     const j=await r.json();
@@ -2078,6 +2080,7 @@ async function wizLerTransportadora(input){
   iaStatus('ia-status-transp','load','🤖 IA lendo o documento da transportadora...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,'ia-status-transp','CNPJ e nome da transportadora')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerTransportadora',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -3039,15 +3042,32 @@ function selBalancaContrato(n){
 }
 
 /* ══ FOTOS ════════════════════════════════════════════════════ */
+/* Os campos de foto aceitam PDF também: NF, CT-e e CRLV quase sempre chegam
+   por e-mail já em PDF, e antes só dava para fotografar a tela. O arquivo é
+   guardado e arquivado no Drive igual a uma foto — o que muda é que PDF não
+   tem miniatura e não passa pela leitura da IA (ela enxerga imagem). */
+function _ehPDF(v){
+  if(!v) return false;
+  if(typeof v==='object') return String(v.type||'').indexOf('pdf')>=0 || /\.pdf$/i.test(v.name||'');
+  return String(v).slice(0,40).indexOf('application/pdf')>=0;   // data URL
+}
+function _mimeDataURL(b64full){
+  var m=String(b64full||'').match(/^data:([^;,]+)/);
+  return m?m[1]:'image/jpeg';
+}
 function foto(inp,btnId,prevId,tipo,fiId,flId,lbl){
   const file=inp.files[0]; if(!file) return;
+  const pdf=_ehPDF(file);
   const r=new FileReader();
   r.onload=e=>{
     fotos[tipo]=e.target.result;
     document.getElementById(btnId).classList.add('ok');
-    document.getElementById(fiId).textContent='✅';
-    document.getElementById(flId).textContent=lbl;
-    if(prevId){const p=document.getElementById(prevId);if(p){p.src=e.target.result;p.style.display='block';}}
+    document.getElementById(fiId).textContent=pdf?'📄':'✅';
+    document.getElementById(flId).textContent=lbl+(pdf?' (PDF)':'');
+    // PDF não abre em <img> — mostrar o preview daria um ícone quebrado
+    if(prevId){const p=document.getElementById(prevId);if(p){
+      if(pdf){ p.style.display='none'; } else { p.src=e.target.result; p.style.display='block'; }
+    }}
   };
   r.readAsDataURL(file);
 }
@@ -4016,6 +4036,8 @@ function sendWAauto(o){
    original. Antes só existia onload: a foto que falhava travava o envio para
    sempre, sem erro nenhum, e junto travava a fila do Drive. */
 function comprimirImagem(b64full, callback){
+  // PDF não passa por canvas — vai inteiro para o Drive
+  if(_ehPDF(b64full)) return callback(b64full);
   var respondeu=false;
   var responder=function(v){ if(respondeu) return; respondeu=true; callback(v||b64full); };
   var img=new Image();
@@ -4098,7 +4120,7 @@ async function uploadFotosDrive(ordem){
       comprimirImagem(item.b64, async function(comprimida){
         try{
           var parts=comprimida.split(',');
-          var mime='image/jpeg';
+          var mime=_mimeDataURL(comprimida);   // PDF chega inteiro e vira TIPO.pdf no Drive
           var dados_b64=parts[1];
           var payload=JSON.stringify({
             acao:'salvarFoto',
@@ -4171,12 +4193,13 @@ async function uploadTicketDrive(ordem){
 
 function fotoPlaca(inp) {
   var file = inp.files[0]; if (!file) return;
+  var pdf = _ehPDF(file);
   var reader = new FileReader();
   reader.onload = function(e) {
     fotos['fpl'] = e.target.result;
     document.getElementById('fb-pl').classList.add('ok');
-    document.getElementById('fi-pl').textContent = '✅';
-    document.getElementById('fl-pl').textContent = 'Placa ✓';
+    document.getElementById('fi-pl').textContent = pdf ? '📄' : '✅';
+    document.getElementById('fl-pl').textContent = pdf ? 'Placa (PDF)' : 'Placa ✓';
     var box = document.getElementById('placa-ia');
     if(box) box.style.display = 'none';
   };
@@ -7534,7 +7557,8 @@ function buscarArquivoFoto(inp){
   var g=document.getElementById('file-galeria');
   if(!g){
     g=document.createElement('input');
-    g.type='file'; g.accept='image/*'; g.id='file-galeria'; g.style.display='none';
+    // Aceita PDF além de imagem: NF, CT-e e CRLV costumam chegar em PDF
+    g.type='file'; g.accept='image/*,application/pdf'; g.id='file-galeria'; g.style.display='none';
     g.onchange=function(){
       var f=g.files&&g.files[0], alvo=_arqAlvo;
       _arqAlvo=null;
@@ -7625,6 +7649,16 @@ function fileToBase64IA(file, maxDim, qualidade){
   qualidade = qualidade || 0.85;
   return new Promise((res, rej) => {
     const reader = new FileReader();
+    /* PDF não entra no canvas — antes caía no img.onerror e a promessa era
+       rejeitada. Na recepção isso PERDIA o arquivo, porque lá o anexo só é
+       guardado por este caminho. Agora volta cru, com o mime certo: quem
+       arquiva no Drive usa; quem chama a IA vê que é PDF e não tenta ler. */
+    if(_ehPDF(file)){
+      reader.onload = () => res({ base64: String(reader.result).split(',')[1], mime: 'application/pdf' });
+      reader.onerror = () => rej(new Error('Erro ao ler arquivo'));
+      reader.readAsDataURL(file);
+      return;
+    }
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
@@ -7648,6 +7682,15 @@ function fileToBase64IA(file, maxDim, qualidade){
   });
 }
 
+/* A IA lê IMAGEM. Com PDF anexado ela devolveria erro e o operador ficaria
+   sem saber por quê — então o app diz o que aconteceu e pede os campos à mão.
+   O arquivo já foi guardado antes desta checagem e vai para o Drive igual. */
+function _pdfNaoLido(mime, statusId, oque){
+  if(String(mime||'').indexOf('pdf')<0) return false;
+  var msg='📄 PDF anexado e guardado — a IA lê só foto. Preencha '+(oque||'os campos')+' à mão.';
+  if(statusId) iaStatus(statusId,'err',msg); else toast(msg);
+  return true;
+}
 function iaStatus(id,tipo,msg){
   const el=document.getElementById(id);if(!el)return;
   el.className='ia-status '+tipo;el.textContent=msg;
@@ -7701,6 +7744,7 @@ async function iaLerDisplay(campo,input){
   iaStatus(m.status,'load','🤖 IA lendo o display...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,m.status,'o peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],contexto:m.ctx+' — '+IA_CTX_BALANCA})});
     const j=await r.json();
@@ -7743,6 +7787,7 @@ async function iaLerDisplayRec(campo,input){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     _guardarFotoRec(_slot,base64,mime);
+    if(_pdfNaoLido(mime,statusId,'o peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDisplay',token:TOKEN,frames:[{base64,mime}],
         contexto:(campo==='tara'?'Tara do caminhão vazio — recepção de colheita':'Peso bruto — recepção de colheita')+' — '+IA_CTX_BALANCA})});
@@ -7793,6 +7838,7 @@ async function iaLerPlaca(input,campoId,statusId){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     if(campoId==='rec-placa') _guardarFotoRec('placa',base64,mime);
+    if(_pdfNaoLido(mime,sid,'a placa')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerPlaca',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7819,6 +7865,7 @@ async function iaLerCNH(input) {
   iaStatus('ia-status-cnh','load','🤖 IA lendo a CNH...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,'ia-status-cnh','nome e CPF')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7843,6 +7890,7 @@ async function iaLerDocExp(input) {
   iaStatus('ia-status-doc-exp','load','🤖 IA lendo o documento...');
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
+    if(_pdfNaoLido(mime,'ia-status-doc-exp','placa, município e estado')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
@@ -7923,6 +7971,7 @@ async function iaLerDocumentoRec(input){
   try{
     const {base64,mime}=await fileToBase64IA(input.files[0]);
     _guardarFotoRec('nf',base64,mime);
+    if(_pdfNaoLido(mime,'ia-status-doc-rec','placa, motorista e peso')) return;
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao:'lerDocumento',token:TOKEN,frame:{base64,mime}})});
     const j=await r.json();
