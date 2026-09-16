@@ -584,8 +584,28 @@ async function etapa_TipoNota(dados) {
   await wait(DELAY * 2);
 }
 
+/* O produtor tem DUAS propriedades: mesmo nome, mesmo CPF, inscrições estaduais
+   diferentes. Quem escolhe a inscrição é o login do portal, não o robô — e da
+   tela do emitente em diante nada mais denuncia o erro: a nota sai inteira,
+   bonita e pela inscrição errada, o que é problema fiscal para desfazer.
+   Por isso aqui a IE que está na tela é conferida com a do contrato antes de
+   seguir. Se o contrato vier sem IE (backend antigo), a conferência é pulada. */
+function _soDigitos(v){ return String(v == null ? '' : v).replace(/\D/g, ''); }
 async function etapa_Emitente(dados) {
-  atualizarStatus('Emitente: ' + (dados.emitente_nome || dados.emitente) + '. Continuando...');
+  const campoIE = [...document.querySelectorAll('input')]
+    .find(i => i.id && i.id.includes('inscricaoEstadualEmitente'));
+  const ieTela = campoIE ? _soDigitos(campoIE.value) : '';
+  const ieContrato = _soDigitos(dados.emitente_ie);
+  if (ieContrato && ieTela && ieContrato !== ieTela) {
+    atualizarStatus(
+      '⛔ <b>INSCRIÇÃO ERRADA — parei aqui.</b><br>' +
+      'O contrato é da IE <b>' + (dados.emitente_ie || '—') + '</b>, mas o portal está emitindo pela IE <b>' + campoIE.value + '</b>.<br>' +
+      'Saia do SEFAZ e entre pela inscrição certa (ou corrija o emitente do contrato no app). Depois clique "▶ Continuar IA".',
+      'erro');
+    return;
+  }
+  atualizarStatus('Emitente: ' + (dados.emitente_nome || dados.emitente) +
+    (ieTela ? ' · IE ' + campoIE.value + ' ✓' : '') + '. Continuando...');
   await wait(DELAY); await wait(400);
   await clicarBotao(['Continuar', 'Continuar >>', 'Próximo', 'Avançar']);
 }
