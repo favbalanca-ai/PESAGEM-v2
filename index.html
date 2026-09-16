@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v150"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v151"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -8512,9 +8512,19 @@ function _copiarFallback(txt,ok){
     document.body.appendChild(ta); ta.focus(); ta.select(); document.execCommand('copy'); document.body.removeChild(ta); ok&&ok(); }
   catch(e){ toast('Não foi possível copiar'); }
 }
-function _linhaCopia(label,val){
+function _linhaCopia(label,val,nota){
   if(val===undefined||val===null||String(val).trim()==='') return null;
   val=String(val);
+  // "nota" é instrução (o que marcar na tela), não dado para copiar — sem o 📋,
+  // senão o operador copia "Não" achando que é para colar em algum lugar.
+  if(nota){
+    const n=document.createElement('div');
+    n.style.cssText='padding:7px 0;border-bottom:.5px solid var(--brd)';
+    const lb=document.createElement('div'); lb.style.cssText='font-size:10px;color:var(--ink3)'; lb.textContent=label;
+    const vl=document.createElement('div'); vl.style.cssText='font-size:13px;font-weight:700;color:var(--g1);word-break:break-word'; vl.textContent=val;
+    n.appendChild(lb); n.appendChild(vl);
+    return n;
+  }
   const row=document.createElement('div');
   row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;padding:9px 0;border-bottom:.5px solid var(--brd);cursor:pointer';
   const left=document.createElement('div'); left.style.cssText='flex:1;min-width:0';
@@ -8529,8 +8539,91 @@ function _linhaCopia(label,val){
   return row;
 }
 // Lista ordenada de campos da NFA (compartilhada por exibir e "copiar tudo")
+/* Dados fiscais do produto NO SIARE. Não são os mesmos da SEFAZ-GO: lá o
+   produto é uma linha de catálogo pronta ("LARANJA KG PRODUTOR/EXTRATOR"), aqui
+   é NCM + grupo + descrição + tributação, cada um num campo. Os valores abaixo
+   foram lidos de uma NFA que o produtor já emitiu — não são chute. */
+var SIARE_PRODUTO={
+  LARANJA:{ncm:'08051000', grupo:'HORTIFRUTIGRANJEIROS', desc:'LARANJA IN NATURA',
+           origem:'Nacional', trib:'40', unid:'KG', especie:'A GRANEL', cfopFrete:'6356'}
+};
+// Nº da última NFA já emitida neste contrato — serve para o "Recuperar" do SIARE
+function _ultimaNFAContrato(ctId){
+  var num='';
+  (cloud||[]).forEach(function(o){
+    if(_mesmoContrato(o.numOrdem,ctId) && o.nfa_numero) num=String(o.nfa_numero);
+  });
+  return num;
+}
+/* Roteiro do SIARE, aba por aba, na ordem em que o formulário pede. Sem isto o
+   operador tem que lembrar de cabeça coisas que não estão em lugar nenhum — e
+   duas delas erram calado: a tela abre com "Tipo de NFA: ENTRADA" marcado
+   (venda é SAÍDA) e a circulação Interna/Interestadual depende do estado do
+   comprador, que só aparece DEPOIS, quando o SIARE busca o CNPJ. */
+function _nfaCamposSIARE(d){
+  const out=[];
+  const sec=(t)=>out.push({sec:t});
+  const add=(l,v)=>{ if(v!==undefined&&v!==null&&String(v).trim()!=='') out.push({l:l,v:String(v)}); };
+  const nota=(l,v)=>{ if(v) out.push({l:l,v:String(v),nota:true}); };   // o que MARCAR na tela
+  const p=(d.produtos&&d.produtos[0])||{};
+  const fx=SIARE_PRODUTO[_grupoKey(p.produto||'')]||null;
+  const kg=Number(d.peso_liquido_kg)||0;
+  const vu=Number(p.valor_unitario)||0;
+  const ult=_ultimaNFAContrato(d.contrato_id);
+  if(ult){
+    sec('SIARE · atalho');
+    add('Recuperar? → Sim · nº', ult);
+    nota('Para que serve','Recupera os dados da última nota deste contrato. Depois é só ajustar quantidade, valor, placa e data.');
+  }
+  sec('SIARE · Informações Básicas');
+  nota('Tipo de NFA','Saída — atenção: a tela abre marcada em ENTRADA');
+  nota('Tipo de Circulação','Interna se o comprador for de MG · Interestadual se for de outro estado');
+  nota('Natureza da Operação','VENDA');
+  nota('Finalidade da Emissão','NF-e normal');
+  nota('Suframa · Regime Especial','Não · Não');
+  sec('SIARE · Dados Iniciais');
+  const cfop=(String(p.tipo_operacao||'').match(/(\d{4})\s*$/)||[])[1]||'';
+  if(cfop) add('CFOP', cfop); else nota('CFOP','conferir — use o mesmo da última nota deste contrato');
+  add('Data Saída/Entrada', d.data_transporte);
+  nota('Venda para órgão Público','Não');
+  sec('SIARE · Remetente/Destinatário');
+  add('Remetente — Inscrição Estadual', d.emitente_ie);
+  add('Destinatário — CNPJ/CPF', d.destinatario_cnpj||d.destinatario_cpf);
+  add('Destinatário — Inscrição Estadual', d.destinatario_ie);
+  nota('Nome e endereço','preenchem sozinhos ao clicar PESQUISAR');
+  nota('Consumidor Final','Não');
+  nota('Destinatário','1 - Contribuinte ICMS');
+  add('Município de início do transporte', String(d.origem_mercadoria||'').split('/')[0].trim());
+  sec('SIARE · Dados Produtos/Serviços');
+  if(fx){
+    add('NCM', fx.ncm); add('Grupo', fx.grupo); add('Descrição do Produto', fx.desc);
+    nota('Origem · Tributação · Unid.', fx.origem+' · '+fx.trib+' · '+fx.unid);
+  }else{
+    nota('Produto','conferir NCM, grupo e descrição — este produto ainda não tem os dados de MG no app');
+  }
+  add('Quantidade', kg?String(kg).replace('.',','):'');
+  add('Valor Unit. R$', vu?vu.toFixed(4).replace('.',','):'');
+  if(kg&&vu) add('Valor Total R$', (kg*vu).toFixed(2).replace('.',','));
+  nota('Somar Frete ao Total da NFA','Não');
+  sec('SIARE · Transporte');
+  nota('Modalidade do Frete','Contratado · Já contratado: Sim');
+  nota('Frete por conta do', d.responsavel_frete||'Destinatário');
+  if(fx) add('CFOP do Frete', fx.cfopFrete);
+  add('Transportador — CNPJ/CPF', d.transportadora_cnpj);
+  add('Placa', d.placa);
+  add('UF do veículo', d.uf_veiculo);
+  add('Volumes — Quantidade', kg?String(kg).replace('.',','):'');
+  if(fx) add('Espécie', fx.especie);   // é campo de texto no SIARE, dá para colar
+  add('Peso Líquido', kg?String(kg).replace('.',','):'');
+  nota('Valor do Frete','informar na hora — o app não sabe o valor do frete');
+  sec('SIARE · Dados Adicionais');
+  add('Informações Complementares', d.info_complementar);
+  return out;
+}
 function _nfaCampos(d){
   const out=[]; const sec=(t)=>out.push({sec:t}); const add=(l,v)=>{ if(v!==undefined&&v!==null&&String(v).trim()!=='') out.push({l:l,v:String(v)}); };
+  // Portal sem robô (SIARE): o roteiro aba a aba vem primeiro, na ordem do form
+  if(!_portalEmitente(d&&d.emitente).robo) return _nfaCamposSIARE(d);
   sec('Destinatário');
   add('CNPJ/CPF', d.destinatario_cnpj||d.destinatario_cpf);
   add('Inscrição Estadual', d.destinatario_ie);
@@ -8584,7 +8677,7 @@ function abrirNFAManual(d){
   _nfaCampos(d).forEach(it=>{
     if(it.sec){ const h=document.createElement('div'); h.textContent=it.sec;
       h.style.cssText='font-size:11px;font-weight:700;color:var(--g1);margin:12px 0 2px;text-transform:uppercase;letter-spacing:.05em'; box.appendChild(h); }
-    else { const r=_linhaCopia(it.l,it.v); if(r) box.appendChild(r); }
+    else { const r=_linhaCopia(it.l,it.v,it.nota); if(r) box.appendChild(r); }
   });
   document.getElementById('modal-nfa-manual').classList.remove('hide');
 }
