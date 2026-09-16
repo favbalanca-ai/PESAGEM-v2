@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v149"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v150"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3559,10 +3559,30 @@ var ORIGEM_EMITENTE={
    copiar, e o número da nota volta pelo "Registrar NF" de sempre. */
 var PORTAL_NFA={
   GO:{nome:'SEFAZ-GO',      curto:'SEFAZ-GO', url:'https://nfw.sefaz.go.gov.br/nfw/view/TelaInicialNFA.jsf', robo:true},
-  MG:{nome:'SIARE (SEF-MG)',curto:'SIARE',    url:'https://www2.fazenda.mg.gov.br/sol/',                     robo:false}
+  /* No SIARE a NFA não sai por um caminho só: a laranja vai pela EMISSÃO
+     ESPECIAL (a de sindicato/cooperativa/produtor rural) e o resto pelo
+     Requerer NFA comum. Entrar pelo serviço errado é refazer o processo, então
+     o app já abre o link do serviço certo e ainda escreve o caminho do menu,
+     porque o link cai no login quando a sessão do certificado expirou. */
+  MG:{nome:'SIARE (SEF-MG)',curto:'SIARE',    url:'https://www2.fazenda.mg.gov.br/sol/',                     robo:false,
+    servicos:{
+      LARANJA:{rot:'Emissão Especial de NFA',
+               menu:'Nota Fiscal Avulsa → Emissão Especial de Nota Fiscal Avulsa',
+               url:'https://www2.fazenda.mg.gov.br/sol/ctrl/SOL/NFAE/SERVICO_076?ACAO=NOVO&SINDCOOPPRODRURAL=1'},
+      _:      {rot:'Requerer NFA',
+               menu:'Nota Fiscal Avulsa → Requerer Nota Fiscal Avulsa',
+               url:'https://www2.fazenda.mg.gov.br/sol/ctrl/SOL/NFAE/SERVICO_070?ACAO=NOVO'}
+    }}
 };
 function _ufEmitente(k){ var o=ORIGEM_EMITENTE[k]; return o&&o.uf?o.uf:'GO'; }
 function _portalEmitente(k){ return PORTAL_NFA[_ufEmitente(k)]||PORTAL_NFA.GO; }
+// Serviço do portal conforme o produto da nota (hoje só o SIARE tem essa divisão)
+function _servicoPortal(d){
+  var pt=_portalEmitente(d&&d.emitente);
+  if(!pt.servicos) return null;
+  var p=(d&&d.produtos&&d.produtos[0])||{};
+  return pt.servicos[_grupoKey(p.produto||'')]||pt.servicos._;
+}
 function preencherOrigemEmitente(){
   var em=document.getElementById('nc-emit').value;
   var o=ORIGEM_EMITENTE[em]||{uf:'GO',mun:"Sítio d'Abadia"};
@@ -8383,11 +8403,11 @@ function renderPreviaNFA(n){
   document.getElementById('nfa-prev-sub').textContent=(n.contrato_id||'')+' · '+new Date().toLocaleDateString('pt-BR');
   document.getElementById('nfa-prev-emit').textContent=n.emitente_nome||'—';
   // Avisa ANTES de clicar em emitir quando a nota não é do portal de Goiás
-  const _pt=_portalEmitente(n.emitente), _ln=document.getElementById('nfa-prev-portal-ln');
+  const _pt=_portalEmitente(n.emitente), _sv=_servicoPortal(n), _ln=document.getElementById('nfa-prev-portal-ln');
   if(_ln){
     _ln.style.display=_pt.robo?'none':'flex';
     const _el=document.getElementById('nfa-prev-portal');
-    if(_el) _el.textContent=_pt.nome+' — manual';
+    if(_el) _el.textContent=_pt.curto+(_sv?' · '+_sv.rot:'')+' — manual';
   }
   document.getElementById('nfa-prev-dest').textContent=n.destinatario_nome||'—';
   document.getElementById('nfa-prev-doc').textContent=n.destinatario_cnpj||n.destinatario_ie||'—';
@@ -8544,8 +8564,9 @@ function abrirNFAManual(d){
   // Cabeçalho diz de que portal é a nota — as duas inscrições do Jovane têm o
   // mesmo nome e o mesmo CPF, e só o estado muda onde a nota deve ser emitida.
   const portal=_portalEmitente(d&&d.emitente);
+  const serv=_servicoPortal(d);
   const btnP=document.getElementById('nfaman-btn-portal');
-  if(btnP) btnP.textContent='🌐 Abrir '+(portal.curto||portal.nome);
+  if(btnP) btnP.textContent='🌐 Abrir '+(serv?serv.rot:(portal.curto||portal.nome));
   const avi=document.getElementById('nfaman-portal');
   if(avi){
     if(portal.robo){ avi.style.display='none'; }
@@ -8553,8 +8574,9 @@ function abrirNFAManual(d){
       avi.style.display='block';
       avi.innerHTML='⚠️ Esta nota é da inscrição de <b>'+_ufEmitente(d&&d.emitente)+'</b>'+
         (d&&d.emitente_ie?' (IE '+d.emitente_ie+')':'')+
-        ' — emita no <b>'+portal.nome+'</b>, não na SEFAZ-GO. O robô não atende esse portal; '+
-        'depois de emitir, use <b>Registrar NF</b> no ticket para lançar o número.';
+        ' — emita no <b>'+portal.nome+'</b>, não na SEFAZ-GO.'+
+        (serv?'<br>Serviço: <b>'+serv.rot+'</b> · no menu: '+serv.menu:'')+
+        '<br>O robô não atende esse portal; depois de emitir, use <b>Registrar NF</b> no ticket para lançar o número.';
     }
   }
   const box=document.getElementById('nfaman-campos'); if(!box) return;
@@ -8578,7 +8600,8 @@ function copiarTudoNFA(){
 }
 function fecharNFAManual(){ document.getElementById('modal-nfa-manual').classList.add('hide'); }
 function abrirSefazManual(){
-  window.open(_portalEmitente(_nfaManualDados&&_nfaManualDados.emitente).url,'_blank');
+  var d=_nfaManualDados, serv=_servicoPortal(d);
+  window.open((serv&&serv.url)||_portalEmitente(d&&d.emitente).url,'_blank');
 }
 
 function iniciarPollingNFA(){
