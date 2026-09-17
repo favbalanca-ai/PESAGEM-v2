@@ -456,7 +456,6 @@ body.dark .card{background:#1a2d22}
     </div>
     <div class="hgrid">
       <div class="hb" onclick="irNova()"><div class="hi">📋</div><div class="ht">Nova Pesagem</div><div class="hs">Registrar entrada</div></div>
-      <div class="hb" onclick="irPrev()"><div class="hi">📅</div><div class="ht">Previstos</div><div class="hs" id="prev-s">Nenhum</div><div class="bcnt" id="prev-c">0</div></div>
       <div class="hb" onclick="irAg()"><div class="hi">⏳</div><div class="ht">Aguardando</div><div class="hs" id="ag-s">Nenhum</div><div class="bcnt" id="ag-c">0</div></div>
       <div class="hb" onclick="irHist()"><div class="hi">📊</div><div class="ht">Histórico</div><div class="hs">Todos os registros</div></div>
       <div class="hb" id="btn-admin" style="display:none" onclick="irOrdens()"><div class="hi">📝</div><div class="ht">Contratos</div><div class="hs">Cadastro</div></div>
@@ -736,37 +735,6 @@ body.dark .card{background:#1a2d22}
   <div class="pg" id="pg-ag">
     <button class="btn btnp" onclick="irNova()" style="margin-bottom:10px">➕ Nova pesagem</button>
     <div id="lst-ag"></div>
-  </div>
-
-  <!-- PREVISTOS — caminhão agendado, que ainda não chegou.
-       "Aguardando" é caminhão no pátio com a tara já pesada; este é o passo
-       anterior: o escritório deixa placa, motorista e contrato prontos e, na
-       chegada, o operador só confere e pesa. -->
-  <div class="pg" id="pg-prev">
-    <div class="card" style="margin-bottom:10px">
-      <div class="ct">📅 Agendar caminhão</div>
-      <div style="font-size:11px;color:var(--ink3);margin-bottom:9px;line-height:1.4">Deixe a carga pronta antes do caminhão chegar. Na balança o operador abre o previsto, confere e pesa a tara — sem digitar nada de novo.</div>
-      <div class="f"><label>Contrato *</label>
-        <select id="pv-oc" class="finput"><option value="">Selecione...</option></select>
-      </div>
-      <div class="r2">
-        <div class="f"><label>Placa *</label><input type="text" id="pv-placa" class="finput" placeholder="AAA-0000" style="text-transform:uppercase;font-family:'JetBrains Mono',monospace;font-weight:700"></div>
-        <div class="f"><label>Data prevista</label><input type="text" id="pv-data" class="finput" placeholder="dd/mm/aaaa"></div>
-      </div>
-      <div class="f"><label>Motorista *</label><input type="text" id="pv-mot" class="finput" placeholder="Nome completo" style="text-transform:uppercase"></div>
-      <div class="r2">
-        <div class="f"><label>CPF</label><input type="text" id="pv-cpf" class="finput" placeholder="000.000.000-00" maxlength="14" oninput="mcpf(this)"></div>
-        <div class="f"><label>UF</label><input type="text" id="pv-uf" class="finput" placeholder="GO" maxlength="2" style="text-transform:uppercase"></div>
-      </div>
-      <div class="f"><label>Município</label><input type="text" id="pv-mun" class="finput" placeholder="Cidade de origem"></div>
-      <div class="r2">
-        <div class="f"><label>CNPJ da transportadora</label><input type="text" id="pv-tcnpj" class="finput" placeholder="00.000.000/0000-00" maxlength="18" oninput="mcnpj(this)"></div>
-        <div class="f"><label>Transportadora</label><input type="text" id="pv-tnome" class="finput" placeholder="Razão social"></div>
-      </div>
-      <div class="f"><label>Observação</label><input type="text" id="pv-obs" class="finput" placeholder="Opcional"></div>
-      <button class="btn btnp" onclick="salvarPrevisto()">📅 Agendar</button>
-    </div>
-    <div id="lst-prev"></div>
   </div>
 
   <!-- PESO BRUTO -->
@@ -1524,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v154"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v155"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1892,7 +1860,6 @@ function _rerenderPg(id){
   try{
     if(id==='pg-home' && typeof updHome==='function') updHome();
     else if(id==='pg-ag' && typeof rAg==='function') rAg();
-    else if(id==='pg-prev' && typeof rPrev==='function') rPrev();
     else if(id==='pg-hist' && typeof rHist==='function') rHist();
   }catch(e){}
 }
@@ -1932,7 +1899,6 @@ function abrirConfigAdmin(){
 }
 function irNova(){
   fotos={}; _fotosDe=null; atual=null; utTara='kg'; utBruto='kg';
-  _previstoAberto=null;   // pesagem nova não está ligada a nenhum agendamento
   ['f-oc','f-pl','f-mt','f-cpf','f-tr','f-ob','f-mun','f-uf','f-transp-cnpj','f-transp-nome'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   // UF padrão GO (maioria das cargas é de Goiás) — agiliza e carrega a lista de municípios
   const ufNova=document.getElementById('f-uf');
@@ -4117,10 +4083,7 @@ async function uploadFotosDrive(ordem){
   const contrato=(ordem.numOrdem||'SEM-CONTRATO').replace(/[^a-zA-Z0-9.\-]/g,'');
   const data=(ordem.dataEntrada||new Date().toLocaleDateString('pt-BR')).replace(/\//g,'-');
   const placa=(ordem.placa||'SEM-PLACA').replace(/[^a-zA-Z0-9]/g,'');
-  // pasta única desta pesagem (fotos + ticket juntos). Quando a carga foi
-  // agendada antes, ela já tem pasta — reusar mantém documento e foto no MESMO
-  // lugar, mesmo que o caminhão chegue num dia diferente do agendado.
-  const pesagem=ordem.pastaPesagem||(data+'_'+placa);
+  const pesagem=data+'_'+placa; // pasta única desta pesagem (fotos + ticket juntos)
   const tipos={
     oc:'CONTRATO', fpl:'PLACA', cnh:'CNH', transp:'TRANSPORTADORA', cam:'CAMINHAO',
     ext:'EXTRA', fotaTara:'BALANCA-TARA', fotaTara2:'BALANCA-TARA-2',
@@ -4244,14 +4207,15 @@ function fotoPlaca(inp) {
 }
 function mcpf(el){let v=el.value.replace(/\D/g,'');if(v.length>3)v=v.slice(0,3)+'.'+v.slice(3);if(v.length>7)v=v.slice(0,7)+'.'+v.slice(7);if(v.length>11)v=v.slice(0,11)+'-'+v.slice(11,13);el.value=v.slice(0,14);}
 function mcnpj(el){let v=el.value.replace(/\D/g,'');if(v.length>2)v=v.slice(0,2)+'.'+v.slice(2);if(v.length>6)v=v.slice(0,6)+'.'+v.slice(6);if(v.length>10)v=v.slice(0,10)+'/'+v.slice(10);if(v.length>15)v=v.slice(0,15)+'-'+v.slice(15,17);el.value=v.slice(0,18);}
-/* Dois registros criados no MESMO segundo ganhavam o mesmo id — e como a
-   planilha ATUALIZA a linha quando o id já existe, o segundo apagava o
-   primeiro. Com um caminhão de cada vez quase nunca acontecia; agendando
-   vários de uma vez é garantido. O sufixo aleatório resolve sem mexer em
-   quem usa o id, que só compara o texto inteiro. */
+/* O id levava data+hora só até o SEGUNDO. Dois registros criados no mesmo
+   segundo saíam iguais — e, como a planilha atualiza a linha quando o id já
+   existe, o segundo apagava o primeiro sem deixar rastro. Acontece quando os
+   dois operadores registram tara ao mesmo tempo, um em cada balança. O sufixo
+   aleatório resolve sem mexer em quem usa o id, que só compara o texto inteiro
+   (os registros antigos seguem válidos). */
 function geraID(){
   const n=new Date(), p=v=>String(v).padStart(2,'0');
-  const rnd=Math.random().toString(36).slice(2,5).toUpperCase();
+  const rnd=Math.random().toString(36).slice(2,6).toUpperCase();
   return 'OS'+n.getFullYear()+p(n.getMonth()+1)+p(n.getDate())+p(n.getHours())+p(n.getMinutes())+p(n.getSeconds())+rnd;
 }
 
@@ -4277,9 +4241,7 @@ function salvar(){
   const now=new Date();
   const balNome=document.getElementById('f-balanca').value||'Balança 1 — Água Viva';
   const o={
-    // Veio de um agendamento? Mantém o id: a planilha ATUALIZA o registro do
-    // previsto em vez de abrir outra linha para a mesma carga.
-    id:(_previstoAberto&&_previstoAberto.id)||geraID(),
+    id:geraID(),
     dataEntrada:now.toLocaleDateString('pt-BR'),
     horaEntrada:now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}),
     numOrdem:oc, funcionario:fn, placa:pl, motorista:mt,
@@ -4298,13 +4260,7 @@ function salvar(){
     status:'Aguardando',
     pesoBruto:null, cargaLiquida:null, statusPeso:null, dataHoraFim:null, assinatura:null
   };
-  // pasta do Drive: se o agendamento já tinha uma (documentos chegaram antes),
-  // reusa — senão as fotos da balança cairiam em outra pasta da mesma carga
-  if(_previstoAberto&&_previstoAberto.pastaPesagem) o.pastaPesagem=_previstoAberto.pastaPesagem;
-  _previstoAberto=null;
-  const _iAnt=DB.ordens.findIndex(x=>x.id===o.id);
-  if(_iAnt>=0) DB.ordens[_iAnt]=o; else DB.ordens.push(o);
-  saveDB(); _refletirNoCloud(o);
+  DB.ordens.push(o); saveDB(); _refletirNoCloud(o);
   _fotosDe=o.id;
   enviar(o,'salvar');
   // Arquiva JÁ as fotos da entrada (placa, CNH, contrato, tara). Antes só subiam
@@ -4313,111 +4269,6 @@ function salvar(){
   _filaDrive(function(){ return uploadFotosDrive(o); });
   beep('ok'); // bip ao registrar tara
   atual=o; toast('✅ Tara registrada!'); updHome(); irAg();
-}
-
-/* ══ PREVISTOS ═════════════════════════════════════════════════
-   Caminhão agendado que ainda não chegou. "Aguardando" é outra coisa: lá o
-   caminhão já está no pátio com a tara pesada. O previsto nasce sem tara e
-   sem data de entrada — por isso não entra nas contas de "hoje" nem nos
-   relatórios, que olham sempre pesagem finalizada.
-   Quando o caminhão chega, o MESMO registro vira a pesagem (id preservado),
-   então não há dois lançamentos para a mesma carga na planilha. */
-var _previstoAberto=null;   // {id, pastaPesagem} do previsto sendo pesado agora
-function irPrev(){ showPg('pg-prev','📅 Previstos'); rPrev(); }
-function _previstos(){
-  var vistos={}, out=[];
-  [].concat(DB.ordens||[], (cloud||[])).forEach(function(o){
-    if(!o||o.status!=='Previsto') return;
-    if(vistos[o.id]) return; vistos[o.id]=1;
-    out.push(o);
-  });
-  return filtrarPorBalancaExp(out);
-}
-function rPrev(){
-  // seletor de contratos — só os liberados, como no resto do app
-  var sel=document.getElementById('pv-oc');
-  if(sel){
-    var cur=sel.value, adm=!!(usr&&usr.nivel==='admin');
-    var libs=(contratosCloud||[]).filter(function(c){ return adm || c.lib; });
-    sel.innerHTML='<option value="">Selecione...</option>'+libs.map(function(c){
-      return '<option value="'+String(c.n).replace(/"/g,'&quot;')+'">'+c.n+(c.p?' · '+c.p:'')+'</option>';
-    }).join('');
-    if(cur) sel.value=cur;
-  }
-  var el=document.getElementById('lst-prev'); if(!el) return;
-  var ls=_previstos();
-  if(!ls.length){ el.innerHTML='<div style="text-align:center;color:var(--ink3);padding:16px;font-size:12px">Nenhum caminhão agendado.</div>'; return; }
-  el.innerHTML=ls.map(function(o){
-    var ct=(contratosCloud||[]).find(function(x){ return _mesmoContrato(x.n,o.numOrdem); });
-    return '<div class="card" style="margin-bottom:8px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">'+
-        '<span style="font-weight:800;font-size:15px;font-family:\'JetBrains Mono\',monospace">'+(o.placa||'—')+'</span>'+
-        '<span style="font-size:11px;color:var(--ink3)">'+(o.dataEntrada?'📅 '+o.dataEntrada:'sem data')+'</span>'+
-      '</div>'+
-      '<div style="font-size:12px;color:var(--ink2);margin-top:3px">'+(o.motorista||'—')+(o.cpf?' · '+o.cpf:'')+'</div>'+
-      '<div style="font-size:11px;color:var(--ink3);margin-top:2px">🧾 '+(o.numOrdem||'—')+(ct&&ct.p?' · '+ct.p:'')+'</div>'+
-      (o.transpNome?'<div style="font-size:11px;color:var(--ink3)">🚚 '+o.transpNome+'</div>':'')+
-      (o.obs?'<div style="font-size:11px;color:var(--ink3);margin-top:2px">'+o.obs+'</div>':'')+
-      '<div style="display:flex;gap:6px;margin-top:9px">'+
-        '<button class="btn btnp" style="flex:1;margin:0;white-space:nowrap" onclick="abrirPrevisto(\''+o.id+'\')">🚚 Chegou — pesar</button>'+
-        '<button class="btn btns" style="flex:0 0 54px;width:54px;margin:0;padding:0" title="Cancelar agendamento" onclick="cancelarPrevisto(\''+o.id+'\')">✕</button>'+
-      '</div></div>';
-  }).join('');
-}
-function salvarPrevisto(){
-  var g=function(id){ var e=document.getElementById(id); return e?e.value.trim():''; };
-  var oc=g('pv-oc'), pl=g('pv-placa').toUpperCase(), mt=g('pv-mot').toUpperCase();
-  if(!oc){ toast('⚠️ Escolha o contrato'); return; }
-  if(!pl){ toast('⚠️ Informe a placa'); return; }
-  if(!mt){ toast('⚠️ Informe o motorista'); return; }
-  var ct=(contratosCloud||[]).find(function(x){ return _mesmoContrato(x.n,oc); });
-  var o={
-    id:geraID(),
-    /* A data prevista ocupa a coluna de data da planilha — assim o
-       agendamento sobrevive ao sync sem precisar de coluna nova. Quando o
-       caminhão chega, salvar() escreve a data real por cima. A hora fica
-       vazia: só existe hora de entrada quando o caminhão entra de verdade. */
-    dataEntrada:g('pv-data')||new Date().toLocaleDateString('pt-BR'), horaEntrada:'',
-    numOrdem:oc, placa:pl, motorista:mt, cpf:g('pv-cpf'),
-    municipio:g('pv-mun'), estado:g('pv-uf').toUpperCase(),
-    transpCnpj:g('pv-tcnpj'), transpNome:g('pv-tnome'),
-    obs:g('pv-obs'), funcionario:(usr?usr.nome:''),
-    balanca:(ct&&parseInt(ct.bal)===2)?'Balança 2 — Espora':'Balança 1 — Água Viva',
-    status:'Previsto',
-    tara:null, pesoBruto:null, cargaLiquida:null, statusPeso:null, dataHoraFim:null, assinatura:null
-  };
-  DB.ordens.push(o); saveDB(); _refletirNoCloud(o);
-  enviar(o,'salvar');
-  ['pv-placa','pv-mot','pv-cpf','pv-mun','pv-tcnpj','pv-tnome','pv-obs'].forEach(function(id){
-    var e=document.getElementById(id); if(e) e.value='';
-  });
-  toast('📅 '+pl+' agendado'); rPrev(); updHome();
-}
-function cancelarPrevisto(id){
-  var o=_previstos().find(function(x){ return x.id===id; });
-  if(!o) return;
-  if(!confirm('Cancelar o agendamento de '+(o.placa||'')+'?')) return;
-  o.status='Cancelado';
-  var i=DB.ordens.findIndex(function(x){ return x.id===id; });
-  if(i>=0) DB.ordens[i]=o; else DB.ordens.push(o);
-  saveDB(); _refletirNoCloud(o); enviar(o,'atualizar');
-  toast('Agendamento cancelado'); rPrev(); updHome();
-}
-/* Chegou: abre o cadastro já preenchido. O id do previsto vai junto para que a
-   pesagem ATUALIZE esse registro em vez de criar outro na planilha. */
-function abrirPrevisto(id){
-  var o=_previstos().find(function(x){ return x.id===id; });
-  if(!o){ toast('Previsto não encontrado'); return; }
-  irNova();                                  // zera tudo (e limpa _previstoAberto)
-  _previstoAberto={id:o.id, pastaPesagem:o.pastaPesagem||''};
-  var set=function(campo,val){ var e=document.getElementById(campo); if(e&&val) e.value=val; };
-  set('f-oc',o.numOrdem); set('f-pl',o.placa); set('f-mt',o.motorista); set('f-cpf',o.cpf);
-  set('f-mun',o.municipio); set('f-transp-cnpj',o.transpCnpj); set('f-transp-nome',o.transpNome);
-  set('f-ob',o.obs);
-  if(o.estado){ var uf=document.getElementById('f-uf'); if(uf){ uf.value=o.estado; carregarMunicipios(o.estado); set('f-mun',o.municipio); } }
-  // selecionarContrato aplica a balança do contrato e já chama infoOC
-  try{ if(o.numOrdem) selecionarContrato(o.numOrdem); }catch(e){ try{ infoOC(o.numOrdem); }catch(_){} }
-  toast('📅 '+(o.placa||'')+' — confira os dados e pese a tara');
 }
 
 /* ══ AGUARDANDO ════════════════════════════════════════════════ */
@@ -5082,8 +4933,6 @@ function rHist(){
   const hj=new Date().toLocaleDateString('pt-BR');
   const bal=usr?.bal||0;
   let ls=[...cloud].reverse();
-  // Agendamento não é pesagem: apareceria aqui como linha sem peso nenhum
-  ls=ls.filter(o=>o.status!=='Previsto' && o.status!=='Cancelado');
   // Filtro por balança do operador — admin vê tudo
   if(bal===1) ls=ls.filter(o=>!o.balanca||o.balanca.includes('Água Viva')||o.balanca.includes('1'));
   else if(bal===2) ls=ls.filter(o=>o.balanca&&(o.balanca.includes('Espora')||o.balanca.includes('2')));
@@ -5702,18 +5551,12 @@ function filtrarPorBalancaExp(lista){
 function updHome(){
   const hj=new Date().toLocaleDateString('pt-BR');
   const todos=filtrarPorBalancaExp(cloud.length>0?cloud:DB.ordens); // resumo da balança do operador; admin vê tudo
-  const dh=todos.filter(o=>o.dataEntrada===hj && o.status!=='Previsto' && o.status!=='Cancelado');
+  const dh=todos.filter(o=>o.dataEntrada===hj);
   const ag=todos.filter(o=>(o.status||'').toLowerCase().includes('aguardando'));
   const fn=todos.filter(o=>o.dataEntrada===hj&&(o.status||'').toLowerCase().includes('finalizado'));
   document.getElementById('mh').textContent=dh.length;
   document.getElementById('ma').textContent=ag.length;
   document.getElementById('mf').textContent=fn.length;
-  const pv=todos.filter(o=>o.status==='Previsto');
-  const ps=document.getElementById('prev-s'), pc=document.getElementById('prev-c');
-  if(ps&&pc){
-    if(pv.length>0){ ps.textContent=pv.length===1?'1 caminhão':pv.length+' caminhões'; pc.textContent=pv.length; pc.style.display='block'; }
-    else { ps.textContent='Nenhum'; pc.style.display='none'; }
-  }
   const s=document.getElementById('ag-s'),c=document.getElementById('ag-c');
   if(ag.length>0){s.textContent=ag.length===1?'1 caminhão':`${ag.length} caminhões`;c.textContent=ag.length;c.style.display='block';}
   else{s.textContent='Nenhum';c.style.display='none';}
