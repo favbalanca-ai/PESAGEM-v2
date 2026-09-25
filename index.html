@@ -1499,7 +1499,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v161"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v162"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1789,9 +1789,22 @@ function saveDB(){
   }
 }
 function saveCloud(){
+  /* slice(-200) e NÃO slice(0,200).
+     'cloud' vem da planilha em ordem crescente — a primeira posição é a pesagem
+     mais ANTIGA (por isso o histórico faz reverse() para mostrar) — e a pesagem
+     recém-feita entra no FIM, por _refletirNoCloud. Guardando os 200 PRIMEIROS,
+     o cache ficava com as mais antigas e a pesagem que acabou de ser feita era
+     justamente a primeira a ser descartada: bastava o app recarregar antes de
+     sincronizar para ela sumir da tela do aparelho.
+     O cache da recepção nunca teve esse problema porque lá o registro novo
+     entra com unshift, no começo da lista. */
   try{
-    localStorage.setItem('pcloud-v2',JSON.stringify(cloud.slice(0,200)));
-  }catch(e){}
+    localStorage.setItem('pcloud-v2',JSON.stringify(cloud.slice(-200)));
+  }catch(e){
+    // Silencioso era pior: com a memória cheia o cache parava de salvar e
+    // ninguém ficava sabendo — a pesagem sumia sem deixar rastro no Diagnóstico.
+    try{ addLog('⚠️ Não consegui guardar o cache de pesagens no aparelho: '+e.message,'erro'); }catch(_){}
+  }
 }
 /* Espelha no cache 'cloud' o ticket que acabou de mudar NESTE aparelho.
    A Home e o Histórico leem de 'cloud' (retrato da planilha); sem espelhar,
