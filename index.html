@@ -1154,9 +1154,6 @@ body.dark .card{background:#1a2d22}
     </div>
     <div class="card">
       <div class="ct">📋 Contratos — Saldo</div>
-      <select id="dash-filtro-prod" onchange="filtrarDashContratos()" style="width:100%;margin-bottom:9px;padding:9px 11px;border:1.5px solid var(--brd);border-radius:9px;background:var(--card);color:var(--ink);font-size:13px;font-family:'Inter',sans-serif">
-        <option value="">🌾 Todos os produtos</option>
-      </select>
       <div id="dash-contratos" style="font-size:12px"></div>
     </div>
     <div class="card">
@@ -1495,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v158"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v159"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2740,15 +2737,14 @@ function renderDashContratos(todos){
   // Saca só faz sentido em grão: contrato de fruta (laranja) mostra só o kg
   const emSc=p=>!p||_ehSacaProd(p);
   const qtd=(v,p)=>fkg(v)+' kg'+(emSc(p)?' ('+Math.round((v||0)/60).toLocaleString('pt-BR')+' sc)':'');
-  /* Filtro por produto: com contratos de milho, soja e laranja ao mesmo tempo,
-     a lista fica longa e quem está programando a semana quer olhar um produto
-     de cada vez. O filtro é por GRUPO (Milho e Milho Safrinha juntos). */
-  _preencherFiltroProduto();
-  const filtro=(document.getElementById('dash-filtro-prod')||{}).value||'';
-  let totalFalta=0;
-  let html='';
+  /* Contratos AGRUPADOS por produto. Misturados, a lista obriga a garimpar
+     "quanto falta de soja" contrato por contrato; agrupados, o subtotal do
+     produto já está no cabeçalho do grupo. Agrupa por GRUPO, então Milho e
+     Milho Safrinha ficam no mesmo bloco. */
+  const grupos={};
   contratosCloud.forEach(ct=>{
-    if(filtro && _grupoKey(ct.p)!==filtro) return;
+    const g=_grupoKey(ct.p)||'—';
+    if(!grupos[g]) grupos[g]={nome:(g==='—'?'Sem produto':g.charAt(0)+g.slice(1).toLowerCase()), produto:ct.p, falta:0, itens:[]};
     const vol=_volKgContrato(ct);
     const liga=o=>_mesmoContrato(o.numOrdem,ct.n);
     const entregues=todos.filter(o=>liga(o)&&(o.status||'').includes('Finalizado'))
@@ -2757,15 +2753,15 @@ function renderDashContratos(todos){
     // então não entra no entregue — mas quem planeja precisa saber que ele já
     // está no pátio comendo o saldo.
     const noPatio=todos.filter(o=>liga(o)&&(o.status||'').includes('Aguardando')).length;
-    // Contrato sem volume cadastrado NÃO some mais do relatório: aparece com o
+    // Contrato sem volume cadastrado NÃO some do relatório: aparece com o
     // entregue e um aviso, em vez de desaparecer sem explicação.
     if(!vol){
-      html+=`<div style="margin-bottom:10px">
+      grupos[g].itens.push(`<div style="margin-bottom:10px">
         <div style="display:flex;justify-content:space-between;font-weight:600;margin-bottom:3px">
           <span>${ct.n}</span><span style="color:var(--a1);font-size:11px">volume não informado</span>
         </div>
         <div style="font-size:10px;color:var(--ink3)">${fkg(entregues)} kg entregues · cadastre o Volume Total para ver o saldo</div>
-      </div>`;
+      </div>`);
       return;
     }
     const pct=Math.min(100,Math.round(entregues/vol*100));
@@ -2774,13 +2770,13 @@ function renderDashContratos(todos){
        "entregue / total" e a conta ficava na cabeça de quem lia — que é
        justamente o número usado para decidir quantos caminhões ainda chamar. */
     const falta=vol-entregues;
-    if(falta>0) totalFalta+=falta;
+    if(falta>0) grupos[g].falta+=falta;
     const linhaSaldo = falta>0
       ? `<span style="color:var(--g1);font-weight:800">${qtd(falta,ct.p)}</span> a carregar`
       : (falta<0
           ? `<span style="color:var(--r1);font-weight:800">${qtd(-falta,ct.p)}</span> acima do contrato`
           : `<span style="color:var(--ink2);font-weight:800">contrato concluído</span>`);
-    html+=`<div style="margin-bottom:10px">
+    grupos[g].itens.push(`<div style="margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;font-weight:600;margin-bottom:3px">
         <span>${ct.n}</span><span style="color:${cor}">${pct}%</span>
       </div>
@@ -2789,21 +2785,33 @@ function renderDashContratos(todos){
       </div>
       <div style="font-size:11px;margin-top:3px">${linhaSaldo}${noPatio?` <span style="color:var(--a1)">· ${noPatio} no pátio</span>`:''}</div>
       <div style="font-size:10px;color:var(--ink3)">${fkg(entregues)} kg entregues de ${fkg(vol)} kg</div>
-    </div>`;
+    </div>`);
+  });
+  // Produto com mais volume a carregar primeiro — é onde os caminhões precisam ir
+  const ordem=Object.keys(grupos).sort((a,b)=>grupos[b].falta-grupos[a].falta||grupos[a].nome.localeCompare(grupos[b].nome));
+  let totalFalta=0, html='';
+  ordem.forEach(g=>{
+    const gr=grupos[g];
+    totalFalta+=gr.falta;
+    const n=gr.itens.length;
+    html+=`<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;background:var(--g3);border-radius:8px;padding:6px 10px;margin-bottom:8px">
+      <span style="font-weight:800;font-size:13px">${g==='—'?'📄':_culturaIcon(g)} ${gr.nome}<span style="font-weight:400;font-size:10px;color:var(--ink3)"> · ${n} contrato${n>1?'s':''}</span></span>
+      <span style="font-size:12px;font-weight:800;color:var(--g1)">${gr.falta>0?qtd(gr.falta,gr.produto)+' a carregar':'—'}</span>
+    </div>
+    <div style="padding-left:2px">${gr.itens.join('')}</div>`;
   });
   // Quanto falta carregar somando todos os contratos — é o número que diz
   // quantos caminhões ainda precisam ser chamados no geral.
-  if(totalFalta>0){
-    html+=`<div style="background:var(--g3);border-radius:9px;padding:8px 11px;margin-top:2px;margin-bottom:8px;text-align:center">
-      <div style="font-size:11px;color:var(--ink2)">Falta carregar, somando os contratos</div>
-      <div style="font-size:15px;font-weight:800;color:var(--g1)">${fkg(totalFalta)} kg</div>
+  if(totalFalta>0 && ordem.length>1){
+    html+=`<div style="background:var(--g1);border-radius:9px;padding:8px 11px;margin-top:2px;margin-bottom:8px;text-align:center">
+      <div style="font-size:11px;color:#cfe8d8">Falta carregar, somando os produtos</div>
+      <div style="font-size:15px;font-weight:800;color:#fff">${fkg(totalFalta)} kg</div>
     </div>`;
   }
   // Pesagens cujo contrato não existe no cadastro (erro de digitação, contrato
   // não cadastrado): antes sumiam de todo relatório por contrato, caladas.
-  // Com filtro de produto ligado elas não entram — não têm produto para filtrar.
   const orfaos={};
-  if(!filtro) todos.forEach(o=>{
+  todos.forEach(o=>{
     const n=String(o.numOrdem||'').trim();
     if(!n) return;
     if(contratosCloud.some(ct=>_mesmoContrato(ct.n,n))) return;
@@ -2820,24 +2828,8 @@ function renderDashContratos(todos){
       <div style="font-size:10px;color:var(--ink3);margin-top:3px">Cadastre o contrato ou corrija o número no ticket (Histórico → abrir o ticket → ✏️ Editar) para ele entrar nos relatórios.</div>
     </div>`;
   }
-  el.innerHTML=html||'<p style="color:var(--ink3)">'+(filtro?'Nenhum contrato deste produto.':'Nenhum contrato cadastrado.')+'</p>';
+  el.innerHTML=html||'<p style="color:var(--ink3)">Nenhum contrato cadastrado.</p>';
 }
-/* Opções do filtro = os produtos que realmente têm contrato, montadas na hora.
-   Preserva a escolha do usuário entre um render e outro (o dashboard redesenha
-   sozinho quando chega sync). */
-function _preencherFiltroProduto(){
-  var sel=document.getElementById('dash-filtro-prod'); if(!sel) return;
-  var cur=sel.value, vistos={}, lista=[];
-  (contratosCloud||[]).forEach(function(c){
-    var g=_grupoKey(c.p); if(!g||vistos[g]) return;
-    vistos[g]=1; lista.push({g:g, nome:g.charAt(0)+g.slice(1).toLowerCase()});
-  });
-  lista.sort(function(a,b){ return a.nome.localeCompare(b.nome); });
-  sel.innerHTML='<option value="">🌾 Todos os produtos</option>'+
-    lista.map(function(p){ return '<option value="'+p.g+'">'+_culturaIcon(p.g)+' '+p.nome+'</option>'; }).join('');
-  if(cur && vistos[cur]) sel.value=cur;
-}
-function filtrarDashContratos(){ renderDashContratos([...cloud]); }
 
 function renderDashBalancas(todos){
   const el=document.getElementById('dash-balancas');
