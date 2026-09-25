@@ -337,7 +337,7 @@ body.dark .card{background:#1a2d22}
     <button class="lbtn" onclick="login()">Entrar →</button>
     <div class="lerr" id="l-err">Nome ou senha incorretos</div>
   </div>
-  <div style="font-size:10px;color:rgba(255,255,255,.2);margin-top:16px">v7.2</div>
+  <div style="font-size:10px;color:rgba(255,255,255,.2);margin-top:16px" id="login-ver">—</div>
 </div>
 
 
@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v159"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v160"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1621,6 +1621,11 @@ window.addEventListener('load',()=>{
     }).catch(err => console.warn('[App] SW não registrado:', err));
   }
   var _dv=document.getElementById('diag-ver'); if(_dv) _dv.textContent=APP_VER;
+  /* A tela de login mostrava "v7.2" escrito à mão, que nunca acompanhou o
+     APP_VER. Quando um aparelho fica preso numa versão velha de cache, é essa
+     a primeira tela que se olha — e ela mentia. Agora mostra a versão real,
+     sem precisar entrar no app para descobrir. */
+  var _lv=document.getElementById('login-ver'); if(_lv) _lv.textContent=APP_VER;
   window.addEventListener('online', ()=>{
     document.getElementById('offb').style.display='none';
     // Reconectou: dá nova chance aos itens que tinham falhado
