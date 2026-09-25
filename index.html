@@ -337,7 +337,14 @@ body.dark .card{background:#1a2d22}
     <button class="lbtn" onclick="login()">Entrar →</button>
     <div class="lerr" id="l-err">Nome ou senha incorretos</div>
   </div>
-  <div style="font-size:10px;color:rgba(255,255,255,.2);margin-top:16px" id="login-ver">—</div>
+  <!-- Diagnóstico acessível ANTES do login: quando o app de um funcionário não
+       sincroniza, muitas vezes nem dá para entrar — e é justamente aí que se
+       precisa ver a versão, a fila parada e testar o servidor. Também permite
+       conferir o aparelho sem pedir a senha dele. -->
+  <div style="margin-top:16px;display:flex;align-items:center;justify-content:center;gap:12px">
+    <span style="font-size:10px;color:rgba(255,255,255,.2)" id="login-ver">—</span>
+    <button onclick="irDiag()" style="background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);color:rgba(255,255,255,.65);padding:6px 12px;border-radius:8px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif">🔍 Diagnóstico</button>
+  </div>
 </div>
 
 
@@ -1492,7 +1499,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v160"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v161"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5463,7 +5470,13 @@ function reenviarTodos(){
 /* ── Tela de diagnóstico ─────────────────────────────────────── */
 let _diagTimer=null;
 function irDiag(){
-  document.getElementById('pg-diag').style.display='block';
+  const d=document.getElementById('pg-diag');
+  /* A tela de login fica em z-index 999. Sem subir acima disso, o Diagnóstico
+     abriria ATRÁS dela e o botão pareceria não fazer nada. */
+  const lg=document.getElementById('login');
+  const antesDoLogin = lg && getComputedStyle(lg).display!=='none';
+  d.style.zIndex = antesDoLogin ? '1000' : '150';
+  d.style.display='block';
   renderDiag();
   testarBackend();
   if(_diagTimer) clearInterval(_diagTimer);
