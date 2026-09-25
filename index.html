@@ -1492,7 +1492,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v156"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v157"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5911,6 +5911,61 @@ function pdfHistorico(){
   const agora=new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
   const nkg=v=>Math.round(v||0).toLocaleString('pt-BR');
 
+  /* ── Saldo dos contratos do período ──────────────────────────────
+     Atenção ao que é de cada conta: o ENTREGUE NO PERÍODO sai do filtro, mas o
+     SALDO tem que sair de TODAS as pesagens finalizadas (cloud). Calcular o
+     saldo só com o período daria um número errado e convincente — um contrato
+     antigo pareceria inteiro a carregar só porque o filtro começa depois. */
+  const ctsPeriodo={};
+  ls.forEach(o=>{
+    const n=String(o.numOrdem||'').trim(); if(!n) return;
+    const k=_ctKey(n); if(!k) return;
+    if(!ctsPeriodo[k]) ctsPeriodo[k]={nome:n, kgPeriodo:0};
+    if((o.status||'').includes('Finalizado')) ctsPeriodo[k].kgPeriodo+=parseFloat(o.cargaLiquida||0)*1000;
+  });
+  let faltaTot=0;
+  const linhasCt=Object.keys(ctsPeriodo).sort().map(k=>{
+    const r=ctsPeriodo[k];
+    const ct=(contratosCloud||[]).find(x=>_ctKey(x.n)===k);
+    const nome=ct?ct.n:r.nome;
+    const vol=ct?_volKgContrato(ct):0;
+    const entTot=(cloud||[]).filter(o=>_ctKey(o.numOrdem||'')===k && (o.status||'').includes('Finalizado'))
+                            .reduce((s,o)=>s+parseFloat(o.cargaLiquida||0)*1000,0);
+    let falta, txtFalta, cor='#1a5c45';
+    if(!ct)       { txtFalta='contrato não cadastrado'; cor='#a15c00'; }
+    else if(!vol) { txtFalta='volume não informado';    cor='#a15c00'; }
+    else {
+      falta=vol-entTot;
+      if(falta>0){ faltaTot+=falta; txtFalta=nkg(falta)+' kg'; }
+      else if(falta<0){ txtFalta=nkg(-falta)+' kg acima'; cor='#c0392b'; }
+      else { txtFalta='concluído'; cor='#666'; }
+    }
+    return `<tr>
+      <td style="padding:5px;font-family:monospace;font-weight:600">${nome}</td>
+      <td style="padding:5px;text-align:right;font-family:monospace">${nkg(r.kgPeriodo)}</td>
+      <td style="padding:5px;text-align:right;font-family:monospace;color:#666">${nkg(entTot)}</td>
+      <td style="padding:5px;text-align:right;font-family:monospace;color:#666">${vol?nkg(vol):'—'}</td>
+      <td style="padding:5px;text-align:right;font-family:monospace;font-weight:800;color:${cor}">${txtFalta}</td>
+    </tr>`;
+  }).join('');
+  const blocoContratos = linhasCt ? `
+    <div style="font-size:12px;font-weight:800;color:#1a5c45;margin:0 0 5px">Saldo dos contratos</div>
+    <table style="width:100%;border-collapse:collapse;font-size:10px;margin-bottom:14px">
+      <thead><tr style="background:#e8f5e9;color:#1a5c45">
+        <th style="padding:5px;text-align:left">Contrato</th>
+        <th style="padding:5px;text-align:right">No período</th>
+        <th style="padding:5px;text-align:right">Entregue total</th>
+        <th style="padding:5px;text-align:right">Volume</th>
+        <th style="padding:5px;text-align:right">Falta carregar</th>
+      </tr></thead>
+      <tbody>${linhasCt}</tbody>
+      ${faltaTot>0?`<tfoot><tr style="background:#f4faf4">
+        <td colspan="4" style="padding:6px 5px;font-weight:800;color:#1a5c45">FALTA CARREGAR</td>
+        <td style="padding:6px 5px;text-align:right;font-weight:800;color:#1a5c45;font-family:monospace;font-size:11px">${nkg(faltaTot)} kg</td>
+      </tr></tfoot>`:''}
+    </table>
+    <div style="font-size:9px;color:#888;margin:-10px 0 14px">Entregue total e saldo consideram todas as pesagens finalizadas do contrato, não só as do período.</div>` : '';
+
   // Do mais antigo para o mais novo (a tela mostra ao contrário)
   const linhas=[...ls].reverse().map((o,i)=>{
     const fim=(o.status||'').includes('Finalizado');
@@ -5936,7 +5991,7 @@ function pdfHistorico(){
       <div style="background:#1a5c45;border-radius:7px;padding:10px 12px;grid-column:span 3">
         <div style="font-size:9px;color:#a5d6a7;text-transform:uppercase;letter-spacing:.5px">Carga líquida do período</div>
         <div style="font-size:18px;font-weight:800;color:#fff">${nkg(kgTot)} kg</div>
-        <div style="font-size:11px;color:#a5d6a7">${(kgTot/1000).toFixed(3)} t · ${Math.round(kgTot/60).toLocaleString('pt-BR')} sacas</div>
+        <div style="font-size:11px;color:#a5d6a7">${(kgTot/1000).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})} t · ${Math.round(kgTot/60).toLocaleString('pt-BR')} sacas</div>
       </div>
       <div style="background:#f4faf4;border:1px solid #c8e6c9;border-radius:7px;padding:8px 10px">
         <div style="font-size:9px;color:#666;text-transform:uppercase">Pesagens</div>
@@ -5951,6 +6006,7 @@ function pdfHistorico(){
         <div style="font-size:15px;font-weight:800;color:#1a5c45">${comNF}<span style="font-size:10px;color:#888"> / ${fin.length}</span></div>
       </div>
     </div>
+    ${blocoContratos}
     <table style="width:100%;border-collapse:collapse;font-size:10px">
       <thead>
         <tr style="background:#1a5c45;color:#fff">
