@@ -370,6 +370,12 @@ body.dark .card{background:#1a2d22}
       <div id="check-exp" style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--brd);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0"></div>
     </div>
 
+    <div id="modo-ins" onclick="entrarModo('ins')" style="border:1.5px solid var(--brd);border-radius:12px;padding:14px;align-items:center;gap:12px;cursor:pointer;background:var(--card);display:none">
+      <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📦</div>
+      <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Receber insumos</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Nota do fornecedor → estoque de insumos</div></div>
+      <div id="check-ins" style="width:20px;height:20px;border-radius:50%;border:1.5px solid var(--brd);display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0"></div>
+    </div>
+
     <div id="modo-dash" onclick="entrarModo('dash')" style="border:1.5px solid var(--brd);border-radius:12px;padding:14px;display:flex;align-items:center;gap:12px;cursor:pointer;background:var(--card);display:none">
       <div style="width:44px;height:44px;border-radius:10px;background:var(--g3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">📊</div>
       <div style="flex:1"><div style="font-size:14px;font-weight:700;color:var(--ink)">Dashboard admin</div><div style="font-size:11px;color:var(--ink3);margin-top:2px">Visão consolidada · todas as balanças</div></div>
@@ -383,6 +389,20 @@ body.dark .card{background:#1a2d22}
       <div style="font-size:18px;color:var(--ink3);flex-shrink:0">›</div>
     </div>
   </div>
+</div>
+
+<!-- ══ MÓDULO RECEBER INSUMOS ══
+     Mostra a tela "Receber nota" do app PLANEJAMENTO-INSUMOS (mesmo site favbalanca-ai.github.io → mesmo
+     login no aparelho). Tudo (leitor do código de barras, conferência, pendências) é do Planejamento e grava
+     na planilha DELE; aqui é só a moldura. Só carrega quando a pessoa entra no módulo. -->
+<div id="pg-ins" style="display:none;position:fixed;inset:0;background:var(--bg);z-index:100;flex-direction:column">
+  <div class="top"><div class="top-in">
+    <h1 class="top-title">📦 Receber insumos</h1>
+    <button onclick="insRecarregar()" title="Recarregar" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">↻</button>
+    <button onclick="trocarModo()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 10px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">⇄ Modo</button>
+    <button onclick="logout()" style="background:rgba(255,255,255,.12);border:none;color:#fff;padding:4px 8px;border-radius:7px;font-size:10px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">Sair</button>
+  </div></div>
+  <iframe id="ins-frame" title="Receber insumos" allow="camera; clipboard-write" style="flex:1;width:100%;border:0;background:var(--bg)"></iframe>
 </div>
 
 <!-- ══ MÓDULO RECEPÇÃO (v2) ══ -->
@@ -1499,7 +1519,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v163"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v164"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -6359,7 +6379,7 @@ function imprimirPDF(){
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Variáveis globais v2 ── */
-let modoAtual = 'exp'; // 'rec' | 'exp' | 'dash'
+let modoAtual = 'exp'; // 'rec' | 'exp' | 'ins' | 'dash'
 let talhoes = [], safrasRec = [], cloudRec = [], estoqueCloud = {};
 let recAtual = null; // OS de recepção em andamento
 const U_PAD = 13, I_PAD = 1, SC_KG = 60;
@@ -6371,14 +6391,16 @@ function mostrarTelaMode() {
   const setVis = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? 'flex' : 'none'; };
   setVis('modo-rec',  mods.includes('rec'));
   setVis('modo-exp',  mods.includes('exp'));
+  setVis('modo-ins',  mods.includes('ins'));
   setVis('modo-dash', mods.includes('dash'));
   setVis('modo-func', usr && usr.nivel === 'admin');
   // Se houver só um módulo disponível, entra direto sem perguntar
-  const disp = ['rec','exp','dash'].filter(m => mods.includes(m));
+  const disp = ['rec','exp','ins','dash'].filter(m => mods.includes(m));
   if (disp.length === 1) { entrarModo(disp[0]); return; }
   document.getElementById('tela-modo').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
   document.getElementById('pg-rec-home').style.display = 'none';
+  document.getElementById('pg-ins').style.display = 'none';
   const nome = usr?.nome || '';
   const bal  = usr?.bal || 0;
   document.getElementById('modo-ola').textContent = `Olá, ${nome} 👋`;
@@ -6386,7 +6408,7 @@ function mostrarTelaMode() {
     bal === 1 ? 'Balança 1 · Água Viva' :
     bal === 2 ? 'Balança 2 · Espora' : 'Acesso · todas as balanças';
   // Resetar checks
-  ['rec','exp','dash'].forEach(m => {
+  ['rec','exp','ins','dash'].forEach(m => {
     const el = document.getElementById('modo-' + m);
     const ck = document.getElementById('check-' + m);
     if (!el || !ck) return;
@@ -6399,7 +6421,7 @@ function mostrarTelaMode() {
 }
 
 function selecionarModo(modo) {
-  ['rec','exp','dash'].forEach(m => {
+  ['rec','exp','ins','dash'].forEach(m => {
     const el = document.getElementById('modo-' + m);
     const ck = document.getElementById('check-' + m);
     if (!el || !ck) return;
@@ -6427,8 +6449,24 @@ function entrarModo(modo) {
   setTimeout(() => confirmarModo(), 180);
 }
 
+// endereço da tela Receber nota do app de Planejamento (mesmo site → mesmo login e mesma sincronização)
+const INS_URL = '../PLANEJAMENTO-INSUMOS/?embed=receber#/receber';
+function insAbrir() {
+  const f = document.getElementById('ins-frame');
+  if (f && !f.getAttribute('src')) f.setAttribute('src', INS_URL);   // só carrega na 1ª vez
+}
+function insRecarregar() { const f = document.getElementById('ins-frame'); if (f) f.setAttribute('src', INS_URL + '&t=' + Date.now()); }
+
 function confirmarModo() {
   document.getElementById('tela-modo').style.display = 'none';
+  document.getElementById('pg-ins').style.display = 'none';
+  if (modoAtual === 'ins') {
+    document.getElementById('pg-rec-home').style.display = 'none';
+    document.getElementById('app').style.display = 'none';
+    document.getElementById('pg-ins').style.display = 'flex';
+    insAbrir();
+    return;
+  }
   if (modoAtual === 'rec') {
     document.getElementById('pg-rec-home').style.display = 'block';
     document.getElementById('app').style.display = 'none';
@@ -8989,7 +9027,7 @@ try { PERMS = JSON.parse(localStorage.getItem('perms-v2') || '{}') || {}; } catc
 // Módulos efetivos do usuário (admin sempre tem acesso total)
 function modulosDe(u){
   if(!u) return [];
-  if(u.nivel === 'admin') return ['rec','exp','dash'];
+  if(u.nivel === 'admin') return ['rec','exp','ins','dash'];
   const p = PERMS[(u.email||'').toUpperCase()];
   if(p && Array.isArray(p.modulos) && p.modulos.length) return p.modulos.slice();
   return ['rec','exp']; // padrão: operador acessa Recepção e Expedição
@@ -9073,6 +9111,8 @@ function _cardFunc(u){
         <input type="checkbox" data-fn-mod="${em}" value="rec" ${mods.includes('rec')?'checked':''}> 📥 Recepção</label>
       <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
         <input type="checkbox" data-fn-mod="${em}" value="exp" ${mods.includes('exp')?'checked':''}> 📤 Expedição</label>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" data-fn-mod="${em}" value="ins" ${mods.includes('ins')?'checked':''}> 📦 Receber insumos</label>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
       <span style="font-size:12px;color:var(--ink3)">Balança</span>
