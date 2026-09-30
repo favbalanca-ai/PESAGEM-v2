@@ -1528,8 +1528,14 @@ body.dark .card{background:#1a2d22}
 <script>
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
-const TOKEN      = "fav2026v2";
-const APP_VER    = "v165"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+/* Era a chave fixa da planilha, escrita neste arquivo público: quem abrisse o
+   código-fonte tinha acesso total para ler e alterar tudo. Agora guarda a
+   SESSÃO que o servidor devolve no login — pessoal, assinada e com validade.
+   As dezenas de chamadas que mandam 'token: TOKEN' continuam escritas igual;
+   o que viaja nelas é que deixou de ser um segredo compartilhado. */
+let TOKEN = '';
+const SESS_KEY = 'psess-v2';
+const APP_VER    = "v166"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1607,25 +1613,29 @@ async function registrarBgSync() {
   }
 }
 
+/* Lista usada pela tela de Permissões. Nome, nível e balança não são
+   segredo. A SENHA saiu daqui: este arquivo é público no GitHub Pages e
+   trazia a senha de todos os funcionários e admins em texto puro. Quem
+   confere senha agora é o servidor (loginUsuario, no Apps Script). */
 const USERS = [
   // Admins — veem tudo consolidado
-  {email:"JOVANE",    pw:"2024", nome:"Jovane",    nivel:"admin", bal:0},
-  {email:"JOAQUIM",   pw:"2024", nome:"Joaquim",   nivel:"admin", bal:0},
-  {email:"TAIS",      pw:"2024", nome:"Tais",      nivel:"admin", bal:0},
-  {email:"ESCRITORIO",pw:"2024", nome:"Escritório",nivel:"admin", bal:0},
+  {email:"JOVANE", nome:"Jovane",    nivel:"admin", bal:0},
+  {email:"JOAQUIM", nome:"Joaquim",   nivel:"admin", bal:0},
+  {email:"TAIS", nome:"Tais",      nivel:"admin", bal:0},
+  {email:"ESCRITORIO", nome:"Escritório",nivel:"admin", bal:0},
   // Balança 1 — Água Viva
-  {email:"RAFAEL",    pw:"123",  nome:"Rafael",    nivel:"op",    bal:1},
-  {email:"DEYVID",    pw:"123",  nome:"Deyvid",    nivel:"op",    bal:1},
-  {email:"RUDIERIO",  pw:"123",  nome:"Rudierio",  nivel:"op",    bal:1},
-  {email:"ALDYNEY",   pw:"123",  nome:"Aldyney",   nivel:"op",    bal:1},
-  {email:"DEUSIMAR",  pw:"123",  nome:"Deusimar",  nivel:"op",    bal:1},
-  {email:"WATILA",    pw:"123",  nome:"Watila",    nivel:"op",    bal:1},
-  {email:"FLAVIO",    pw:"123",  nome:"Flavio",    nivel:"op",    bal:1},
-  {email:"MARCOS",    pw:"123",  nome:"Marcos",    nivel:"op",    bal:1},
+  {email:"RAFAEL",  nome:"Rafael",    nivel:"op",    bal:1},
+  {email:"DEYVID",  nome:"Deyvid",    nivel:"op",    bal:1},
+  {email:"RUDIERIO",  nome:"Rudierio",  nivel:"op",    bal:1},
+  {email:"ALDYNEY",  nome:"Aldyney",   nivel:"op",    bal:1},
+  {email:"DEUSIMAR",  nome:"Deusimar",  nivel:"op",    bal:1},
+  {email:"WATILA",  nome:"Watila",    nivel:"op",    bal:1},
+  {email:"FLAVIO",  nome:"Flavio",    nivel:"op",    bal:1},
+  {email:"MARCOS",  nome:"Marcos",    nivel:"op",    bal:1},
   // Balança 2 — Espora
-  {email:"FABRICIO",  pw:"123",  nome:"Fabricio",  nivel:"op",    bal:2},
-  {email:"FABIO",     pw:"123",  nome:"Fabio",     nivel:"op",    bal:2},
-  {email:"NILSON",    pw:"123",  nome:"Nilson",    nivel:"op",    bal:2},
+  {email:"FABRICIO",  nome:"Fabricio",  nivel:"op",    bal:2},
+  {email:"FABIO",  nome:"Fabio",     nivel:"op",    bal:2},
+  {email:"NILSON",  nome:"Nilson",    nivel:"op",    bal:2},
 ];
 
 /* ══ ESTADO ═══════════════════════════════════════════════════ */
@@ -1723,19 +1733,61 @@ async function forcarAtualizacao(){
 }
 
 /* ══ LOGIN ════════════════════════════════════════════════════ */
-function login(){
+/* ══ SESSÃO ════════════════════════════════════════════════════
+   Guardada no aparelho para (a) não pedir senha toda vez e (b) permitir entrar
+   sem internet — a balança trabalha offline. A senha nunca é guardada: fica só
+   o resumo SHA-256, que serve para conferir a digitada e não dá para voltar. */
+function _sessaoSalva(){ try{ return JSON.parse(localStorage.getItem(SESS_KEY)||'null'); }catch(e){ return null; } }
+function _guardarSessao(o){ try{ localStorage.setItem(SESS_KEY,JSON.stringify(o)); }catch(e){} }
+async function _resumoSenha(u,p){
+  try{
+    const b=new TextEncoder().encode(String(u).toUpperCase()+'|'+p);
+    const h=await crypto.subtle.digest('SHA-256',b);
+    return Array.from(new Uint8Array(h)).map(x=>x.toString(16).padStart(2,'0')).join('');
+  }catch(e){ return ''; }
+}
+async function login(){
   const em=document.getElementById('l-em').value.trim().toUpperCase();
   const pw=document.getElementById('l-pw').value;
   const er=document.getElementById('l-err');
   er.style.display='none';
   if(!em||!pw){er.textContent='Preencha nome e senha.';er.style.display='block';return;}
-  const u=USERS.find(x=>x.email.toUpperCase()===em&&x.pw===pw);
-  if(!u){er.textContent='❌ Nome ou senha incorretos.';er.style.display='block';return;}
-  usr=u; localStorage.setItem('pu',JSON.stringify(u)); openApp(u);
+  er.textContent='⏳ Entrando...'; er.style.display='block';
+  // 1) Quem confere a senha é o servidor
+  if(navigator.onLine && SHEETS_URL){
+    try{
+      const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({acao:'login',usuario:em,senha:pw})});
+      const j=JSON.parse(await r.text());
+      if(j.ok){
+        const u={email:j.usuario,nome:j.nome,nivel:j.nivel,bal:j.bal};
+        TOKEN=j.sessao;
+        _guardarSessao({sessao:j.sessao,expira:j.expira,u:u,verif:await _resumoSenha(em,pw)});
+        usr=u; localStorage.setItem('pu',JSON.stringify(u));
+        er.style.display='none'; openApp(u); return;
+      }
+      er.textContent='❌ '+(j.erro||'Nome ou senha incorretos'); er.style.display='block'; return;
+    }catch(e){ /* servidor fora do ar: tenta a sessão guardada, abaixo */ }
+  }
+  // 2) Sem servidor: vale a sessão deste aparelho, se a senha digitada bater
+  const sv=_sessaoSalva();
+  if(sv && sv.u && String(sv.u.email||'').toUpperCase()===em && Number(sv.expira)>Date.now()
+     && sv.verif && sv.verif===await _resumoSenha(em,pw)){
+    TOKEN=sv.sessao; usr=sv.u; localStorage.setItem('pu',JSON.stringify(sv.u));
+    er.style.display='none'; openApp(sv.u);
+    toast('📵 Sem internet — entrou com a sessão guardada neste aparelho');
+    return;
+  }
+  er.textContent = navigator.onLine
+    ? '❌ Não consegui falar com o servidor. Tente de novo.'
+    : '📵 Sem internet e sem sessão guardada aqui. Conecte uma vez para entrar neste aparelho.';
+  er.style.display='block';
 }
 function checkSess(){
-  const r=localStorage.getItem('pu');
-  if(r){const u=JSON.parse(r);const v=USERS.find(x=>x.email===u.email&&x.pw===u.pw);if(v){usr=v;openApp(v);return;}}
+  const sv=_sessaoSalva();
+  if(sv && sv.sessao && sv.u && Number(sv.expira)>Date.now()){
+    TOKEN=sv.sessao; usr=sv.u; openApp(sv.u); return;
+  }
   document.getElementById('login').classList.remove('h');
   document.getElementById('app').style.display='none';
 }
@@ -1798,7 +1850,7 @@ function openApp(u){
   updHome();
 }
 function logout(){
-  localStorage.removeItem('pu'); usr=null;
+  localStorage.removeItem('pu'); localStorage.removeItem(SESS_KEY); TOKEN=''; usr=null;
   document.getElementById('login').classList.remove('h');
   document.getElementById('app').style.display='none';
   document.getElementById('l-em').value='';
@@ -5269,6 +5321,7 @@ function addP(o,a){
   const item = idx>=0
     ? {...pend[idx], ordem:o, acao:a}
     : {id:o.id, ordem:o, acao:a, ts:Date.now(), tentativas:0, falhou:false};
+  item.sessao=TOKEN;   // o SW roda com o app fechado e não enxerga esta variável
   if(idx>=0) pend[idx]=item; else pend.push(item);
   saveDB();
   // Salvar no IndexedDB para o Service Worker acessar
