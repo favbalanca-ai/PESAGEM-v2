@@ -1,6 +1,6 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v165';
+const CACHE    = 'fav-v2-v166';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
@@ -101,7 +101,7 @@ async function syncBackground() {
       const r = await fetch(SHEETS_URL, {
         method: 'POST',
         headers: {'Content-Type': 'text/plain'},
-        body: JSON.stringify({acao: p.acao, ordem: p.ordem, token: TOKEN})
+        body: JSON.stringify({acao: p.acao, ordem: p.ordem, token: p.sessao || TOKEN})
       });
       const j = await r.json();
       if (j.ok) {
