@@ -1247,7 +1247,7 @@ function backupSemanal(){
     var shB=ss.getSheetByName("Backup_Info")||ss.insertSheet("Backup_Info");
     if(shB.getLastRow()<1)shB.appendRow(["Data","Nome","URL","Status","Obs"]);
     shB.appendRow([agora(),nome,copia.getUrl(),"OK","Backup automático semanal"]);
-    _limparBackupsAntigos(bp,12);return{ok:true,nome:nome};
+    _limparBackupsAntigos(bp,14);return{ok:true,nome:nome};   // ~2 semanas de cópias diárias
   }catch(e){return{ok:false,erro:e.message};}
 }
 function _limparBackupsAntigos(pasta,manter){
@@ -1258,7 +1258,9 @@ function _limparBackupsAntigos(pasta,manter){
 }
 function criarTriggerBackup(){
   ScriptApp.getProjectTriggers().forEach(function(t){if(t.getHandlerFunction()==="backupSemanal")ScriptApp.deleteTrigger(t);});
-  ScriptApp.newTrigger("backupSemanal").timeBased().everyWeeks(1).onWeekDay(ScriptApp.WeekDay.MONDAY).atHour(2).create();
+  // DIÁRIO, não semanal: com backup de segunda-feira, um problema na quarta
+  // custava três dias de pesagem. Mantém as 12 cópias mais recentes (~2 semanas).
+  ScriptApp.newTrigger("backupSemanal").timeBased().everyDays(1).atHour(2).create();
   SpreadsheetApp.getUi().alert("✅ Trigger criado! Backup toda segunda-feira às 02h.");
 }
 
