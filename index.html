@@ -1499,7 +1499,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v162"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v163"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5182,10 +5182,26 @@ function limparFilaInvalidos(){
 }
 
 /* ── Enviar para planilha (offline → fila com timestamp) ────── */
+/* Tira da fila o que já foi confirmado pela planilha */
+function _tirarDaFila(id){
+  if(!id) return;
+  pend=pend.filter(x=>!(x&&x.ordem&&x.ordem.id===id));
+  saveDB();
+  try{ idbRemover(id); }catch(e){}
+}
 async function enviar(ordem,acao){
   if(!SHEETS_URL){addLog('SHEETS_URL não configurado','erro');_ultimoErroEnvio='SHEETS_URL não configurado';return false;}
+  /* A FILA PRIMEIRO, o envio depois.
+     Ao finalizar, o app abre o WhatsApp 1,5 s adiante — e o Android congela ou
+     mata a página do navegador que foi para segundo plano, com o fetch ainda no
+     ar. Nesse caminho o trecho que colocava o item na fila ficava dentro do
+     catch e NUNCA rodava: a pesagem não chegava na planilha, não ficava na fila,
+     e nada tentava de novo. Do lado de quem pesou, tudo parecia certo, porque o
+     ticket e o WhatsApp saíram.
+     Gravando antes, o pior caso é enviar duas vezes — inofensivo, porque o
+     backend atualiza a linha existente pelo id em vez de criar outra. */
+  addP(ordem,acao);
   if(!navigator.onLine){
-    addP(ordem,acao);
     addLog(`Offline — ${ordem.placa||ordem.id} salvo na fila`,'aviso');
     _ultimoErroEnvio='sem internet';
     updS();return false;
@@ -5197,16 +5213,17 @@ async function enviar(ordem,acao){
     let j; try{ j=JSON.parse(txt); }
     catch(_){ throw new Error('resposta inválida do backend: '+txt.substring(0,120)); }
     if(j.ok){
+      _tirarDaFila(ordem.id);          // confirmado pela planilha: pode sair da fila
       addLog(`✅ ${acao} — ${ordem.placa||ordem.id}`,'ok');
       localStorage.setItem('syncUlt-v2',new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
       updS(); return true;
     } else {
-      addP(ordem,acao);
+      // continua na fila (foi gravado antes) — o sync tenta de novo
       addLog(`❌ API recusou — ${ordem.placa||ordem.id}: ${j.erro||'erro desconhecido'}`,'erro');
       _ultimoErroEnvio=j.erro||'a planilha recusou o envio';
     }
   }catch(e){
-    addP(ordem,acao);
+    // idem: já está na fila, então uma página morta no meio do envio não perde nada
     addLog(`❌ Falha de rede — ${ordem.placa||ordem.id}: ${e.message}`,'erro');
     _ultimoErroEnvio=e.message;
   }
@@ -7356,13 +7373,30 @@ function irTalhoes() {
 }
 
 /* ── Envio dedicado para recepção ── */
+/* Fila da recepção: grava por ID (upsert). Antes era push puro — cada falha
+   empilhava outra cópia da MESMA recepção e o sync tentava enviar repetido. */
+function _porNaFilaRec(rec){
+  try{
+    var f=JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+    var i=f.findIndex(function(x){ return x && x.id===rec.id; });
+    var item={id:rec.id, rec:rec, ts:Date.now()};
+    if(i>=0) f[i]=item; else f.push(item);
+    localStorage.setItem('pend-rec-v2', JSON.stringify(f));
+  }catch(e){ try{ addLog('⚠️ Não consegui guardar a recepção na fila: '+e.message,'erro'); }catch(_){} }
+}
+function _tirarDaFilaRec(id){
+  try{
+    var f=JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
+    localStorage.setItem('pend-rec-v2', JSON.stringify(f.filter(function(x){ return !(x && x.id===id); })));
+  }catch(e){}
+}
 async function enviarRec(rec) {
   if (!SHEETS_URL) { addLog('SHEETS_URL não configurado','erro'); return; }
+  // Fila primeiro, envio depois — mesmo motivo da expedição: se o aparelho
+  // congelar a página no meio do envio, o registro já está guardado e o sync
+  // tenta de novo. Reenviar é inofensivo: o backend atualiza pelo id.
+  _porNaFilaRec(rec);
   if (!navigator.onLine) {
-    // Salvar na fila de pendentes de recepção
-    const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
-    pendRec.push({id: rec.id, rec, ts: Date.now()});
-    localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
     toast('📥 Salvo offline — será enviado quando conectar');
     return;
   }
@@ -7374,18 +7408,13 @@ async function enviarRec(rec) {
     });
     const j = JSON.parse(await r.text());
     if (j.ok) {
+      _tirarDaFilaRec(rec.id);
       addLog(`✅ Recepção enviada — ${rec.placa}`,'ok');
     } else {
-      addLog(`❌ Recepção recusada — ${j.erro||'erro'}`,'erro');
-      const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
-      pendRec.push({id: rec.id, rec, ts: Date.now()});
-      localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
+      addLog(`❌ Recepção recusada — ${j.erro||'erro'}`,'erro');   // segue na fila
     }
   } catch(e) {
-    addLog(`❌ Falha de rede recepção — ${e.message}`,'erro');
-    const pendRec = JSON.parse(localStorage.getItem('pend-rec-v2')||'[]');
-    pendRec.push({id: rec.id, rec, ts: Date.now()});
-    localStorage.setItem('pend-rec-v2', JSON.stringify(pendRec));
+    addLog(`❌ Falha de rede recepção — ${e.message}`,'erro');     // segue na fila
   }
 }
 
