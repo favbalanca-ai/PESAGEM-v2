@@ -1290,6 +1290,16 @@ body.dark .card{background:#1a2d22}
     </div>
   </div>
 
+  <!-- Conferência: o que este aparelho finalizou × o que consta na planilha.
+       A fila só mostra o que o app SABE que não subiu. Isto pega o caso pior —
+       o envio que se perdeu sem deixar rastro (página morta no meio) — porque
+       compara contra o que a planilha realmente devolve. -->
+  <div class="card">
+    <div class="ct">🧾 Conferência com a planilha</div>
+    <div id="diag-confere" style="font-size:12px">Toque em conferir.</div>
+    <button onclick="conferirPesagens()" style="width:100%;margin-top:8px;background:var(--g1);border:none;color:#fff;padding:9px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🧾 Conferir pesagens deste aparelho</button>
+  </div>
+
   <!-- Pendentes com detalhe -->
   <div class="card">
     <div class="ct">⏳ Fila offline (<span id="diag-pend-count">0</span>)</div>
@@ -1519,7 +1529,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v164"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v165"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4760,6 +4770,7 @@ function finalizar(){
   atual.assinatura=prevImg&&prevImg.src&&prevImg.src.length>100?prevImg.src:sigC.toDataURL('image/png');
   atual.status='Finalizado';
   atual.dataHoraFim=now.toLocaleDateString('pt-BR')+' '+now.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  _registrarFinalizada(atual);   // caderninho local, para conferir com a planilha depois
   // Salvar assinatura no localStorage indexada pelo id (disponível em outros momentos)
   try{ localStorage.setItem('sig_'+atual.id, atual.assinatura); }catch(e){}
   // Guarda no ticket as fotos da balança tiradas agora (junto com as da entrada)
@@ -5539,6 +5550,59 @@ function irDiag(){
 function hideDiag(){
   document.getElementById('pg-diag').style.display='none';
   if(_diagTimer){ clearInterval(_diagTimer); _diagTimer=null; }
+}
+/* ══ CONFERÊNCIA COM A PLANILHA ════════════════════════════════
+   Um caderninho local do que ESTE aparelho finalizou. A fila de pendentes só
+   conhece o que o app sabe que não subiu; quando o envio morre no meio (a
+   página é encerrada pelo Android), não sobra nem fila nem erro — e a pesagem
+   some calada. Comparando o caderninho com o que a planilha devolve, isso
+   aparece, com um botão para reenviar. */
+var FIN_LOG='fin-log-v2';
+function _finLog(){ try{ return JSON.parse(localStorage.getItem(FIN_LOG)||'[]'); }catch(e){ return []; } }
+function _registrarFinalizada(o){
+  if(!o||!o.id) return;
+  try{
+    var l=_finLog().filter(function(x){ return x && x.id!==o.id; });
+    l.push({id:o.id, placa:o.placa||'', contrato:o.numOrdem||'', quando:o.dataHoraFim||'', kg:Math.round((o.cargaLiquida||0)*1000)});
+    if(l.length>300) l=l.slice(-300);      // não cresce para sempre
+    localStorage.setItem(FIN_LOG,JSON.stringify(l));
+  }catch(e){}
+}
+async function conferirPesagens(){
+  var el=document.getElementById('diag-confere'); if(!el) return;
+  var log=_finLog();
+  if(!log.length){ el.innerHTML='<span style="color:var(--ink3)">Nenhuma pesagem finalizada neste aparelho ainda.</span>'; return; }
+  el.innerHTML='⏳ Conferindo '+log.length+' pesagem(ns) com a planilha...';
+  if(!navigator.onLine){ el.innerHTML='<span style="color:var(--a1)">📵 Sem internet — conecte para conferir.</span>'; return; }
+  var ok=await carregarDaPlanilha();
+  if(!ok){ el.innerHTML='<span style="color:var(--r1)">❌ Não consegui ler a planilha agora. Tente de novo.</span>'; return; }
+  // Falta = não está na planilha, ou está lá sem o peso finalizado
+  var falta=log.filter(function(f){
+    var na=(cloud||[]).find(function(o){ return o.id===f.id; });
+    return !na || String(na.status||'').indexOf('Finalizado')<0;
+  });
+  if(!falta.length){
+    el.innerHTML='<span style="color:var(--g1);font-weight:700">✅ Todas as '+log.length+' pesagens deste aparelho estão na planilha.</span>';
+    return;
+  }
+  el.innerHTML='<div style="color:var(--r1);font-weight:700;margin-bottom:6px">⚠️ '+falta.length+' pesagem(ns) finalizada(s) aqui que NÃO estão completas na planilha</div>'+
+    falta.map(function(f){
+      return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:.5px solid var(--brd)">'+
+        '<div><div style="font-weight:700;font-family:\'JetBrains Mono\',monospace">'+(f.placa||f.id)+'</div>'+
+        '<div style="font-size:10px;color:var(--ink3)">'+(f.contrato||'—')+' · '+(f.quando||'')+' · '+(f.kg||0).toLocaleString('pt-BR')+' kg</div></div>'+
+        '<button onclick="reenviarFinalizada(\''+f.id+'\')" style="background:var(--g1);border:none;color:#fff;padding:7px 11px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;flex-shrink:0">Reenviar</button>'+
+      '</div>';
+    }).join('')+
+    '<div style="font-size:10px;color:var(--ink3);margin-top:6px">O reenvio usa o que está guardado neste aparelho. Se a pesagem não existir mais aqui, precisa ser refeita.</div>';
+}
+async function reenviarFinalizada(id){
+  var o=(DB.ordens||[]).find(function(x){ return x.id===id; })
+      || (pend.find(function(p){ return p.ordem&&p.ordem.id===id; })||{}).ordem;
+  if(!o){ toast('❌ Esta pesagem não está mais guardada neste aparelho'); return; }
+  toast('⏳ Reenviando '+(o.placa||id)+'...');
+  var ok=await enviar(o,'atualizar');
+  toast(ok?('✅ '+(o.placa||id)+' enviada'):('❌ Não subiu: '+(_ultimoErroEnvio||'erro')));
+  conferirPesagens();
 }
 function renderDiag(){
   // Status
