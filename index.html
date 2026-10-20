@@ -281,6 +281,26 @@ body.dark .card{background:#1a2d22}
   .print-divider { height:0; border-top:0.3mm dashed #999; margin:3mm 6mm; flex-shrink:0; align-self:stretch; }
   .print-col .pdf-page { box-shadow:none !important; max-width:100% !important; padding:0 !important; font-size:10.5px !important; margin:0 !important; }
   #print-rel-page { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  /* Compartilhar → Imprimir do navegador, sem passar pelos relatórios do app.
+     As telas sobrepostas (Dashboard, Diagnóstico) convivem com a Home por
+     baixo: sem esconder o resto, o Dashboard saía impresso com os cards da
+     Home ao lado. E como elas são position:fixed com rolagem própria, só a
+     primeira tela cabia no papel — o fim do conteúdo sumia. */
+  body[data-print="pg-dash"] > *:not(#pg-dash),
+  body[data-print="pg-diag"] > *:not(#pg-diag),
+  body[data-print="app"]     > *:not(#app) { display:none !important; }
+  /* Só normaliza posição e rolagem. NÃO mexe em display: a regra acima já
+     escondeu o que não vai no papel, e um display:block aqui reexibiria. */
+  body[data-print="pg-dash"] #pg-dash,
+  body[data-print="pg-diag"] #pg-diag,
+  body[data-print="app"] #app{
+    position:static !important; inset:auto !important; height:auto !important;
+    max-height:none !important; overflow:visible !important; z-index:auto !important;
+    padding:0 !important;
+  }
+  body[data-print] .bar, body[data-print] .top button,
+  body[data-print] #tst, body[data-print] #offb { display:none !important; }
+  body[data-print] .card { break-inside:avoid; page-break-inside:avoid; }
 }
 #offb{position:fixed;top:env(safe-area-inset-top,0);left:0;right:0;background:#e6a817;color:#fff;text-align:center;font-size:11px;font-weight:700;padding:5px;z-index:1000;display:none}
 #tst{position:fixed;bottom:88px;left:50%;transform:translateX(-50%) translateY(14px);background:var(--g4);color:#fff;padding:9px 18px;border-radius:30px;font-size:12px;font-weight:600;opacity:0;transition:all .25s;z-index:999;pointer-events:none;max-width:90vw;text-align:center}
@@ -1136,7 +1156,8 @@ body.dark .card{background:#1a2d22}
   <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
     <button onclick="hideDash()" style="background:var(--g3);border:none;color:var(--g1);width:34px;height:34px;border-radius:9px;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center">‹</button>
     <div style="font-size:15px;font-weight:700">📊 Dashboard Admin</div>
-    <button onclick="syncGeral()" style="margin-left:auto;background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
+    <button onclick="pdfDashboard()" style="margin-left:auto;background:var(--g3);border:none;color:var(--g1);padding:7px 11px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">📄 PDF</button>
+    <button onclick="syncGeral()" style="background:var(--g1);border:none;color:#fff;padding:7px 13px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer">🔄 Atualizar</button>
   </div>
 
   <!-- Tabs -->
@@ -1529,7 +1550,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v165"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v166"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5530,6 +5551,19 @@ function reenviarTodos(){
 
 /* ── Tela de diagnóstico ─────────────────────────────────────── */
 let _diagTimer=null;
+/* O navegador imprime a página como ela está; o app precisa dizer qual tela
+   está na frente para o CSS esconder as de trás. Os relatórios do app (ticket,
+   período, contrato) já têm classe própria e não passam por aqui. */
+function _marcarImpressao(){
+  if(document.body.classList.contains('print-ticket')||document.body.classList.contains('print-relatorio')) return;
+  var visivel=function(id){ var e=document.getElementById(id);
+    return e && getComputedStyle(e).display!=='none' && !e.classList.contains('h'); };
+  var topo = visivel('pg-diag') ? 'pg-diag' : visivel('pg-dash') ? 'pg-dash' : 'app';
+  document.body.setAttribute('data-print',topo);
+}
+function _limparImpressao(){ document.body.removeAttribute('data-print'); }
+window.addEventListener('beforeprint',_marcarImpressao);
+window.addEventListener('afterprint',_limparImpressao);
 function irDiag(){
   const d=document.getElementById('pg-diag');
   /* A tela de login fica em z-index 999. Sem subir acima disso, o Diagnóstico
@@ -6040,6 +6074,38 @@ function fecharPDF(){ document.getElementById('pdf-frame').classList.remove('sho
    Exporta exatamente o que está na tela — período, contrato, busca e
    status já aplicados — com os totais do recorte. */
 var _histFiltrado=[];
+/* PDF do Dashboard. Imprimir a tela pelo navegador funciona (ver data-print),
+   mas sai a interface do celular: botões, abas e colunas estreitas. Aqui vira
+   relatório de verdade, com os números do dia e o saldo por produto — que é o
+   que se manda para alguém. Reaproveita o bloco de contratos já montado na
+   tela, para o papel não divergir do que o Adm está vendo. */
+function pdfDashboard(){
+  const t=(id,p)=>{ const e=document.getElementById(id); return e?e.textContent.trim():(p||'—'); };
+  const blocoCt=(document.getElementById('dash-contratos')||{}).innerHTML||'';
+  if(!blocoCt){ toast('⚠️ Abra o Dashboard e espere carregar antes de gerar o PDF'); return; }
+  const emp=nomeEmpresa((cloud&&cloud[0])||{});
+  const agora=new Date().toLocaleDateString('pt-BR')+' '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  const cx=(rot,val)=>`<div style="background:#f4faf4;border:1px solid #c8e6c9;border-radius:7px;padding:8px 10px;text-align:center">
+      <div style="font-size:9px;color:#666;text-transform:uppercase;letter-spacing:.5px">${rot}</div>
+      <div style="font-size:16px;font-weight:800;color:#1a5c45">${val}</div></div>`;
+  const conteudo=`
+    <div style="text-align:center;border-bottom:2.5px solid #1a5c45;padding-bottom:10px;margin-bottom:14px">
+      <div style="font-size:20px;font-weight:800;color:#1a5c45">⚖️ ${emp}</div>
+      <div style="font-size:13px;font-weight:700;margin-top:3px">Posição dos contratos</div>
+      <div style="font-size:11px;color:#888;margin-top:3px">${agora}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+      ${cx('Pesagens hoje', t('dash-hoje','0'))}
+      ${cx('Aguardando', t('dash-ag','0'))}
+      ${cx('Carga do dia', t('dash-carga','0t'))}
+    </div>
+    <div style="font-size:12px;font-weight:800;color:#1a5c45;margin:0 0 6px">Contratos — saldo a carregar</div>
+    <div style="font-size:12px">${blocoCt}</div>
+    <div style="margin-top:12px;text-align:center;font-size:9px;color:#aaa;border-top:1px solid #eee;padding-top:6px">
+      Gerado em ${agora} · ${emp} · Sistema Balança FAV
+    </div>`;
+  _pdfRelatorio(conteudo,'Contratos-saldo-'+new Date().toLocaleDateString('pt-BR').replace(/\//g,'-')+'.pdf','Posição dos contratos');
+}
 function pdfHistorico(){
   const ls=_histFiltrado||[];
   if(!ls.length){ toast('⚠️ Nada filtrado para exportar'); return; }
@@ -6191,7 +6257,13 @@ async function _pdfRelatorio(html,nomeArq,titulo){
   alvo.innerHTML=html;
   // Fora da tela e com largura de A4: no celular, capturar na largura real
   // (~360px) espremeria a tabela toda.
-  cont.style.cssText='display:block;position:fixed;left:-10000px;top:0;width:794px;background:#fff;z-index:-1';
+  /* Paleta clara forçada AQUI, não no @media print: o PDF é gerado pelo
+     html2canvas, que desenha a mídia de TELA e ignora as regras de impressão.
+     Sem isto, com o app em modo escuro o relatório saía com fundo quase preto. */
+  cont.style.cssText='display:block;position:fixed;left:-10000px;top:0;width:794px;background:#fff;color:#0f1a14;z-index:-1;'+
+    '--g1:#1a5c45;--g2:#256b52;--g3:#e6f4ee;--g4:#0d2b1e;--r1:#c0392b;--r2:#fdecea;'+
+    '--a1:#92650a;--a2:#fef3c7;--ink:#0f1a14;--ink2:#3a5244;--ink3:#7a9e8a;'+
+    '--bg:#fff;--card:#fff;--brd:#c8dfd3;--sh:none';
   try{
     const canvas=await html2canvas(alvo,{scale:2,useCORS:true,backgroundColor:'#ffffff',logging:false});
     const img=canvas.toDataURL('image/jpeg',0.92);
