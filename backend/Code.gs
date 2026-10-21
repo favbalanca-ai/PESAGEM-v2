@@ -28,6 +28,63 @@ var EMITENTES = {
   "JOAO":    { nome: "<<<NOME EMITENTE 4>>>", ie: "<<<IE_4>>>", cpf: "<<<CPF_4>>>" }
 };
 
+/* ══ LOGIN E SESSÃO ════════════════════════════════════════════
+   O app é um arquivo público (GitHub Pages): tudo que estiver nele, qualquer
+   um lê — inclusive as senhas e a chave da planilha, que era o que havia até
+   aqui. Agora a conferência de senha acontece AQUI, e a lista de usuários fica
+   nas Propriedades do Script, que não são públicas nem versionadas.
+
+   Propriedade USUARIOS (Extensões → Apps Script → Configurações → Propriedades):
+   {"RAFAEL":{"senha":"trocar","nome":"Rafael","nivel":"op","bal":1},
+    "JOVANE":{"senha":"trocar","nome":"Jovane","nivel":"admin","bal":0}}
+   Propriedade SEGREDO_SESSAO: qualquer texto longo e aleatório.
+
+   A sessão devolvida é assinada (HMAC) e tem validade: o app guarda e manda em
+   vez da chave fixa. Ninguém consegue forjar uma sem o segredo. */
+var SESSAO_DIAS = 30;
+/* Enquanto houver aparelho em versão antiga, a chave fixa continua valendo.
+   Depois que TODOS aparecerem em v166+, troque para false: aí o token público
+   antigo deixa de abrir a planilha. */
+var PERMITIR_TOKEN_ANTIGO = true;
+
+function _props(){ return PropertiesService.getScriptProperties(); }
+function _usuarios(){ try{ return JSON.parse(_props().getProperty("USUARIOS")||"{}"); }catch(e){ return {}; } }
+function _segredoSessao(){ return _props().getProperty("SEGREDO_SESSAO")||TOKEN_SECRET; }
+function _assinarSessao(txt){
+  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(txt,_segredoSessao()));
+}
+function loginUsuario(usuario,senha){
+  var u=s(usuario).trim().toUpperCase();
+  var lista=_usuarios();
+  if(!u) return {ok:false,erro:"Informe o usuário"};
+  var chaves=Object.keys(lista);
+  if(!chaves.length) return {ok:false,erro:"Nenhum usuário cadastrado no servidor — configure a propriedade USUARIOS no Apps Script"};
+  var us=lista[u];
+  if(!us || String(us.senha)!==String(senha)) return {ok:false,erro:"Usuário ou senha incorretos"};
+  if(us.ativo===false) return {ok:false,erro:"Usuário desativado"};
+  var exp=new Date().getTime()+SESSAO_DIAS*86400000;
+  var corpo=u+"|"+exp;
+  return {ok:true, sessao:corpo+"|"+_assinarSessao(corpo), expira:exp,
+          usuario:u, nome:s(us.nome)||u, nivel:s(us.nivel)||"op", bal:n(us.bal)||0,
+          perm:us.perm||null};
+}
+// Devolve o usuário da sessão, ou null se for inválida/vencida/adulterada
+function _usuarioDaSessao(t){
+  var p=s(t).split("|");
+  if(p.length!==3) return null;
+  if(_assinarSessao(p[0]+"|"+p[1])!==p[2]) return null;
+  if(Number(p[1])<new Date().getTime()) return null;
+  return p[0];
+}
+/* O app manda a sessão no MESMO campo 'token' que já usava — assim nenhuma das
+   dezenas de chamadas precisou mudar, e aparelho velho segue funcionando. */
+function _autorizado(d){
+  var t=s(d.sessao||d.token);
+  if(_usuarioDaSessao(t)) return true;
+  if(PERMITIR_TOKEN_ANTIGO && t===TOKEN_SECRET) return true;
+  return false;
+}
+
 // ── Helpers ──────────────────────────────────────────────────
 function resposta(obj){return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);}
 function s(v){return v!=null?String(v):"";}
@@ -63,8 +120,14 @@ function doPost(e){
     // NFA: processamento pós-emissão (sem token — vem da extensão Chrome)
     if(d.action==="processarNFA") return resposta(processarNFA(d));
 
+    // Login: é o que ENTREGA a sessão, então não pode exigir sessão
+    if(d.acao==="login") return resposta(loginUsuario(d.usuario,d.senha));
+    // Ping: só diz que o servidor respondeu. Liberado para o Diagnóstico
+    // funcionar na tela de login, antes de existir sessão.
+    if(d.acao==="ping")  return resposta({ok:true,msg:"online",ts:agora()});
+
     // Rotas autenticadas
-    if(d.token!==TOKEN_SECRET)return resposta({ok:false,erro:"Token invalido"});
+    if(!_autorizado(d))return resposta({ok:false,erro:"Sessão inválida ou expirada — entre de novo no app"});
     if(d.acao==="salvar")             return resposta(salvarPesagem(d.ordem));
     if(d.acao==="atualizar")          return resposta(atualizarPesagem(d.ordem));
     if(d.acao==="listar")             return resposta(listarPesagens());
@@ -89,7 +152,6 @@ function doPost(e){
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
-    if(d.acao==="ping")               return resposta({ok:true,msg:"online",ts:agora()});
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame,d.tipo));
