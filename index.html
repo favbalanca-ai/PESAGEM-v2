@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v170"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v171"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3938,6 +3938,10 @@ function _htmlCamposNota(pre,sel){
   '</div>';
 }
 function _lerCamposNota(pre){
+  // Caixinhas fora da tela (formulário ainda não montado) não são "tudo
+  // desmarcado": devolver null mantém o padrão, senão o contrato sairia
+  // gravado para não levar NADA do contrato na nota, sem ninguém pedir.
+  if(!document.getElementById(pre+NFA_CAMPOS[0].k)) return null;
   return NFA_CAMPOS.filter(function(c){
     var el=document.getElementById(pre+c.k); return el && el.checked;
   }).map(function(c){return c.k;});
@@ -4014,7 +4018,11 @@ function addContratoNFA(){
         }
       }catch(e){toast('❌ Erro ao processar resposta');}
     })
-    .catch(function(){toast('❌ Sem conexão ao salvar');});
+    /* O contrato digitado NÃO é apagado aqui: a limpeza dos campos só acontece
+       quando a planilha confirma. Quem tentou salvar e viu o aviso é só tocar
+       em Cadastrar de novo — confira antes se ele não entrou na lista, porque
+       a falha pode ser só na resposta. */
+    .catch(function(){ _avisoServidor('cadastro do contrato'); });
 }
 
 function loadContratosNFADaPlanilha(){
@@ -4150,8 +4158,11 @@ function salvarEditarContrato(idx){
   };
   if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — edição de contrato exige internet'); return; }
   toast('⏳ Salvando contrato...');
-  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
-    body:JSON.stringify({acao:'salvarContratoNFA',dados:dados,token:TOKEN})})
+  /* Aqui dá para tentar de novo sem risco: a edição manda a LINHA da planilha,
+     então gravar duas vezes escreve a mesma linha de novo — não cria contrato
+     repetido. No cadastro novo não dá (o servidor acrescenta uma linha a cada
+     chamada), por isso lá a repetição é por conta de quem clica. */
+  _postComRetentativa({acao:'salvarContratoNFA',dados:dados,token:TOKEN},2)
     .then(function(r){return r.text();})
     .then(function(t){
       try{
@@ -4163,7 +4174,7 @@ function salvarEditarContrato(idx){
         }else{ toast('❌ '+(j.erro||'erro ao salvar')); }
       }catch(e){ toast('❌ Erro ao processar resposta'); }
     })
-    .catch(function(){ toast('❌ Sem conexão ao salvar'); });
+    .catch(function(){ _avisoServidor('edição do contrato'); });
 }
 
 /* ══ SCANNER CNH / DOCUMENTO ═══════════════════════════════════ */
@@ -5425,6 +5436,37 @@ function addLog(msg,tipo){
   syncLog.unshift({t:agora,m:msg,tipo:tipo||'info'});
   if(syncLog.length>100) syncLog=syncLog.slice(0,100);
   localStorage.setItem('syncLog',JSON.stringify(syncLog));
+}
+/* "Sem conexão" era a mensagem para qualquer falha de rede — e mandava
+   procurar no lugar errado. Na maioria das vezes o aparelho está com internet
+   e quem não respondeu foi o servidor: implantação do Apps Script fora do ar,
+   publicada sem acesso para "qualquer pessoa", ou demorando demais. São
+   problemas diferentes, com soluções diferentes, e o aviso tem de dizer qual
+   é — senão se perde meia hora procurando sinal de celular. */
+/* POST que tenta de novo quando a rede falha. SÓ para chamadas em que repetir
+   não duplica nada (ex.: gravar uma linha já existente da planilha). O Apps
+   Script falha sozinho de vez em quando, e uma falha dessas virava "sem
+   conexão" na cara de quem só queria salvar. */
+function _postComRetentativa(corpo,tentativas){
+  var espera=[1200,3000];
+  function tentar(i){
+    return fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(corpo)})
+      .catch(function(e){
+        if(i>=tentativas || !navigator.onLine) throw e;
+        try{ addLog('↻ Servidor não respondeu — tentando de novo ('+(i+1)+'/'+tentativas+')','erro'); }catch(_){}
+        return new Promise(function(res){ setTimeout(res,espera[i]||3000); }).then(function(){ return tentar(i+1); });
+      });
+  }
+  return tentar(0);
+}
+function _avisoServidor(ctx){
+  if(!navigator.onLine){
+    toast('📵 Este aparelho está sem internet'+(ctx?' — '+ctx:''));
+    try{ addLog('📵 Sem internet no aparelho'+(ctx?' ('+ctx+')':''),'erro'); }catch(e){}
+    return;
+  }
+  toast('❌ O servidor não respondeu — abra 🔍 Diagnóstico e toque em Testar servidor');
+  try{ addLog('❌ Aparelho com internet, mas o servidor não respondeu'+(ctx?' ('+ctx+')':'')+'. Conferir a implantação do Apps Script.','erro'); }catch(e){}
 }
 /* Junta no Drive as pastas repetidas criadas antes da correção (envios
    simultâneos). O conteúdo vai para a pasta mais antiga; as vazias vão p/ lixeira. */
