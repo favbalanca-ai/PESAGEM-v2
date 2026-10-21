@@ -990,6 +990,7 @@ body.dark .card{background:#1a2d22}
       <button class="fil" onclick="setF(this,'nfa-ok')">✅ Liberados</button>
       <button class="fil" onclick="setF(this,'ok')">Conformes</button>
       <button class="fil" onclick="setF(this,'er')">Excedidos</button>
+      <button class="fil" onclick="setF(this,'saldo')">📦 Com saldo a carregar</button>
     </div>
     <div id="lst-hist"></div>
   </div>
@@ -1557,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v169"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v170"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2254,7 +2255,13 @@ function irHist(){
       const el=document.getElementById('lst-hist');
       if(el) el.innerHTML='<div class="emp"><div class="ei">⏳</div><p>Carregando...</p></div>';
     }
-    loadCl().then(function(){
+    /* O saldo a carregar precisa do VOLUME do contrato (contratosCloud) e da
+       UNIDADE dele (contratosNFA, para saber se o volume está em kg, tonelada
+       ou saca). Sem isso o filtro 📦 não teria com o que comparar. */
+    const _ctrs=[];
+    if(!(contratosCloud||[]).length) _ctrs.push(loadContratosDaPlanilha());
+    if(!(contratosNFA||[]).length)   _ctrs.push(carregarContratosNFAP());
+    Promise.all([loadCl()].concat(_ctrs)).then(function(){
       popContratosHist();
       rHist();
       favEmitirPorURL(); // Opção A: se veio ?emitir=ID da planilha, abre a emissão
@@ -3034,17 +3041,80 @@ function toggleAdminUI(){
   document.querySelectorAll('.adm-only').forEach(el=>el.style.display=isAdm?'flex':'none');
 }
 
+/* ── Saldo a carregar por contrato, em kg ──────────────────────────
+   Mesma conta do relatório em PDF: volume do contrato menos tudo que já foi
+   finalizado nele, somando TODAS as pesagens e não só as da tela — um
+   contrato antigo pareceria inteiro a carregar só porque o filtro começa
+   depois. Contrato sem volume informado fica de fora da conta em vez de
+   aparecer como "falta tudo", que seria um número errado e convincente. */
+function _saldoPorContrato(){
+  var m={};
+  (contratosCloud||[]).forEach(function(ct){
+    var k=_ctKey(ct.n); if(!k) return;
+    m[k]={nome:ct.n, vol:_volKgContrato(ct), ent:0, falta:0, temVol:false};
+  });
+  (cloud||[]).forEach(function(o){
+    var k=_ctKey(o.numOrdem||''); if(!k||!m[k]) return;
+    if(String(o.status||'').includes('Finalizado')) m[k].ent+=parseFloat(o.cargaLiquida||0)*1000;
+  });
+  Object.keys(m).forEach(function(k){
+    m[k].temVol=m[k].vol>0;
+    m[k].falta=m[k].temVol?(m[k].vol-m[k].ent):0;
+  });
+  return m;
+}
+function _temSaldo(numOrdem,sal){
+  var r=sal[_ctKey(numOrdem||'')];
+  return !!(r && r.temVol && r.falta>0);
+}
+// Quadro "falta carregar", do que falta mais para o que falta menos
+function _blocoSaldoHist(sal){
+  var chaves=Object.keys(sal).filter(function(k){ return sal[k].temVol && sal[k].falta>0; })
+                   .sort(function(a,b){ return sal[b].falta-sal[a].falta; });
+  if(!chaves.length) return {html:'',qtd:0};
+  var nkg=function(v){ return Math.round(v).toLocaleString('pt-BR')+' kg'; };
+  var tot=chaves.reduce(function(s,k){ return s+sal[k].falta; },0);
+  var html='<div style="border:1.5px solid var(--g1);border-radius:9px;padding:9px 11px;margin-bottom:9px">'+
+    '<div style="font-size:11px;font-weight:800;color:var(--g1);margin-bottom:6px">📦 Falta carregar</div>'+
+    chaves.map(function(k){
+      return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding:3px 0;border-bottom:1px solid var(--brd)">'+
+        '<span style="font-family:\'JetBrains Mono\',monospace;font-weight:600">'+sal[k].nome+'</span>'+
+        '<span style="font-weight:800;color:var(--g1);white-space:nowrap">'+nkg(sal[k].falta)+'</span></div>';
+    }).join('')+
+    '<div style="display:flex;justify-content:space-between;gap:8px;font-size:12px;padding-top:6px;font-weight:800">'+
+      '<span>TOTAL · '+chaves.length+' contrato'+(chaves.length>1?'s':'')+'</span>'+
+      '<span style="color:var(--g1);white-space:nowrap">'+nkg(tot)+'</span></div>'+
+  '</div>';
+  return {html:html, qtd:chaves.length};
+}
+
 function popContratosHist(){
   var sel=document.getElementById('h-contrato');
   if(!sel) return;
   var val=sel.value; // preservar seleção atual
-  // pegar contratos únicos das pesagens
+  /* Contratos únicos das pesagens, agrupados pela chave tolerante: "2026.CS15"
+     e "2026.cs 15" são o mesmo contrato e apareciam duas vezes na lista — com
+     o saldo ao lado isso ficaria pior ainda, parecendo dois contratos de
+     40.000 kg cada. Quando o contrato está cadastrado, vale a grafia dele. */
+  var sal=_saldoPorContrato();
   var nums={};
-  for(var i=0;i<cloud.length;i++) if(cloud[i].numOrdem) nums[cloud[i].numOrdem]=true;
+  for(var i=0;i<cloud.length;i++){
+    var n=String(cloud[i].numOrdem||'').trim(); if(!n) continue;
+    var k=_ctKey(n); if(!k) continue;
+    if(!nums[k]) nums[k]=(sal[k]&&sal[k].nome)||n;
+  }
   var opts='<option value="">📋 Todos os contratos</option>';
-  var sorted=Object.keys(nums).sort();
-  for(var i=0;i<sorted.length;i++){
-    opts+='<option value="'+sorted[i]+'"'+(val===sorted[i]?' selected':'')+'>'+sorted[i]+'</option>';
+  var chaves=Object.keys(nums).sort(function(a,b){ return nums[a].localeCompare(nums[b]); });
+  for(var i=0;i<chaves.length;i++){
+    var nome=nums[chaves[i]];
+    // o saldo vai no próprio nome: é o que se quer saber ao escolher o contrato
+    var r=sal[chaves[i]], suf='';
+    if(r && r.temVol){
+      suf = r.falta>0 ? ' · falta '+Math.round(r.falta).toLocaleString('pt-BR')+' kg'
+          : (r.falta<0 ? ' · '+Math.round(-r.falta).toLocaleString('pt-BR')+' kg acima'
+                       : ' · concluído');
+    }
+    opts+='<option value="'+nome+'"'+(_mesmoContrato(val,nome)?' selected':'')+'>'+nome+suf+'</option>';
   }
   sel.innerHTML=opts;
 }
@@ -5201,6 +5271,9 @@ function rHist(){
   else if(filAtivo==='nfa-ok') ls=ls.filter(o=>o.nfa_emitida);
   else if(filAtivo==='ok') ls=ls.filter(o=>(o.statusPeso||'').includes('CONFORME'));
   else if(filAtivo==='er') ls=ls.filter(o=>(o.statusPeso||'').includes('EXCEDIDO'));
+  // Só as pesagens de contratos que ainda têm volume para carregar
+  let _salCt=null;
+  if(filAtivo==='saldo'){ _salCt=_saldoPorContrato(); ls=ls.filter(o=>_temSaldo(o.numOrdem,_salCt)); }
   // filtro por período (data de entrada)
   if(de)  ls=ls.filter(o=>{ const d=_dataOrd(o.dataEntrada); return d && d>=de; });
   if(ate) ls=ls.filter(o=>{ const d=_dataOrd(o.dataEntrada); return d && d<=ate; });
@@ -5211,7 +5284,23 @@ function rHist(){
   const el=document.getElementById('lst-hist');
   _histFiltrado=ls;
   if(!ls.length){
-    el.innerHTML='<div class="emp"><div class="ei">📊</div><p>Nenhuma pesagem</p>'+(navigator.onLine?'':'<p style="font-size:11px;margin-top:6px">Sem internet — conecte para ver o histórico</p>')+'</div>';
+    if(filAtivo==='saldo' && !(contratosCloud||[]).length){
+      // sem a lista de contratos não há volume para comparar — e um "nenhum
+      // contrato com saldo" aqui seria mentira
+      el.innerHTML='<div class="emp"><div class="ei">📦</div><p>Lista de contratos ainda não carregada</p><p style="font-size:11px;margin-top:6px">Toque ☁️ aqui em cima para buscar os contratos e ver o saldo.</p></div>';
+      return;
+    }
+    /* Contrato com saldo mas ainda SEM nenhuma pesagem não entra na lista de
+       pesagens — e dizer "nenhum contrato com saldo" aí seria o contrário da
+       verdade: é o contrato que falta carregar inteiro. */
+    const _bs = (filAtivo==='saldo' && _salCt) ? _blocoSaldoHist(_salCt) : {html:'',qtd:0};
+    if(_bs.qtd){
+      el.innerHTML=_bs.html+'<div class="emp" style="padding:14px"><p style="font-size:12px">Nenhuma pesagem registrada ainda '+(_bs.qtd>1?'nesses contratos':'nesse contrato')+'.</p></div>';
+      return;
+    }
+    el.innerHTML='<div class="emp"><div class="ei">'+(filAtivo==='saldo'?'✅':'📊')+'</div><p>'+
+      (filAtivo==='saldo'?'Nenhum contrato com saldo a carregar':'Nenhuma pesagem')+'</p>'+
+      (navigator.onLine?'':'<p style="font-size:11px;margin-top:6px">Sem internet — conecte para ver o histórico</p>')+'</div>';
     return;
   }
   _histFiltrado=ls;                    // guardado para o PDF do período
@@ -5222,7 +5311,10 @@ function rHist(){
       <span><b>${ls.length}</b> pesagem${ls.length>1?'s':''}${_fin.length!==ls.length?' · <b>'+_fin.length+'</b> finalizada'+(_fin.length>1?'s':''):''}</span>
       ${_kg>0?'<span>Carga: <b style="color:var(--g1)">'+Math.round(_kg).toLocaleString('pt-BR')+' kg</b> ('+(_kg/1000).toFixed(1)+' t)</span>':''}
     </div>`;
-  el.innerHTML=_resumo+ls.map(o=>{
+  /* Com o filtro de saldo ligado, o que interessa não é a lista de pesagens e
+     sim QUANTO falta em cada contrato — por isso o quadro vem antes delas. */
+  const _blocoSaldo = (filAtivo==='saldo' && _salCt) ? _blocoSaldoHist(_salCt).html : '';
+  el.innerHTML=_resumo+_blocoSaldo+ls.map(o=>{
     const st=o.statusPeso||(o.status==='Aguardando'?'Aguardando':'CONFORME');
     const bc=st==='EXCEDIDO'?'exc':st==='ATENÇÃO'?'atc':'';
     const bg=st==='EXCEDIDO'?'ber':st==='ATENÇÃO'?'bwn':st==='Aguardando'||st.toLowerCase().includes('aguardando')?'bag':'bok';
