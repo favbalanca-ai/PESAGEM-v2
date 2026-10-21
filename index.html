@@ -1121,6 +1121,7 @@ body.dark .card{background:#1a2d22}
           <div class="f"><label>Obs</label><input type="text" id="nc-obs" placeholder="Observações"></div>
         </div>
         <div class="f"><label>Informações Complementares (NFA)</label><input type="text" id="nc-info" placeholder="Texto que sai na nota"></div>
+        <div id="nc-campos-wrap"></div>
         <div class="f"><label>Texto fiscal adicional <span style="font-weight:400;color:var(--ink3)">(opcional — você escolhe incluir na hora de emitir)</span></label>
           <textarea id="nc-info2" rows="3" placeholder="Ex.: isenção de ICMS, FUNRURAL, SENAR, contrato de sementes..." style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:'Inter',sans-serif;color:var(--ink);background:var(--card);resize:vertical"></textarea>
         </div>
@@ -1550,7 +1551,7 @@ body.dark .card{background:#1a2d22}
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
-const APP_VER    = "v167"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v168"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3742,16 +3743,84 @@ function preencherOrigemEmitente(){
    O app separa: parte fixa sempre sai na NFA; o adicional é opcional (checkbox
    na prévia da emissão). */
 const NFA_SEP_ADICIONAL='\n#TEXTO-ADICIONAL#\n';
+
+/* ── Quais informações do contrato saem na nota ──
+   O campo "Informações Complementares" da NFA levava SEMPRE as cinco linhas
+   montadas pelo servidor (contrato, volume, saldo, motorista, CPF) e só dava
+   para tirar todas de uma vez, na hora de emitir. Agora a escolha é POR
+   CONTRATO: cada contrato guarda a sua lista, porque o que um comprador quer
+   ver na nota não é o que o outro quer.
+   A lista fica DENTRO de info_complementar numa linha com marcador — mesmo
+   truque do texto fiscal adicional — então não muda nem o servidor nem a
+   planilha. Contrato antigo (sem a linha) = as cinco de sempre. */
+const NFA_SEP_CAMPOS='#CAMPOS-NOTA#';
+const NFA_CAMPOS=[
+  {k:'CONTRATO',  rot:'Número do contrato'},
+  {k:'VOLUME',    rot:'Volume do contrato'},
+  {k:'SALDO',     rot:'Saldo do contrato'},
+  {k:'MOTORISTA', rot:'Motorista'},
+  {k:'CPF',       rot:'CPF do motorista'},
+  {k:'PLACA',     rot:'Placa do caminhão'},
+  {k:'SAFRA',     rot:'Safra'}
+];
+// O que o servidor já mandava: é o padrão de quem nunca escolheu nada,
+// para a nota continuar saindo igual até alguém mexer.
+const NFA_CAMPOS_PADRAO=['CONTRATO','VOLUME','SALDO','MOTORISTA','CPF'];
+
 function _splitInfoContrato(s){
   s=String(s==null?'':s);
   const i=s.indexOf(NFA_SEP_ADICIONAL);
-  if(i<0) return {base:s.trim(), extra:''};
-  return {base:s.slice(0,i).trim(), extra:s.slice(i+NFA_SEP_ADICIONAL.length).trim()};
+  const extra = i<0 ? '' : s.slice(i+NFA_SEP_ADICIONAL.length).trim();
+  let campos=null;
+  const base=(i<0?s:s.slice(0,i)).split('\n').filter(function(ln){
+    const m=new RegExp('^\\s*'+NFA_SEP_CAMPOS+'\\s*(.*)$').exec(ln);
+    if(!m) return true;
+    campos=m[1].split(/[,;]/).map(function(x){return x.trim().toUpperCase();}).filter(Boolean);
+    return false;
+  }).join('\n').trim();
+  return {base:base, extra:extra, campos:campos||NFA_CAMPOS_PADRAO.slice()};
 }
-function _joinInfoContrato(base,extra){
+function _joinInfoContrato(base,extra,campos){
   base=String(base==null?'':base).trim(); extra=String(extra==null?'':extra).trim();
+  if(campos) base=(base?base+'\n':'')+NFA_SEP_CAMPOS+' '+campos.join(',');
   return extra ? (base+NFA_SEP_ADICIONAL+extra) : base;
 }
+
+/* As caixinhas de seleção. O mesmo HTML serve o cadastro (prefixo nc-cp-) e
+   a edição (ec-cp-), para as duas telas nunca ficarem diferentes. */
+function _htmlCamposNota(pre,sel){
+  sel=sel||NFA_CAMPOS_PADRAO;
+  return '<div class="f"><label>Informações do contrato que saem na nota</label>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin-top:4px">'+
+    NFA_CAMPOS.map(function(c){
+      return '<label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;cursor:pointer;color:var(--ink)">'+
+        // .f input zera a aparência (é feito para caixas de texto) e a caixinha
+        // sairia como um retângulo sem o "visto" — por isso devolvemos aqui
+        '<input type="checkbox" id="'+pre+c.k+'"'+(sel.indexOf(c.k)>=0?' checked':'')+
+        ' style="width:18px;height:18px;flex-shrink:0;padding:0;border:0;background:transparent;'+
+        '-webkit-appearance:checkbox;appearance:checkbox;accent-color:var(--g1)">'+c.rot+'</label>';
+    }).join('')+
+    '</div>'+
+    '<div style="font-size:10px;color:var(--ink3);margin-top:6px">Saem no campo <b>Informações Complementares</b> da NFA. Na hora de emitir ainda dá para tirar todas de uma vez.</div>'+
+  '</div>';
+}
+function _lerCamposNota(pre){
+  return NFA_CAMPOS.filter(function(c){
+    var el=document.getElementById(pre+c.k); return el && el.checked;
+  }).map(function(c){return c.k;});
+}
+function _marcarCamposNota(pre,sel){
+  sel=sel||NFA_CAMPOS_PADRAO;
+  NFA_CAMPOS.forEach(function(c){
+    var el=document.getElementById(pre+c.k); if(el) el.checked=(sel.indexOf(c.k)>=0);
+  });
+}
+// Monta as caixinhas do cadastro. Este script roda depois do HTML da tela,
+// então o lugar onde elas entram já existe.
+try{
+  var _wcp=document.getElementById('nc-campos-wrap');
+  if(_wcp) _wcp.innerHTML=_htmlCamposNota('nc-cp-',null);
+}catch(e){}
 
 function addContratoNFA(){
   var nome=document.getElementById('nc-dest-nome').value.trim();
@@ -3786,7 +3855,7 @@ function addContratoNFA(){
       return m && u ? (m+' / '+u) : (m||u);
     })(),
     responsavel_frete: document.getElementById('nc-frete').value,
-    info_complementar: _joinInfoContrato(document.getElementById('nc-info').value, document.getElementById('nc-info2')?document.getElementById('nc-info2').value:''),
+    info_complementar: _joinInfoContrato(document.getElementById('nc-info').value, document.getElementById('nc-info2')?document.getElementById('nc-info2').value:'', _lerCamposNota('nc-cp-')),
     balanca: parseInt(document.getElementById('nc-bal').value)||1,
     obs: document.getElementById('nc-obs').value.trim()
   };
@@ -3802,6 +3871,7 @@ function addContratoNFA(){
         if(j.ok){
           toast('✅ Contrato NFA '+(j.id||'')+' gravado!');
           ['nc-id','nc-dest-nome','nc-dest-cnpj','nc-dest-ie','nc-dest-email','nc-dest-wa','nc-grupo','nc-tipoop','nc-produto','nc-valor','nc-vol','nc-safra','nc-origem-uf','nc-origem-mun','nc-info','nc-info2','nc-obs'].forEach(function(id){var el=document.getElementById(id);if(el)el.value='';});
+          _marcarCamposNota('nc-cp-',null);
           preencherOrigemEmitente();
           if(document.getElementById('nc-displegal')){document.getElementById('nc-displegal').value='';document.getElementById('nc-displegal-wrap').style.display='none';}
           favPreencherTipoOp();
@@ -3898,6 +3968,7 @@ function abrirEditarContrato(idx){
       '<div class="f"><label>Responsável pelo Frete</label><select id="ec-frete" style="'+selSty+'">'+opt(['Destinatário','Remetente','Sem Frete'],c.responsavel_frete||'Destinatário')+'</select></div>'+
       '<div class="f"><label>Balança</label><select id="ec-bal" style="'+selSty+'"><option value="1"'+((Number(c.balanca)||1)===1?' selected':'')+'>Balança 1 — Água Viva</option><option value="2"'+(Number(c.balanca)===2?' selected':'')+'>Balança 2 — Espora</option></select></div>'+
       '<div class="f"><label>Informações Complementares (NFA)</label><input id="ec-info" value="'+esc(infoPartes.base)+'"></div>'+
+      _htmlCamposNota('ec-cp-',infoPartes.campos)+
       '<div class="f"><label>Texto fiscal adicional (opcional na emissão)</label><textarea id="ec-info2" rows="3" style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:\'Inter\',sans-serif;color:var(--ink);background:var(--card);resize:vertical">'+String(infoPartes.extra||'').replace(/</g,'&lt;')+'</textarea></div>'+
       '<div class="f"><label>Obs</label><input id="ec-obs" value="'+esc(c.obs)+'"></div>'+
       '<div class="f"><label>Status</label><select id="ec-status" style="'+selSty+'">'+opt(['Ativo','Inativo'],c.status||'Ativo')+'</select></div>'+
@@ -3935,7 +4006,7 @@ function salvarEditarContrato(idx){
     safra: g('ec-safra').value.trim(),
     origem_mercadoria: g('ec-origem').value.trim(),
     responsavel_frete: g('ec-frete').value,
-    info_complementar: _joinInfoContrato(g('ec-info').value, g('ec-info2')?g('ec-info2').value:''),
+    info_complementar: _joinInfoContrato(g('ec-info').value, g('ec-info2')?g('ec-info2').value:'', _lerCamposNota('ec-cp-')),
     balanca: parseInt(g('ec-bal').value)||1,
     obs: g('ec-obs').value.trim(),
     // preserva campos que não estão no formulário
@@ -8646,6 +8717,9 @@ async function abrirModalNFA(){
   const _oNFA = (cloud||[]).find(x=>x.id===_nfaTicketAtual) || (atual&&atual.id===_nfaTicketAtual?atual:null);
   if(_oNFA && !_nfaLocalOk(_oNFA)) return;
   toast('⏳ Montando NFA a partir do contrato do ticket...');
+  // A SAFRA (quando o contrato pede ela na nota) sai da lista de contratos,
+  // que nem sempre está carregada em quem só pesa.
+  if(!(contratosNFA||[]).length){ try{ await carregarContratosNFAP(); }catch(e){} }
   try{
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'montarDadosNFA',ticket_id:_nfaTicketAtual,token:TOKEN})});
     const d=await r.json();
@@ -8779,21 +8853,42 @@ function _aplicarInfoExtraNFA(){
   if(_nfaInfoExtra && (!chkE || chkE.checked)) partes.push(_nfaInfoExtra);
   _nfaDados.info_complementar=partes.join('\n');
 }
+// Qual campo do contrato é esta linha do cabeçalho ('' = não é nenhum)
+const RE_CAB_NFA=/^\s*(CONTRATO|VOLUME\s+CONTRATO|SALDO\s+DO\s+CONTRATO|MOTORISTA|CPF)\s*:/i;
+function _chaveCampoNota(ln){
+  const m=RE_CAB_NFA.exec(ln);
+  if(!m) return '';
+  const t=m[1].toUpperCase().replace(/\s+/g,' ');
+  return t==='VOLUME CONTRATO' ? 'VOLUME' : (t==='SALDO DO CONTRATO' ? 'SALDO' : t);
+}
 function _prepararInfoExtraNFA(n){
   const p=_splitInfoContrato(n.info_complementar);
   _nfaInfoExtra=p.extra;
+  const sel=p.campos;   // o que ESTE contrato pediu para sair na nota
   // Separa o cabeçalho (linhas CONTRATO:/VOLUME/SALDO/MOTORISTA/CPF montadas
   // pelo backend no topo) da info normal do contrato
   const linhas=String(p.base||'').split('\n');
   const cab=[]; let i=0;
-  const reCab=/^\s*(CONTRATO|VOLUME\s+CONTRATO|SALDO\s+DO\s+CONTRATO|MOTORISTA|CPF)\s*:/i;
-  while(i<linhas.length && reCab.test(linhas[i])){ cab.push(linhas[i].trim()); i++; }
+  while(i<linhas.length && RE_CAB_NFA.test(linhas[i])){
+    const ln=linhas[i].trim(), k=_chaveCampoNota(ln);
+    if(!k || sel.indexOf(k)>=0) cab.push(ln);   // o servidor manda tudo; aqui fica só o escolhido
+    i++;
+  }
+  // PLACA e SAFRA o servidor não monta — o app acrescenta quando pedidas
+  if(sel.indexOf('PLACA')>=0 && n.placa) cab.push('PLACA: '+n.placa);
+  if(sel.indexOf('SAFRA')>=0){
+    const ct=(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
+    if(ct && ct.safra) cab.push('SAFRA: '+ct.safra);
+  }
   _nfaInfoCab=cab.join('\n');
   _nfaInfoBase=linhas.slice(i).join('\n').trim();
   const lnC=document.getElementById('nfa-ln-cab');
   if(lnC){
     lnC.style.display=_nfaInfoCab?'flex':'none';
     const chkC=document.getElementById('nfa-prev-cab-chk'); if(chkC) chkC.checked=true;
+    // mostra exatamente o que vai sair, não uma lista fixa
+    const sub=document.getElementById('nfa-prev-cab-sub');
+    if(sub) sub.textContent=cab.map(function(l){return l.split(':')[0].trim();}).join(' / ');
   }
   const ln=document.getElementById('nfa-ln-extra');
   if(ln){
@@ -9354,7 +9449,7 @@ function salvarFuncionarios(){
         <span id="nfa-prev-total" style="font-size:17px;font-weight:800;color:#1a3a6c"></span>
       </div>
       <div class="nfa-ln" id="nfa-ln-cab" style="display:none;align-items:flex-start">
-        <label for="nfa-prev-cab-chk" style="cursor:pointer;flex:1">Incluir dados do contrato<br><span style="font-size:10px;color:#888;font-weight:400">CONTRATO / VOLUME / SALDO / MOTORISTA / CPF</span></label>
+        <label for="nfa-prev-cab-chk" style="cursor:pointer;flex:1">Incluir dados do contrato<br><span id="nfa-prev-cab-sub" style="font-size:10px;color:#888;font-weight:400"></span></label>
         <input type="checkbox" id="nfa-prev-cab-chk" checked onchange="_aplicarInfoExtraNFA()" style="width:20px;height:20px;flex-shrink:0;margin-top:2px">
       </div>
       <div class="nfa-ln" id="nfa-ln-extra" style="display:none;align-items:flex-start">
