@@ -1366,6 +1366,9 @@ body.dark .card{background:#1a2d22}
     <div style="font-size:11px;color:var(--ink3);margin:12px 0 8px;border-top:1px dashed var(--brd);padding-top:10px">As pesagens antigas abrem sem assinatura em quem não colheu, porque o link não era gravado na planilha. A imagem está no Drive — isto vai buscar e gravar o link.</div>
     <button onclick="recuperarAssinaturas()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🖋️ Recuperar assinaturas antigas</button>
     <div id="diag-rec-sig" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
+    <div style="font-size:11px;color:var(--ink3);margin:12px 0 8px;border-top:1px dashed var(--brd);padding-top:10px">As assinaturas enviadas antes da correção do fundo foram para o Drive como retângulo preto. Este aparelho pode reenviar, com fundo branco, as que ele guardou.</div>
+    <button onclick="reenviarAssinaturasDoAparelho()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">♻️ Reenviar assinaturas deste aparelho</button>
+    <div id="diag-reenv-sig" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
   </div>
 
   <!-- Log de eventos -->
@@ -1566,7 +1569,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v187"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v188"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4509,6 +4512,12 @@ function comprimirImagem(b64full, callback){
       var canvas=document.createElement('canvas');
       canvas.width=w; canvas.height=h;
       var ctx=canvas.getContext('2d');
+      /* FUNDO BRANCO antes de desenhar. A assinatura é um PNG com fundo
+         transparente, e JPEG não tem transparência: o que era vazio virava
+         PRETO. No Drive a assinatura chegava como um retângulo preto com os
+         traços verde-escuros praticamente invisíveis dentro. */
+      ctx.fillStyle='#ffffff';
+      ctx.fillRect(0,0,w,h);
       ctx.drawImage(img,0,0,w,h);
       responder(canvas.toDataURL('image/jpeg',0.7));
     }catch(e){
@@ -5607,6 +5616,64 @@ function _avisoServidor(ctx){
   toast('❌ O servidor não respondeu — abra 🔍 Diagnóstico e toque em Testar servidor');
   try{ addLog('❌ Aparelho com internet, mas o servidor não respondeu'+(ctx?' ('+ctx+')':'')+'. Conferir a implantação do Apps Script.','erro'); }catch(e){}
 }
+/* As assinaturas que subiram antes da correção do fundo estão no Drive como
+   retângulo preto (JPEG não guarda transparência). Os traços continuam lá,
+   mas em verde-escuro sobre preto — ninguém enxerga. A imagem BOA, em PNG com
+   fundo transparente, continua guardada no aparelho que colheu: daqui ela é
+   reenviada já com fundo branco, e o link novo vai para a planilha.
+   Só funciona no aparelho que assinou — é lá que a imagem está. */
+async function reenviarAssinaturasDoAparelho(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  var el=document.getElementById('diag-reenv-sig');
+  var ids=[];
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k && k.indexOf('sig_')===0) ids.push(k.slice(4));
+    }
+  }catch(e){}
+  if(!ids.length){
+    if(el) el.innerHTML='<span style="color:var(--ink3)">Este aparelho não tem assinatura guardada. Rode no celular que coletou as assinaturas.</span>';
+    return;
+  }
+  if(!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  if(!confirm('Reenviar '+ids.length+' assinatura(s) guardada(s) neste aparelho, agora com fundo branco?')) return;
+  var ok=0, falhou=0, semPesagem=0;
+  for(var n=0;n<ids.length;n++){
+    var id=ids[n];
+    if(el) el.innerHTML='⏳ Reenviando '+(n+1)+' de '+ids.length+'...';
+    var o=(cloud||[]).find(function(x){return x.id===id;}) || (DB.ordens||[]).find(function(x){return x.id===id;});
+    if(!o){ semPesagem++; continue; }     // pesagem não está mais neste aparelho
+    var b64=null; try{ b64=localStorage.getItem('sig_'+id); }catch(e){}
+    if(!b64 || b64.indexOf('data:')!==0){ falhou++; continue; }
+    try{
+      var url=await _subirAssinatura(o,b64);
+      if(url) ok++; else falhou++;
+    }catch(e){ falhou++; }
+  }
+  try{ addLog('♻️ Assinaturas reenviadas: '+ok+' ok, '+falhou+' falha(s), '+semPesagem+' sem a pesagem aqui','ok'); }catch(e){}
+  if(el) el.innerHTML = ok
+    ? '<b style="color:var(--g1)">✅ '+ok+' assinatura(s) reenviada(s)</b>'+(falhou?' · '+falhou+' falharam':'')+(semPesagem?' · '+semPesagem+' sem a pesagem neste aparelho':'')+
+      '<br><span style="color:var(--ink3)">Toque ☁️ no Histórico e confira o ticket.</span>'
+    : '<span style="color:var(--a1)">Nenhuma reenviada'+(semPesagem?' ('+semPesagem+' sem a pesagem neste aparelho)':'')+'.</span>';
+}
+// Manda uma assinatura para o Drive e grava o link na planilha
+async function _subirAssinatura(ordem,b64){
+  var contrato=(ordem.numOrdem||'SEM-CONTRATO').replace(/[^a-zA-Z0-9.\-]/g,'');
+  var data=(ordem.dataEntrada||'').replace(/\//g,'-');
+  var placa=(ordem.placa||'SEM-PLACA').replace(/[^a-zA-Z0-9]/g,'');
+  var comprimida=await new Promise(function(res){ comprimirImagem(b64,res); });
+  var partes=String(comprimida).split(',');
+  var r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'salvarFoto',dados:{contrato:contrato,data:data,placa:placa,
+      pesagem:data+'_'+placa,tipo:'ASSINATURA',base64:partes[1],mime:_mimeDataURL(comprimida)},token:TOKEN})});
+  var j=JSON.parse(await r.text());
+  if(!j.ok||!j.url) return null;
+  await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'assinaturaUrl',dados:{id:ordem.id,url:j.url},token:TOKEN})});
+  return j.url;
+}
+
 /* Varre a planilha procurando no Drive a assinatura de cada pesagem antiga e
    grava o link na coluna. Vai em blocos porque o Apps Script corta em 6
    minutos: o servidor devolve quantas faltam e aqui a gente chama de novo até
