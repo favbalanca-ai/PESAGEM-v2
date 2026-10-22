@@ -153,6 +153,7 @@ function doPost(e){
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
+    if(d.acao==="ordemUrl")           return resposta(registrarOrdemUrl(d.dados||{}));
     if(d.acao==="recuperarAssinaturas") return resposta(recuperarAssinaturas(d.inicio,d.limite));
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
@@ -938,6 +939,22 @@ function recuperarAssinaturas(inicio,limite){
   }catch(e){ return {ok:false,erro:e.message}; }
 }
 
+/* Ordem de carregamento anexada pelo Adm no ticket, depois da pesagem. O
+   arquivo vai para a mesma pasta da carga no Drive; aqui fica só o link, na
+   coluna 31, para o ticket mostrar em qualquer aparelho. */
+function registrarOrdemUrl(d){
+  try{
+    var id=s(d&&d.id), url=s(d&&d.url);
+    if(!id || url.indexOf("http")!==0) return {ok:false,erro:"id ou url invalidos"};
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("Pesagem");
+    if(!sh || sh.getLastRow()<2) return {ok:false,erro:"Aba Pesagem vazia"};
+    var ids=sh.getRange(2,1,sh.getLastRow()-1,1).getValues();
+    for(var i=0;i<ids.length;i++){
+      if(s(ids[i][0])===id){ sh.getRange(i+2,31).setValue(url); return {ok:true}; }
+    }
+    return {ok:false,erro:"Pesagem nao encontrada: "+id};
+  }catch(e){ return {ok:false,erro:e.message}; }
+}
 // Gravar só o link da assinatura, depois que a imagem subiu para o Drive
 function registrarAssinaturaUrl(d){
   try{
@@ -1019,7 +1036,7 @@ function listarPesagens(){
     }
   }
 
-  var nCols=Math.min(sh.getLastColumn(),30); // [NFA-AUTORIZACAO] lê até col 30
+  var nCols=Math.min(sh.getLastColumn(),31); // col 31 = Ordem de carregamento
   var dados=sh.getRange(2,1,sh.getLastRow()-1,nCols).getValues();
   var ordens=[];
   for(var i=0;i<dados.length;i++){
@@ -1049,7 +1066,8 @@ function listarPesagens(){
       nfa_kg:ticketsComNFA[idTicket]?Math.round(ticketsComNFA[idTicket].kg):0,// kg já emitidos em NFA (soma)
       nfa_qtd:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].qtd:0,          // quantas NFAs o ticket já tem
       nfa_autorizada:(r[27]?s(r[27])==="Sim":false),                          // [NFA-AUTORIZACAO] col 28
-      nfa_autorizada_por:(r[28]?s(r[28]):"")                                   // [NFA-AUTORIZACAO] col 29
+      nfa_autorizada_por:(r[28]?s(r[28]):""),                                  // [NFA-AUTORIZACAO] col 29
+      ordem_url:(r[30]?s(r[30]):"")                                            // col 31 — ordem de carregamento anexada pelo Adm
     });
   }
   return{ok:true,ordens:ordens};
@@ -1448,7 +1466,7 @@ function configurarPlanilha(){
   function cab(sh,cols,c){sh.getRange(1,1,1,cols.length).setValues([cols]).setBackground(c||cor).setFontColor("#fff").setFontWeight("bold");sh.setFrozenRows(1);}
   var shP=ss.getSheetByName("Pesagem")||ss.insertSheet("Pesagem");
   // [NFA-AUTORIZACAO] colunas 28-30 acrescentadas ao fim
-  cab(shP,["ID","Data","Hora","Num_Ordem","Placa","Motorista","CPF","Eixo_Diant","Eixos_S","Eixos_D","Eixos_T","Total_Eixos","Formula_Eixos","PBT_Max_t","Tara_t","Bruto_t","Carga_t","Status","Funcionario","Obs","DataHora_Fim","Assinatura","Municipio","Estado","Longo","Transp_CNPJ","Transp_Nome","NFA_Autorizada","NFA_Autorizada_Por","NFA_Autorizada_Em"]);
+  cab(shP,["ID","Data","Hora","Num_Ordem","Placa","Motorista","CPF","Eixo_Diant","Eixos_S","Eixos_D","Eixos_T","Total_Eixos","Formula_Eixos","PBT_Max_t","Tara_t","Bruto_t","Carga_t","Status","Funcionario","Obs","DataHora_Fim","Assinatura","Municipio","Estado","Longo","Transp_CNPJ","Transp_Nome","NFA_Autorizada","NFA_Autorizada_Por","NFA_Autorizada_Em","Ordem_Carregamento"]);
   criarAbaContratos(ss); // aba única Contratos (completo)
   var shR=ss.getSheetByName("Recepcao")||ss.insertSheet("Recepcao");
   cab(shR,["ID","Data","Hora","Safra","Talhao_Cod","Talhao_Nome","Cultura","Variedade","Placa","Motorista","CPF","Tipo_Caminhao","Balanca","Tara_t","Bruto_t","Umidade_pct","Impureza_pct","Desc_Umidade_kg","Desc_Impureza_kg","Peso_Liquido_kg","Sacas","sc_ha","Status","Funcionario","DataHora_Fim","Obs"]);
