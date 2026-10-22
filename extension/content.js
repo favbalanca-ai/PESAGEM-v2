@@ -112,6 +112,18 @@ function _passosHTML(){
 // ─── OVERLAY + BOTÕES PARAR / CONTINUAR IA ────────────────────────────────────
 let _overlay = null;
 let _ultimaMsg = '', _ultimoTipo = 'info';
+/* Quantidade × valor unitário, como o robô digitou. Serve para conferir com o
+   total que a SEFAZ mostra: o preço por tonelada costuma ser dízima
+   (R$ 122/saca = 2.033,3333.../t) e sobra um centavo de diferença. Fica no
+   log em vez de virar discussão depois. */
+function _totalEsperado() {
+  try {
+    const num = (v) => parseFloat(String(v || '').replace(/\./g, '').replace(',', '.')) || 0;
+    const q = num(lerCampo('quantidadeProduto')), v = num(lerCampo('valorUnitarioProduto'));
+    if (!q || !v) return '';
+    return ' | total esperado R$ ' + (q * v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  } catch (e) { return ''; }
+}
 let _registroPendente = false;   // nota emitida cujo registro no app ainda não foi aceito
 function atualizarStatus(msg, tipo = 'info') {
   _ultimaMsg = msg; _ultimoTipo = tipo;
@@ -304,7 +316,8 @@ if (!window.__FAV_NFA_MSG__) {
       logFAV('NFA registrada automaticamente do PDF baixado: nº ' + (msg.numero_nfa || '?'));
       atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (msg.numero_nfa || '—') +
         '<div style="font-size:11px;margin-top:5px">Arquivada na pasta da placa ' + (msg.placa || '') +
-        ', junto das fotos e do ticket. Removida da pasta Downloads.' +
+        ', junto das fotos e do ticket.' +
+        (msg.arquivo ? '<br>No computador: <b>Downloads/' + msg.arquivo + '</b>' : ' Removida da pasta Downloads.') +
         (msg.pasta_url ? ' <a href="' + msg.pasta_url + '" target="_blank" style="color:#cfe9ff">abrir pasta</a>' : '') +
         '<br>No app, use <b>📤 Enviar NFA + Ticket</b> para mandar por e-mail/WhatsApp.</div>', 'ok');
     }
@@ -926,7 +939,7 @@ async function etapa_Produtos(dados) {
       setCampoNumero('quantidadeProduto', qtdStr); await wait(700);
       setCampoNumero('valorUnitarioProduto', valStr); await wait(900);
       await aguardarSefazLivre(6000);
-      logFAV('Campos lidos → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"');
+      logFAV('Campos lidos → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"' + _totalEsperado());
       if (lerCampo('quantidadeProduto') === '' || lerCampo('valorUnitarioProduto') === '') {
         setCampoNumero('quantidadeProduto', qtdStr); await wait(700);
         setCampoNumero('valorUnitarioProduto', valStr); await wait(900);
@@ -942,7 +955,7 @@ async function etapa_Produtos(dados) {
         // o postback pode limpar qtd/valor — re-aplica
         setCampoNumero('quantidadeProduto', qtdStr); await wait(600);
         setCampoNumero('valorUnitarioProduto', valStr); await wait(800);
-        logFAV('Pós-dispositivo → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"');
+        logFAV('Pós-dispositivo → qtd="' + lerCampo('quantidadeProduto') + '" valor="' + lerCampo('valorUnitarioProduto') + '"' + _totalEsperado());
       } else await wait(500);
 
       // 5.5) Observações Complementares (aba Produtos) — o texto vem do CONTRATO
