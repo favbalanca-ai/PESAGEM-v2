@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.8 (recarrega a aba quando a SEFAZ nao abre)
+// FAV NFA - Background Service Worker v7.11 (registro da NFA sem preflight de CORS + retentativas)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -33,6 +33,15 @@ function tratarMensagem(msg, sendResponse) {
   }
   if (msg.action === 'PROCESSAR_PDF_NFA') {
     processarPDF(msg).then(sendResponse).catch(e => sendResponse({ erro: e.message }));
+    return true;
+  }
+  // Nova tentativa do registro que ficou pendente, pedida pelo painel
+  if (msg.action === 'REENVIAR_REGISTRO') {
+    reenviarRegistroPendente().then(sendResponse).catch(e => sendResponse({ ok: false, erro: e.message }));
+    return true;
+  }
+  if (msg.action === 'TEM_REGISTRO_PENDENTE') {
+    chrome.storage.local.get(_REG_PEND, (d) => sendResponse({ ok: true, pendente: !!d[_REG_PEND] }));
     return true;
   }
   if (msg.action === 'LIMPAR_NFA') {
@@ -248,10 +257,63 @@ async function capturarPDFbaixado(item) {
     }
   } catch (e) {
     console.error('[FAV BG] captura do PDF falhou:', e);
-    avisarAbasSefaz({ action: 'NFA_FALHOU', erro: e.message });
+    avisarAbasSefaz({ action: 'NFA_FALHOU', erro: e.message, pendente: true });
   }
 }
 
+/* ── Por que dava "Failed to fetch" ────────────────────────────────────────
+   O envio ia com Content-Type: application/json. Para o navegador, isso NÃO é
+   uma requisição simples: ele manda antes um OPTIONS (preflight) para pedir
+   licença. O Apps Script não responde a OPTIONS, o preflight morre e o fetch
+   devolve exatamente "Failed to fetch" — sempre, não só às vezes.
+   O app (index.html) nunca passou por isso porque sempre usou text/plain, que
+   é requisição simples e vai direto. Agora a extensão faz igual, e o manifest
+   ganhou host_permissions do script.google.com, que tira a extensão da regra
+   de CORS de vez.
+   Também: o Apps Script engasga de vez em quando, e uma falha dessas
+   descartava a nota emitida. Agora tenta de novo e, se não for, guarda o
+   registro como pendente para uma nova tentativa. */
+const _REG_PEND = 'nfa_registro_pendente';
+async function postGAS(payload, tentativas) {
+  tentativas = tentativas || 3;
+  const espera = [0, 1500, 4000];
+  let ultimo = '';
+  for (let i = 0; i < tentativas; i++) {
+    if (espera[i]) await new Promise(r => setTimeout(r, espera[i]));
+    try {
+      const resp = await fetch(GAS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },   // simples: sem preflight
+        body: JSON.stringify(payload)
+      });
+      const txt = await resp.text();
+      if (!resp.ok) { ultimo = 'HTTP ' + resp.status + ' — ' + txt.slice(0, 120); continue; }
+      try { return JSON.parse(txt); }
+      catch (e) { ultimo = 'resposta não é JSON: ' + txt.slice(0, 120); continue; }
+    } catch (e) {
+      ultimo = e.message || String(e);
+      console.log('[FAV BG] tentativa ' + (i + 1) + '/' + tentativas + ' falhou:', GAS_URL, ultimo);
+    }
+  }
+  throw new Error(ultimo || 'sem resposta do servidor');
+}
+// Nova tentativa do registro que ficou pendente (chamada pelo painel)
+async function reenviarRegistroPendente() {
+  const st = await chrome.storage.local.get(_REG_PEND);
+  const pend = st[_REG_PEND];
+  if (!pend) return { ok: false, erro: 'não há registro pendente' };
+  try {
+    const data = await postGAS(pend);
+    if (data && data.ok) {
+      await chrome.storage.local.remove(_REG_PEND);
+      chrome.storage.local.remove('nfa_pendente');
+      chrome.storage.local.set({ nfa_concluida: data });
+      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa,
+        drive_url: data.drive_url, pasta_url: data.pasta_url, placa: pend.placa });
+    }
+    return data;
+  } catch (e) { return { ok: false, erro: e.message }; }
+}
 async function processarPDF(msg) {
   const { pdf_base64, pdf_url, dados_nfa } = msg;
   const payload = {
@@ -265,10 +327,17 @@ async function processarPDF(msg) {
     destinatario_whatsapp: dados_nfa.destinatario_whatsapp,
     data_emissao: new Date().toISOString(), produtos: dados_nfa.produtos
   };
-  const resp = await fetch(GAS_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-  if (!resp.ok) throw new Error('GAS retornou: ' + resp.status);
-  const data = await resp.json();
+  let data;
+  try {
+    data = await postGAS(payload);
+  } catch (e) {
+    // Guarda para tentar de novo: a nota já foi emitida na SEFAZ, perder o
+    // registro significa a nota existir e o app não saber.
+    try { await chrome.storage.local.set({ [_REG_PEND]: payload }); } catch (_) {}
+    throw e;
+  }
   if (data.ok) {
+    chrome.storage.local.remove(_REG_PEND);
     chrome.storage.local.remove('nfa_pendente');
     // O app faz polling de GET_NFA_CONCLUIDA para gravar o nº da NFA no ticket.
     // Sem guardar aqui, o app esperava para sempre e a nota nunca era marcada.

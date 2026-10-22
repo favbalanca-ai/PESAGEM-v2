@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.4 (confirma Condicionante na entrada da etapa Produtos + log neutro)
+// FAV NFA - Content Script v7.11 (registro da NFA sem preflight + nova tentativa)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -112,6 +112,7 @@ function _passosHTML(){
 // ─── OVERLAY + BOTÕES PARAR / CONTINUAR IA ────────────────────────────────────
 let _overlay = null;
 let _ultimaMsg = '', _ultimoTipo = 'info';
+let _registroPendente = false;   // nota emitida cujo registro no app ainda não foi aceito
 function atualizarStatus(msg, tipo = 'info') {
   _ultimaMsg = msg; _ultimoTipo = tipo;
   logFAV( typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
@@ -137,6 +138,11 @@ function atualizarStatus(msg, tipo = 'info') {
     '<div style="margin-top:6px">' +
     '<button id="fav-btn-registrar" style="width:100%;padding:8px;background:#0e7c66;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📄 Registrar NFA emitida (anexar PDF)</button>' +
     '</div>' +
+    /* A nota já saiu na SEFAZ; se o registro no app falhou, o PDF continua
+       guardado aqui e basta tentar de novo — sem precisar achar o arquivo. */
+    (_registroPendente
+      ? '<div style="margin-top:6px"><button id="fav-btn-retentar" style="width:100%;padding:8px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">↻ Tentar registrar de novo</button></div>'
+      : '') +
     '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
   const bp = _overlay.querySelector('#fav-btn-parar');
   if (bp) bp.onclick = () => {
@@ -182,6 +188,21 @@ function atualizarStatus(msg, tipo = 'info') {
     };
     if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(feito).catch(fallback);
     else fallback();
+  };
+  const bret = _overlay.querySelector('#fav-btn-retentar');
+  if (bret) bret.onclick = () => {
+    bret.textContent = '↻ Tentando...';
+    bret.disabled = true;
+    logFAV('Nova tentativa de registro (pendente guardado)');
+    chrome.runtime.sendMessage({ action: 'REENVIAR_REGISTRO' }, (r) => {
+      if (r && r.ok) { _registroPendente = false; return; }   // o background avisa com NFA_REGISTRADA
+      bret.textContent = '↻ Tentar registrar de novo';
+      bret.disabled = false;
+      logFAV('Nova tentativa falhou: ' + ((r && r.erro) || 'sem resposta'));
+      const m = _overlay.querySelector('#fav-status-msg');
+      if (m) m.innerHTML = '❌ Ainda não consegui registrar: ' + ((r && r.erro) || 'sem resposta') +
+        '<div style="font-size:11px;margin-top:5px">Dá para anexar o PDF à mão no botão acima.</div>';
+    });
   };
   // Registrar a nota já emitida anexando o PDF que a SEFAZ baixou
   const breg = _overlay.querySelector('#fav-btn-registrar');
@@ -278,6 +299,7 @@ if (!window.__FAV_NFA_MSG__) {
       return true; // resposta assíncrona
     }
     if (msg.action === 'NFA_REGISTRADA') {
+      _registroPendente = false;
       definirEtapa('registrar');
       logFAV('NFA registrada automaticamente do PDF baixado: nº ' + (msg.numero_nfa || '?'));
       atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (msg.numero_nfa || '—') +
@@ -288,8 +310,13 @@ if (!window.__FAV_NFA_MSG__) {
     }
     if (msg.action === 'NFA_FALHOU') {
       logFAV('Registro automático falhou: ' + (msg.erro || '?'));
+      _registroPendente = !!msg.pendente;
       atualizarStatus('⚠️ Não consegui registrar sozinho (' + (msg.erro || 'erro') + ').' +
-        '<div style="font-size:11px;margin-top:5px">Clique em <b>"📄 Registrar NFA emitida"</b> e anexe o PDF baixado.</div>', 'aviso');
+        '<div style="font-size:11px;margin-top:5px">' +
+        (msg.pendente
+          ? 'A nota <b>já foi emitida</b> e o PDF está guardado aqui: toque em <b>"↻ Tentar registrar de novo"</b>.'
+          : 'Clique em <b>"📄 Registrar NFA emitida"</b> e anexe o PDF baixado.') +
+        '</div>', 'aviso');
     }
   });
 }
@@ -1042,6 +1069,18 @@ async function executarUnico(dados) {
 (async () => {
   try { if (sessionStorage.getItem('fav_nfa_parar') === '1') window.__FAV_NFA_PARAR__ = true; } catch(e){}
   if (window.__FAV_NFA_PARAR__) { atualizarStatus('⛔ Pausada. Clique "Continuar IA" para retomar.', 'aviso'); return; }
+  /* A página recarrega depois do "Enviar Nota". Se o registro tinha ficado
+     pendente, o botão de nova tentativa precisa reaparecer já nesta carga. */
+  try {
+    chrome.runtime.sendMessage({ action: 'TEM_REGISTRO_PENDENTE' }, (r) => {
+      if (r && r.pendente) {
+        _registroPendente = true;
+        logFAV('Há um registro de NFA pendente neste computador');
+        atualizarStatus('⚠️ Tem uma nota emitida esperando registro no app.' +
+          '<div style="font-size:11px;margin-top:5px">Toque em <b>"↻ Tentar registrar de novo"</b>.</div>', 'aviso');
+      }
+    });
+  } catch (e) {}
   atualizarStatus('🤖 Automação carregada. Procurando dados da NFA...', 'info');
   await wait(1200);
   let dados = (typeof window !== 'undefined' && window.__FAV_NFA_DADOS__) ? window.__FAV_NFA_DADOS__ : null;
