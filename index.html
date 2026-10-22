@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v178"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v179"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2427,6 +2427,24 @@ function _entregueContrato(ctN){
       kg+=parseFloat(o.cargaLiquida||0)*1000;
   });
   return kg;
+}
+/* Volume, entregue e saldo de um contrato, já na unidade DELE.
+   A unidade mora na lista de Contratos NFA; quando ela não está carregada,
+   _volKgContrato devolve o número cru e a tela mostrava quilo onde era
+   tonelada — foi assim que um contrato de 367,859 t virou "367.859 kg" e o
+   saldo apareceu como −24.332. Agora o aviso vai junto, em vez de o número
+   errado passar calado. */
+function _volumesContrato(o){
+  if(!o) return null;
+  var u=_unidContrato(o.n);
+  var volKg=_volKgContrato(o);
+  if(!(volKg>0)) return null;
+  var entKg=_entregueContrato(o.n);
+  return {
+    conhecida: !!u,
+    volKg: volKg, entKg: entKg, saldoKg: volKg-entKg,
+    fmt: function(kg){ return _qtdUnidNota(kg, u||'KG', o.p); }
+  };
 }
 // Calcula o estoque por produto DIRETO das recepções (cloudRec) + contratos de venda
 // (contratosCloud) + expedições (cloud), sem depender da aba Estoque do backend.
@@ -3448,19 +3466,21 @@ function infoOC(v){
   if(!o){el.style.display='none';return;}
   var entregues=0;
   for(var j=0;j<cloud.length;j++){var x=cloud[j];if(_mesmoContrato(x.numOrdem,v)&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
-  const vol=_volKgContrato(o);
-  const saldo=vol>0?vol-entregues:null;
+  const vc=_volumesContrato(o);
+  const vol=vc?vc.volKg:0;
+  const saldo=vc?vc.saldoKg:null;
   var balNum=parseInt(o.bal)||1;
   var balNome=balNum===2?'Balança 2 — Espora':'Balança 1 — Água Viva';
   let html='📋 <b>'+o.n+'</b>';
   if(o.p) html+=' · '+o.p;
   if(o.d) html+=' · '+o.d;
   html+=' · <b>⚖️ '+balNome+'</b>';
-  if(vol>0){
+  if(vc){
     const cor=saldo<=0?'var(--r1)':saldo<vol*0.1?'var(--a1)':'var(--g1)';
-    html+='<br>📦 Volume: <b>'+vol.toLocaleString('pt-BR')+' kg</b>';
-    html+=' · Entregue: <b>'+Math.round(entregues).toLocaleString('pt-BR')+' kg</b>';
-    html+=' · <span style="color:'+cor+';font-weight:800">Saldo: '+Math.round(saldo).toLocaleString('pt-BR')+' kg</span>';
+    html+='<br>📦 Volume: <b>'+vc.fmt(vc.volKg)+'</b>';
+    html+=' · Entregue: <b>'+vc.fmt(vc.entKg)+'</b>';
+    html+=' · <span style="color:'+cor+';font-weight:800">Saldo: '+vc.fmt(vc.saldoKg)+'</span>';
+    if(!vc.conhecida) html+='<br><span style="color:var(--a1);font-size:10px;font-weight:700">⚠️ Unidade do contrato ainda não carregada — números acima em kg. Toque ☁️ nos Contratos para confirmar.</span>';
   }
   if(o.o) html+='<br>'+o.o;
   el.style.display='block'; el.innerHTML=html;
@@ -3571,7 +3591,9 @@ function rOC(){
     html+='<div style="font-size:10px;color:'+balCor2+';font-weight:700;margin-top:1px">'+balLbl2+'</div>';
     html+='<div style="font-size:11px;color:var(--ink3);margin-top:1px">'+(o.p||'—')+' · '+(o.d||'—')+'</div>';
     if(vol>0){
-      html+='<div style="font-size:11px;color:var(--ink2);margin-top:3px">📦 Total: <b>'+vol.toLocaleString('pt-BR')+'kg</b> · Entregue: <b>'+Math.round(entregues).toLocaleString('pt-BR')+'kg</b> · <b style="color:'+cor+'">Saldo: '+Math.round(saldo).toLocaleString('pt-BR')+'kg</b></div>';
+      var _vc=_volumesContrato(o);
+      var _f=_vc?_vc.fmt:function(kg){return Math.round(kg).toLocaleString('pt-BR')+' kg';};
+      html+='<div style="font-size:11px;color:var(--ink2);margin-top:3px">📦 Total: <b>'+_f(vol)+'</b> · Entregue: <b>'+_f(entregues)+'</b> · <b style="color:'+cor+'">Saldo: '+_f(saldo)+'</b></div>';
       html+='<div style="background:#e0e0e0;border-radius:4px;height:4px;margin-top:5px"><div style="background:'+(pct>=100?'var(--r1)':pct>=90?'var(--a1)':'var(--g1)')+';width:'+pct+'%;height:4px;border-radius:4px"></div></div>';
     }
     if(o.o) html+='<div style="font-size:10px;color:var(--ink3);margin-top:3px">'+o.o+'</div>';
@@ -7027,6 +7049,21 @@ function openApp(u) {
   loadDB(); loadCfg(); initSig(); initDark();
   // Atualiza permissões da planilha em segundo plano (vale no próximo login)
   carregarPermissoes().then(aplicarPermsAoUsr);
+
+  /* A UNIDADE de cada contrato (kg, tonelada, saca) só existe na lista de
+     Contratos NFA, que é uma tela de admin. Quem só pesa nunca carregava essa
+     lista, e aí o volume do contrato aparecia como se fosse quilo — um
+     contrato de 367,859 t virava "367.859 kg" e o saldo saía negativo logo na
+     primeira carga. Carregar uma vez ao entrar resolve para todo mundo. */
+  if (navigator.onLine && !(contratosNFA||[]).length) {
+    carregarContratosNFAP().then(function(){
+      try{
+        var box=document.getElementById('oc-info'), cmp=document.getElementById('f-oc');
+        if(box && box.style.display!=='none' && cmp) infoOC(cmp.value);
+        if(document.getElementById('lst-oc')) rOC();
+      }catch(e){}
+    });
+  }
 
   // Admin UI — contratos e dashboard SOMENTE para admin
   const btnAdmin = document.getElementById('btn-admin');
