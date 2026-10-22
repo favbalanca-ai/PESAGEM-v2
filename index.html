@@ -445,7 +445,7 @@ body.dark .card{background:#1a2d22}
     </div>
     <div class="sbar" style="margin-top:10px">
       <div class="stxt" id="stxt-rec">☁️ Sincronizado</div>
-      <button class="bsync adm-only" style="display:none;margin-right:6px" onclick="irDiag()">🔍 Diag</button>
+      <button class="bsync" style="margin-right:6px" onclick="irDiag()">🔍 Diag</button>
       <button class="bsync" onclick="syncRecManual()">Sincronizar</button>
     </div>
     <div style="margin-top:10px" id="rec-estoque-cards"></div>
@@ -506,7 +506,9 @@ body.dark .card{background:#1a2d22}
       <div class="hb" onclick="irAg()"><div class="hi">⏳</div><div class="ht">Aguardando</div><div class="hs" id="ag-s">Nenhum</div><div class="bcnt" id="ag-c">0</div></div>
       <div class="hb" onclick="irHist()"><div class="hi">📊</div><div class="ht">Histórico</div><div class="hs">Todos os registros</div></div>
       <div class="hb" id="btn-admin" style="display:none" onclick="irOrdens()"><div class="hi">📝</div><div class="ht">Contratos</div><div class="hs">Cadastro</div></div>
-      <div class="hb adm-only" style="display:none" onclick="irDiag()"><div class="hi">🔍</div><div class="ht">Diagnóstico</div><div class="hs" id="diag-hs">Sync OK</div></div>
+      <!-- Diagnóstico para todo mundo: é a tela que responde "a pesagem subiu?",
+           e quem precisa saber isso na hora é justamente quem está na balança. -->
+      <div class="hb" onclick="irDiag()"><div class="hi">🔍</div><div class="ht">Diagnóstico</div><div class="hs" id="diag-hs">Sync OK</div></div>
     </div>
   </div>
 
@@ -1332,7 +1334,7 @@ body.dark .card{background:#1a2d22}
     <div id="diag-pend-list" style="font-size:12px"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
       <button onclick="reenviarTodos()" style="background:var(--g1);border:none;color:#fff;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">↩️ Reenviar todos</button>
-      <button onclick="limparFilaInvalidos()" style="background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar inválidos</button>
+      <button class="adm-only" style="display:none;background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer" onclick="limparFilaInvalidos()">🗑️ Limpar inválidos</button>
     </div>
   </div>
 
@@ -1342,7 +1344,7 @@ body.dark .card{background:#1a2d22}
     <div id="diag-rec-list" style="font-size:12px"></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
       <button onclick="syncRecManual()" style="background:var(--g1);border:none;color:#fff;padding:6px 12px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">🔄 Sincronizar recepção</button>
-      <button onclick="limparFilaRecInvalidos()" style="background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer">🗑️ Limpar inválidos</button>
+      <button class="adm-only" style="display:none;background:none;border:1px solid var(--r1);color:var(--r1);padding:5px 12px;border-radius:7px;font-size:11px;cursor:pointer" onclick="limparFilaRecInvalidos()">🗑️ Limpar inválidos</button>
     </div>
   </div>
 
@@ -1561,7 +1563,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v183"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v184"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
