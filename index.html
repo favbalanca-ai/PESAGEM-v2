@@ -1561,7 +1561,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v182"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v183"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4588,6 +4588,17 @@ async function uploadFotosDrive(ordem){
               ordem.assinaturaUrl = j.url;
               const idx=DB.ordens.findIndex(x=>x.id===ordem.id);
               if(idx>=0){DB.ordens[idx].assinaturaUrl=j.url; saveDB();}
+              /* Guardar só aqui não servia de nada: o comentário dizia "para
+                 outros dispositivos" e a URL nunca saía deste aparelho. Agora
+                 vai para a planilha, que é o que todo mundo lê. Se o servidor
+                 ainda não conhecer a ação, falha sem incomodar ninguém. */
+              try{
+                fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+                  body:JSON.stringify({acao:'assinaturaUrl',dados:{id:ordem.id,url:j.url},token:TOKEN})})
+                  .then(function(r){return r.text();})
+                  .then(function(t){ try{ if(!JSON.parse(t).ok) addLog('⚠️ A planilha não guardou o link da assinatura — publique o Code.gs novo','aviso'); }catch(_){} })
+                  .catch(function(){});
+              }catch(_){}
             }
           }
         }catch(e){ addLog('❌ Foto '+item.nome+' ('+(ordem.placa||ordem.id)+') não foi para o Drive: '+e.message,'erro'); }
@@ -5173,9 +5184,10 @@ function rTicket(o){
   const sb=document.getElementById('tk-st');
   sb.className='st '+(st==='EXCEDIDO'?'er':st==='ATENÇÃO'?'wn':'ok');
   sb.textContent=st==='EXCEDIDO'?'🚨 EXCEDIDO':st==='ATENÇÃO'?'⚠️ ATENÇÃO':'✅ CONFORME';
-  if(o.assinatura && o.assinatura.length>10 && (o.assinatura.startsWith('data:') || o.assinatura.startsWith('http'))){
+  var _sig=_assinaturaDe(o);
+  if(_sig){
     document.getElementById('tk-sig-c').style.display='block';
-    document.getElementById('tk-sig-i').src=o.assinatura;
+    document.getElementById('tk-sig-i').src=_sig;
   } else {
     document.getElementById('tk-sig-c').style.display='none';
   }
@@ -6237,6 +6249,32 @@ function updHome(){
 function toast(m){const e=document.getElementById('tst');e.textContent=m;e.classList.add('on');setTimeout(()=>e.classList.remove('on'),3500);}
 
 // ── Normalizar dados vindos da planilha ───────────────────────
+/* ── Onde está a imagem da assinatura ───────────────────────────────
+   A planilha guarda só "Sim"/"Nao" na coluna Assinatura (a imagem em base64
+   não cabe lá). A imagem fica: no aparelho que assinou (localStorage sig_<id>),
+   dentro do próprio registro enquanto a pesagem está em andamento, ou no Drive
+   (assinaturaUrl). Procurar nos três, na mesma ordem, em todo lugar que mostra
+   assinatura — a tela do ticket olhava só o registro e por isso ficava sem. */
+function _assinaturaDe(o){
+  if(!o) return null;
+  try{
+    var local=localStorage.getItem('sig_'+o.id);
+    if(local && local.indexOf('data:')===0) return local;
+  }catch(e){}
+  var a=o.assinatura;
+  if(typeof a==='string' && (a.indexOf('data:')===0 || a.indexOf('http')===0)) return a;
+  var u=o.assinaturaUrl;
+  if(typeof u==='string' && (u.indexOf('data:')===0 || u.indexOf('http')===0)) return u;
+  return null;
+}
+// A planilha diz que foi assinada, mesmo sem a imagem estar neste aparelho
+function _assinouMasSemImagem(o){
+  if(!o || _assinaturaDe(o)) return false;
+  // normOrdem troca 'assinatura' pela imagem e guarda o que a planilha disse
+  // em 'assinaturaDito' — é ali que o "Sim" está depois de normalizar.
+  var a=String(o.assinaturaDito!=null?o.assinaturaDito:(o.assinatura||''));
+  return /^(sim|s|true|1)$/i.test(a.trim());
+}
 function normOrdem(o){
   const normD=v=>{if(!v)return '';const s=String(v);if(s.includes('T')||s.match(/^\d{4}-\d{2}-\d{2}/)){try{const d=new Date(s);if(!isNaN(d))return d.toLocaleDateString('pt-BR');}catch(e){}}return s;};
   const normH=v=>{if(!v)return '';const s=String(v);if(s.includes('T')){try{const d=new Date(s);if(!isNaN(d))return d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){}}return s.substring(0,5);};
@@ -6246,26 +6284,11 @@ function normOrdem(o){
     if(s.includes('T')){try{const d=new Date(s);if(!isNaN(d))return d.toLocaleDateString('pt-BR')+' '+d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});}catch(e){}}
     return s.replace(/^(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}):\d{2}.*$/, '$1');
   };
-  // Recuperar assinatura: prioridade → base64 local (localStorage) → URL do Drive → indicador
-  let assinatura = o.assinatura;
-  if(!assinatura || assinatura==='Nao' || assinatura==='nao' || assinatura===false || assinatura===null){
-    assinatura = null;
-  } else {
-    // Se já é base64 ou URL válida, usar direto
-    if(assinatura.startsWith('data:') || assinatura.startsWith('http')){
-      // ok, usar como está
-    } else {
-      // Veio "Sim" ou outro texto da planilha — buscar no localStorage pelo id
-      const sigLocal = localStorage.getItem('sig_'+o.id);
-      if(sigLocal && sigLocal.startsWith('data:')){
-        assinatura = sigLocal;
-      } else if(o.assinaturaUrl && (o.assinaturaUrl.startsWith('http') || o.assinaturaUrl.startsWith('data:'))){
-        assinatura = o.assinaturaUrl;
-      } else {
-        assinatura = null; // não temos a imagem neste dispositivo
-      }
-    }
-  }
+  /* Antes, assinatura vazia virava null sem procurar no aparelho: bastava a
+     planilha devolver a coluna em branco para o ticket dizer "sem assinatura"
+     mesmo com a imagem guardada aqui. */
+  const assinaturaOrig = o.assinatura;
+  const assinatura = _assinaturaDe(o);
   return{
     ...o,
     dataEntrada:  normD(o.dataEntrada),
@@ -6291,6 +6314,7 @@ function normOrdem(o){
                     if(!/finalizado/i.test(s)) return s;
                     return resto?('Finalizado - '+resto):'Finalizado'; })(),
     assinatura:   assinatura,
+    assinaturaDito: assinaturaOrig,   // o que a planilha respondeu ("Sim"/"Nao"/vazio)
     longo:        o.longo===true||o.longo==='Sim'||o.longo==='sim',
   };
 }
@@ -6429,16 +6453,7 @@ function _ticketHTML(o){
   const taraKg=Math.round((o.tara||0)*1000);
   const brutoKg=Math.round((o.pesoBruto||0)*1000);
   const cargaKg=Math.round((o.cargaLiquida||0)*1000);
-  // Assinatura: prioridade localStorage → objeto atual → URL Drive
-  let sigSrc = null;
-  const sigLocal = localStorage.getItem('sig_'+o.id);
-  if(sigLocal && sigLocal.startsWith('data:')){
-    sigSrc = sigLocal;
-  } else if(o.assinatura && (o.assinatura.startsWith('data:') || o.assinatura.startsWith('http'))){
-    sigSrc = o.assinatura;
-  } else if(o.assinaturaUrl && (o.assinaturaUrl.startsWith('http') || o.assinaturaUrl.startsWith('data:'))){
-    sigSrc = o.assinaturaUrl;
-  }
+  const sigSrc = _assinaturaDe(o);
 
   const mun=(o.municipio||'').trim();
   const uf=(o.estado||'').trim();
@@ -6509,7 +6524,12 @@ function _ticketHTML(o){
       <h3>✍️ Assinatura do Motorista</h3>
       ${sigSrc
         ?`<img src="${sigSrc}" alt="Assinatura" style="width:100%;max-height:120px;object-fit:contain;border:1px solid #e0e0e0;border-radius:6px">`
-        :`<div style="height:80px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px">Sem assinatura registrada</div>`
+        :(_assinouMasSemImagem(o)||_assinouMasSemImagem(atual)
+          // "Sem assinatura registrada" dava a entender que o motorista não
+          // assinou. Se a planilha diz que assinou, o que falta é a imagem,
+          // que fica no aparelho de quem colheu.
+          ?`<div style="height:80px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#888;font-size:11px;text-align:center;padding:0 10px">Assinado pelo motorista — imagem guardada no aparelho que registrou a pesagem</div>`
+          :`<div style="height:80px;border:1.5px dashed #ccc;border-radius:6px;display:flex;align-items:center;justify-content:center;color:#aaa;font-size:12px">Sem assinatura registrada</div>`)
       }
     </div>
     <div style="text-align:center;margin-top:16px;font-size:10px;color:#aaa;border-top:1px solid #eee;padding-top:10px">
