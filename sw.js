@@ -1,6 +1,6 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v186';
+const CACHE    = 'fav-v2-v187';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
@@ -48,9 +48,15 @@ self.addEventListener('fetch', e => {
 
   // HTML / navegação: NETWORK-FIRST → online sempre pega a versão nova
   // (evita ficar preso em cache antigo). Offline: cai pro cache.
+  //
+  // cache:'no-store' não é detalhe: o GitHub Pages manda o index.html com
+  // max-age de 10 minutos, e sem isso o próprio fetch aqui era respondido
+  // pelo cache HTTP do navegador. Resultado: versão nova publicada e o
+  // aparelho continuava abrindo a velha, mesmo fechando e abrindo o app —
+  // "network-first" buscava na rede mas recebia o arquivo guardado.
   if (req.mode === 'navigate' || req.destination === 'document') {
     e.respondWith(
-      fetch(req)
+      fetch(req, {cache: 'no-store'})
         .then(res => {
           if (res && res.ok) { const c = res.clone(); caches.open(CACHE).then(x => x.put('./index.html', c)); }
           return res;
