@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v175"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v176"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -9125,13 +9125,15 @@ function _comPonto(t){
   t=String(t||'').trim();
   return (!t||/[.;:]$/.test(t)) ? t : t+'.';
 }
-/* Quantidade na MESMA unidade em que a nota declara o produto — a conta por
-   dentro é toda em quilo, só a hora de escrever é que escolhe a unidade. */
-function _qtdUnidNota(kg,prod){
-  const u=String((prod&&prod.unidade)||'').toUpperCase();
-  if(u==='T')  return (kg/1000).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' TON';
-  if(u==='SC'){
-    const pk=_pesoSacoProduto(prod.produto)||60;
+/* Quantidade na unidade ESCOLHIDA NO CONTRATO — é nela que o contrato foi
+   fechado e é nela que o comprador confere. A conta por dentro é toda em
+   quilo; só a hora de escrever é que escolhe a unidade. */
+function _qtdUnidNota(kg,unidContrato,nomeProduto){
+  const u=String(unidContrato||'KG').toUpperCase();
+  if(u==='T'||u==='TON'||u==='TONELADA')
+    return (kg/1000).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' TON';
+  if(u==='SC'||u==='SACA'){
+    const pk=_pesoSacoProduto(nomeProduto)||60;   // 60 kg (ou 40, conforme o produto)
     return (kg/pk).toLocaleString('pt-BR',{maximumFractionDigits:3})+' SC';
   }
   return Math.round(kg).toLocaleString('pt-BR')+' KG';
@@ -9201,12 +9203,13 @@ function _prepararInfoExtraNFA(n){
   const numNosso  =(sel.indexOf('CONTRATO')>=0 && val.CONTRATO) ? val.CONTRATO : '';
   if(numEmpresa || numNosso) cab.push('CONTRATO '+(numEmpresa||numNosso));
   // Sem contrato na lista (ou contrato em cabeça), vale o que o servidor mandou
+  const unidCt=ctr?ctr.unidade:'';
   if(sel.indexOf('VOLUME')>=0){
-    const q=sld?_qtdUnidNota(sld.volKg,prod):val.VOLUME;
+    const q=sld?_qtdUnidNota(sld.volKg,unidCt,prod.produto):val.VOLUME;
     if(q) cab.push('QUANTIDADE '+q);
   }
   if(sel.indexOf('SALDO')>=0){
-    const q=sld?_qtdUnidNota(sld.saldoKg,prod):val.SALDO;
+    const q=sld?_qtdUnidNota(sld.saldoKg,unidCt,prod.produto):val.SALDO;
     if(q) cab.push('SALDO '+q);
   }
   _nfaInfoCab=_comPonto(cab.join(', '));
