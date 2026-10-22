@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v173"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v174"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -9102,16 +9102,40 @@ let _nfaPesoTicketKg=0; // peso líquido original do ticket (kg)
 //   CABEÇALHO = dados do contrato (CONTRATO/VOLUME/SALDO/MOTORISTA/CPF) — checkbox
 //   BASE      = info normal do contrato (sempre sai)
 //   EXTRA     = texto fiscal adicional — checkbox
-let _nfaInfoCab='', _nfaInfoBase='', _nfaInfoExtra='';
+/* Ordem do texto que sai na nota:
+     CABEÇALHO . TEXTO DO CONTRATO . TEXTO FISCAL . RODAPÉ
+   O motorista e o CPF ficam no RODAPÉ, depois do texto fiscal — é o lugar
+   onde o comprador espera encontrá-los. */
+let _nfaInfoCab='', _nfaInfoBase='', _nfaInfoExtra='', _nfaInfoRodape='';
 function _aplicarInfoExtraNFA(){
   if(!_nfaDados) return;
   const chkC=document.getElementById('nfa-prev-cab-chk');
   const chkE=document.getElementById('nfa-prev-extra-chk');
+  const comCab=(!chkC || chkC.checked);
   const partes=[];
-  if(_nfaInfoCab && (!chkC || chkC.checked)) partes.push(_nfaInfoCab);
+  if(_nfaInfoCab && comCab) partes.push(_nfaInfoCab);
   if(_nfaInfoBase) partes.push(_nfaInfoBase);
   if(_nfaInfoExtra && (!chkE || chkE.checked)) partes.push(_nfaInfoExtra);
-  _nfaDados.info_complementar=partes.join('\n');
+  if(_nfaInfoRodape && comCab) partes.push(_nfaInfoRodape);
+  // Um parágrafo só, como o comprador recebe — cada parte já termina em ponto
+  _nfaDados.info_complementar=partes.join(' ').replace(/\s+/g,' ').trim();
+}
+// Põe ponto no fim de um pedaço de texto, sem duplicar o que já tem
+function _comPonto(t){
+  t=String(t||'').trim();
+  return (!t||/[.;:]$/.test(t)) ? t : t+'.';
+}
+/* Quantidade na MESMA unidade em que a nota declara o produto. O volume e o
+   entregue ficam em quilo na planilha (o servidor soma kg na coluna Entregue,
+   qualquer que seja a unidade do contrato), então a conversão sai daqui. */
+function _qtdUnidNota(kg,prod){
+  const u=String((prod&&prod.unidade)||'').toUpperCase();
+  if(u==='T')  return (kg/1000).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' TON';
+  if(u==='SC'){
+    const pk=_pesoSacoProduto(prod.produto)||60;
+    return (kg/pk).toLocaleString('pt-BR',{maximumFractionDigits:3})+' SC';
+  }
+  return Math.round(kg).toLocaleString('pt-BR')+' KG';
 }
 // Qual campo do contrato é esta linha do cabeçalho ('' = não é nenhum)
 const RE_CAB_NFA=/^\s*(CONTRATO|VOLUME\s+CONTRATO|SALDO\s+DO\s+CONTRATO|MOTORISTA|CPF)\s*:/i;
@@ -9121,37 +9145,73 @@ function _chaveCampoNota(ln){
   const t=m[1].toUpperCase().replace(/\s+/g,' ');
   return t==='VOLUME CONTRATO' ? 'VOLUME' : (t==='SALDO DO CONTRATO' ? 'SALDO' : t);
 }
+/* Saldo do contrato, em quilo, contando esta carga UMA vez.
+   O servidor mandava "saldo atual − esta carga", mas a coluna Entregue da
+   planilha JÁ tinha somado esta pesagem (a NFA é emitida depois de finalizar),
+   então a carga era descontada duas vezes: 367.859 − 24.700 − 24.700 saía
+   318.459 onde o certo era 343.159. Aqui a conta é só volume − entregue, e o
+   entregue é o maior entre o da planilha e a soma das pesagens finalizadas
+   que o app conhece — assim nem falta (carga ainda não somada na planilha)
+   nem sobra (carga somada duas vezes). */
+function _saldoContratoNFA(n){
+  const ct=(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
+  if(!ct) return null;
+  const vol=Number(ct.volume_total)||0;
+  if(vol<=0) return null;
+  const entPlan=Number(ct.volume_entregue)||0;
+  const entApp=(cloud||[]).filter(function(o){
+      return _mesmoContrato(o.numOrdem,n.contrato_id) && String(o.status||'').includes('Finalizado');
+    }).reduce(function(s,o){ return s+parseFloat(o.cargaLiquida||0)*1000; },0);
+  return {volKg:vol, saldoKg:vol-Math.max(entPlan,entApp), ct:ct};
+}
 function _prepararInfoExtraNFA(n){
-  const p=_splitInfoContrato(n.info_complementar);
-  _nfaInfoExtra=p.extra;
+  /* Sempre a partir do texto ORIGINAL do servidor: _aplicarInfoExtraNFA
+     sobrescreve n.info_complementar com o texto já montado, e reparsear esse
+     texto montado duplicaria tudo. */
+  if(n._infoOriginal==null) n._infoOriginal=n.info_complementar;
+  const p=_splitInfoContrato(n._infoOriginal);
+  _nfaInfoExtra=_comPonto(p.extra);
   const sel=p.campos;   // o que ESTE contrato pediu para sair na nota
   // Separa o cabeçalho (linhas CONTRATO:/VOLUME/SALDO/MOTORISTA/CPF montadas
   // pelo backend no topo) da info normal do contrato
   const linhas=String(p.base||'').split('\n');
-  const cab=[]; let i=0;
+  const val={}; let i=0;
   while(i<linhas.length && RE_CAB_NFA.test(linhas[i])){
     const ln=linhas[i].trim(), k=_chaveCampoNota(ln);
-    if(!k || sel.indexOf(k)>=0) cab.push(ln);   // o servidor manda tudo; aqui fica só o escolhido
+    if(k) val[k]=ln.slice(ln.indexOf(':')+1).trim();
     i++;
   }
-  // PLACA, SAFRA e o contrato da empresa o servidor não monta — o app
-  // acrescenta quando pedidos
-  if(sel.indexOf('PLACA')>=0 && n.placa) cab.push('PLACA: '+n.placa);
-  if(sel.indexOf('SAFRA')>=0){
-    const ct=(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
-    if(ct && ct.safra) cab.push('SAFRA: '+ct.safra);
-  }
-  // Marcado mas em branco não vira linha vazia na nota
-  if(sel.indexOf('CTEMPRESA')>=0 && p.ctEmpresa) cab.push('CONTRATO EMPRESA: '+p.ctEmpresa);
-  _nfaInfoCab=cab.join('\n');
-  _nfaInfoBase=linhas.slice(i).join('\n').trim();
+  const prod=(n.produtos&&n.produtos[0])||{};
+  const sld=_saldoContratoNFA(n);
+  const ctr=sld?sld.ct:(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
+
+  /* CABEÇALHO: "CONTRATO 408697, QUANTIDADE 367,859 TON, SALDO 343,159 TON."
+     Quando existe o número da empresa, é ele que ocupa o CONTRATO — é o número
+     que o comprador procura; o nosso interno não diz nada para ele. */
+  const cab=[];
+  const numEmpresa=(sel.indexOf('CTEMPRESA')>=0 && p.ctEmpresa) ? p.ctEmpresa : '';
+  const numNosso  =(sel.indexOf('CONTRATO')>=0 && val.CONTRATO) ? val.CONTRATO : '';
+  if(numEmpresa || numNosso) cab.push('CONTRATO '+(numEmpresa||numNosso));
+  if(sel.indexOf('VOLUME')>=0 && sld) cab.push('QUANTIDADE '+_qtdUnidNota(sld.volKg,prod));
+  if(sel.indexOf('SALDO')>=0  && sld) cab.push('SALDO '+_qtdUnidNota(sld.saldoKg,prod));
+  _nfaInfoCab=_comPonto(cab.join(', '));
+
+  /* RODAPÉ: depois do texto fiscal, como o comprador espera ler. */
+  const rod=[];
+  if(sel.indexOf('MOTORISTA')>=0 && val.MOTORISTA) rod.push('MOTORISTA '+val.MOTORISTA.toUpperCase());
+  if(sel.indexOf('CPF')>=0       && val.CPF)       rod.push('CPF '+val.CPF);
+  if(sel.indexOf('PLACA')>=0     && n.placa)       rod.push('PLACA '+String(n.placa).toUpperCase());
+  if(sel.indexOf('SAFRA')>=0 && ctr && ctr.safra)  rod.push('SAFRA '+ctr.safra);
+  _nfaInfoRodape=rod.join(' ');
+
+  _nfaInfoBase=_comPonto(linhas.slice(i).join(' ').trim());
   const lnC=document.getElementById('nfa-ln-cab');
   if(lnC){
-    lnC.style.display=_nfaInfoCab?'flex':'none';
+    lnC.style.display=(_nfaInfoCab||_nfaInfoRodape)?'flex':'none';
     const chkC=document.getElementById('nfa-prev-cab-chk'); if(chkC) chkC.checked=true;
     // mostra exatamente o que vai sair, não uma lista fixa
     const sub=document.getElementById('nfa-prev-cab-sub');
-    if(sub) sub.textContent=cab.map(function(l){return l.split(':')[0].trim();}).join(' / ');
+    if(sub) sub.textContent=[_nfaInfoCab,_nfaInfoRodape].filter(Boolean).join(' ');
   }
   const ln=document.getElementById('nfa-ln-extra');
   if(ln){
