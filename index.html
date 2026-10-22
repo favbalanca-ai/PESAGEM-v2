@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v172"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v173"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1816,6 +1816,30 @@ async function login(){
     ? '❌ Não consegui falar com o servidor. Tente de novo.'
     : '📵 Sem internet e sem sessão guardada aqui. Conecte uma vez para entrar neste aparelho.';
   er.style.display='block';
+}
+/* ── Sessão recusada pelo servidor ────────────────────────────────
+   O aparelho guarda a sessão e abre o app sem perguntar nada ao servidor —
+   é isso que deixa trabalhar offline na balança. O efeito colateral: se a
+   assinatura deixou de valer (o segredo do servidor mudou, a lista de
+   usuários foi trocada, a implantação foi republicada), o app PARECE logado
+   e todas as chamadas são recusadas em silêncio. Era exatamente isso que
+   dava "entrei, mas não lê a planilha": tela vazia e nenhuma explicação.
+   Agora a primeira recusa do servidor manda a pessoa entrar de novo. */
+function _sessaoRecusada(j){
+  if(!j || j.ok!==false) return false;
+  if(!/sess(ã|a)o\s+inv|sess(ã|a)o\s+expirad|token\s+inv/i.test(String(j.erro||''))) return false;
+  try{ addLog('🔒 O servidor recusou a sessão deste aparelho — é preciso entrar de novo','erro'); }catch(e){}
+  try{ localStorage.removeItem(SESS_KEY); }catch(e){}
+  TOKEN='';
+  try{ toast('🔒 Sua sessão venceu — entre de novo'); }catch(e){}
+  try{
+    document.getElementById('app').style.display='none';
+    var tm=document.getElementById('tela-modo'); if(tm) tm.style.display='none';
+    document.getElementById('login').classList.remove('h');
+    var er=document.getElementById('l-err');
+    if(er){ er.textContent='🔒 O servidor recusou a sessão deste aparelho. Entre de novo (precisa de internet).'; er.style.display='block'; }
+  }catch(e){}
+  return true;
 }
 function checkSess(){
   const sv=_sessaoSalva();
@@ -2789,7 +2813,7 @@ function carregarContratosNFAP(){
     if(!navigator.onLine){res();return;}
     fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'listarContratosNFA',token:TOKEN})})
       .then(function(r){return r.json();})
-      .then(function(j){ if(j&&j.ok&&j.contratos) contratosNFA=j.contratos; res(); })
+      .then(function(j){ if(_sessaoRecusada(j)){ res(); return; } if(j&&j.ok&&j.contratos) contratosNFA=j.contratos; res(); })
       .catch(function(){res();});
   });
 }
@@ -3600,6 +3624,7 @@ function loadContratosDaPlanilha(){
     .then(function(t){
       try{
         var j=JSON.parse(t);
+        if(_sessaoRecusada(j)) return;
         if(j.ok&&j.contratos){
           contratosCloud=j.contratos;
           salvarContratosLocal();
@@ -4065,6 +4090,7 @@ function loadContratosNFADaPlanilha(){
     .then(function(t){
       try{
         var j=JSON.parse(t);
+        if(_sessaoRecusada(j)) return;
         contratosNFA=(j.ok&&j.contratos)?j.contratos:[];
         rContratosNFA();
       }catch(e){if(el)el.innerHTML='<div style="text-align:center;color:#c0392b;padding:14px">Erro ao carregar.</div>';}
@@ -5701,6 +5727,10 @@ async function carregarDaPlanilha(){
       addLog(`☁️ ${j.ordens.length} registro(s) carregados da planilha`,'ok');
       return true;
     }
+    // A planilha respondeu, mas recusando. Calar aqui era o que fazia a tela
+    // ficar vazia sem ninguém saber por quê.
+    if(_sessaoRecusada(j)) return false;
+    if(j&&j.erro) addLog('❌ A planilha respondeu: '+j.erro,'erro');
     return false;
   }catch(e){
     addLog(`❌ Erro ao carregar planilha: ${e.message}`,'erro');
@@ -8149,6 +8179,7 @@ async function carregarRecepcoes() {
     try {
       const r = await fetch(SHEETS_URL, {method:'POST',headers:{'Content-Type':'text/plain'},cache:'no-store',body:JSON.stringify({acao:'listarRecepcoes',token:TOKEN})});
       const j = await r.json();
+      if (_sessaoRecusada(j)) return;
       if (j.ok && j.recepcoes) {
         cloudRec = j.recepcoes;
         localStorage.setItem('pcloud-rec-v2', JSON.stringify(cloudRec.slice(0,200)));
@@ -8163,6 +8194,7 @@ async function carregarEstoque() {
     try {
       const r = await fetch(SHEETS_URL, {method:'POST',headers:{'Content-Type':'text/plain'},cache:'no-store',body:JSON.stringify({acao:'listarEstoque',token:TOKEN})});
       const j = await r.json();
+      if (_sessaoRecusada(j)) return;
       if (j.ok) {
         estoqueCloud = j;
         localStorage.setItem('estoque-v2', JSON.stringify(j));
