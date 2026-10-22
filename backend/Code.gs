@@ -152,6 +152,7 @@ function doPost(e){
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
+    if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame,d.tipo));
@@ -834,7 +835,7 @@ function salvarPesagem(o){
     n(o.totalEixos),s(o.formulaEixos),n(o.pbtMax||o.limPeso),
     n(o.tara),n(o.pesoBruto),n(o.cargaLiquida),
     s(o.status||"Aguardando"),s(o.funcionario),s(o.obs),
-    s(o.dataHoraFim),o.assinatura?"Sim":"Nao",
+    s(o.dataHoraFim),_colAssinatura(o),
     s(o.municipio),s(o.estado),b(o.longo)?"Sim":"Nao",
     s(o.transpCnpj),s(o.transpNome)
   ];
@@ -845,6 +846,31 @@ function salvarPesagem(o){
   sh.getRange(row,1,1,linha.length).setBackground(cor);
   if(st!==""){sh.getRange(row,18).setValue("Finalizado - "+st).setFontWeight("bold").setFontColor(st==="EXCEDIDO"?"#c0392b":"#1a5c45");}
   return{ok:true,id:s(o.id),row:row};
+}
+
+/* Coluna Assinatura: a imagem em base64 não cabe na planilha, então ali vai o
+   LINK do Drive quando existir — é o que permite o ticket aparecer assinado em
+   outro aparelho — e "Sim"/"Nao" quando não há link. O app já aceita as duas
+   coisas: se começar com http, mostra a imagem. */
+function _colAssinatura(o,jaGravado){
+  var u=s(o&&o.assinaturaUrl);
+  if(u.indexOf("http")===0) return u;
+  if(jaGravado && s(jaGravado).indexOf("http")===0) return jaGravado;
+  return (o&&o.assinatura)?"Sim":"Nao";
+}
+// Gravar só o link da assinatura, depois que a imagem subiu para o Drive
+function registrarAssinaturaUrl(d){
+  try{
+    var id=s(d&&d.id), url=s(d&&d.url);
+    if(!id || url.indexOf("http")!==0) return {ok:false,erro:"id ou url invalidos"};
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("Pesagem");
+    if(!sh || sh.getLastRow()<2) return {ok:false,erro:"Aba Pesagem vazia"};
+    var ids=sh.getRange(2,1,sh.getLastRow()-1,1).getValues();
+    for(var i=0;i<ids.length;i++){
+      if(s(ids[i][0])===id){ sh.getRange(i+2,22).setValue(url); return {ok:true}; }
+    }
+    return {ok:false,erro:"Pesagem nao encontrada: "+id};
+  }catch(e){ return {ok:false,erro:e.message}; }
 }
 
 function atualizarPesagem(o){
@@ -868,7 +894,10 @@ function atualizarPesagem(o){
   sh.getRange(row,17).setValue(n(o.cargaLiquida));
   sh.getRange(row,18).setValue(st!==""?"Finalizado - "+st:s(o.status));
   sh.getRange(row,21).setValue(s(o.dataHoraFim));
-  sh.getRange(row,22).setValue(o.assinatura?"Sim":"Nao");
+  /* Não sobrescreve o link do Drive com "Sim": quando o app manda um
+     'atualizar' depois do arquivamento, o que já está gravado vale mais. */
+  var _ja=s(sh.getRange(row,22).getValue());
+  sh.getRange(row,22).setValue(_colAssinatura(o,_ja));
   sh.getRange(row,23).setValue(s(o.municipio));
   sh.getRange(row,24).setValue(s(o.estado));
   if(o.longo!==undefined)sh.getRange(row,25).setValue(b(o.longo)?"Sim":"Nao");
