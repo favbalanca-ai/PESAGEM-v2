@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.12 (espera a caixa por evento, não por tempo fixo)
+// FAV NFA - Content Script v7.14 (painel montado uma vez, não refeito a cada aviso)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -57,6 +57,13 @@ async function preencherInput(seletores, valor) {
   await wait(200);
 }
 
+function _estaVisivel(el) {
+  if (!el) return false;
+  const st = window.getComputedStyle(el);
+  if (st.display === 'none' || st.visibility === 'hidden') return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
 async function clicarBotao(textos) {
   const lista = Array.isArray(textos) ? textos : [textos];
   const todos = Array.from(document.querySelectorAll('input[type=submit],input[type=button],button,a.btn,a[class*=button],a[id]'));
@@ -68,7 +75,9 @@ async function clicarBotao(textos) {
       const id  = (b.id || '').toLowerCase();
       return txt.includes(alvo) || val.includes(alvo) || id.includes(alvo.replace(/\s+/g,''));
     });
-    if (btn && btn.offsetParent !== null) { btn.click(); await wait(DELAY * 2); return; }
+    // offsetParent não serve para elemento em container position:fixed (lá ele
+    // é sempre null); o retângulo diz melhor se o botão está mesmo na tela
+    if (btn && _estaVisivel(btn)) { btn.click(); await wait(DELAY * 2); return; }
   }
   throw new Error('Botão não encontrado: ' + lista[0]);
 }
@@ -125,20 +134,20 @@ function _totalEsperado() {
   } catch (e) { return ''; }
 }
 let _registroPendente = false;   // nota emitida cujo registro no app ainda não foi aceito
-function atualizarStatus(msg, tipo = 'info') {
-  _ultimaMsg = msg; _ultimoTipo = tipo;
-  logFAV( typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
-  if (!_overlay) {
-    _overlay = document.createElement('div');
-    _overlay.id = 'fav-nfa-overlay';
-    _overlay.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;background:#1a3a6c;color:white;padding:14px 18px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Arial,sans-serif;font-size:13px;min-width:300px;max-width:380px;line-height:1.5;';
-    document.body.appendChild(_overlay);
-  }
-  const cores = { info:'#1a3a6c', ok:'#1a6c3c', erro:'#c0392b', aviso:'#e67e22' };
-  _overlay.style.background = cores[tipo] || cores.info;
-  _overlay.innerHTML = '<div style="font-weight:bold;margin-bottom:6px">🤖 FAV — Automação NFA</div>' +
-    _passosHTML() +
-    '<div id="fav-status-msg" style="margin-bottom:8px;border-top:1px solid rgba(255,255,255,.25);padding-top:7px">' + msg + '</div>' +
+/* O painel era REFEITO inteiro a cada mudança de status — innerHTML novo e
+   todos os botões recriados, várias vezes por minuto. Além do trabalho à toa,
+   um clique do usuário podia cair num botão que acabara de ser substituído.
+   Agora ele é montado UMA vez; a cada atualização mudam só a cor, a lista de
+   etapas e o texto. */
+function _montarPainel() {
+  if (_overlay && document.body.contains(_overlay)) return _overlay;
+  _overlay = document.createElement('div');
+  _overlay.id = 'fav-nfa-overlay';
+  _overlay.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;background:#1a3a6c;color:white;padding:14px 18px;border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,0.4);font-family:Arial,sans-serif;font-size:13px;min-width:300px;max-width:380px;line-height:1.5;';
+  _overlay.innerHTML =
+    '<div style="font-weight:bold;margin-bottom:6px">🤖 FAV — Automação NFA</div>' +
+    '<div id="fav-passos"></div>' +
+    '<div id="fav-status-msg" style="margin-bottom:8px;border-top:1px solid rgba(255,255,255,.25);padding-top:7px"></div>' +
     '<div style="display:flex;gap:6px">' +
     '<button id="fav-btn-parar" style="flex:1;padding:8px;background:#c0392b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">⛔ PARAR</button>' +
     '<button id="fav-btn-continuar" style="flex:1;padding:8px;background:#1a6c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">▶ Continuar IA</button>' +
@@ -150,12 +159,9 @@ function atualizarStatus(msg, tipo = 'info') {
     '<div style="margin-top:6px">' +
     '<button id="fav-btn-registrar" style="width:100%;padding:8px;background:#0e7c66;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📄 Registrar NFA emitida (anexar PDF)</button>' +
     '</div>' +
-    /* A nota já saiu na SEFAZ; se o registro no app falhou, o PDF continua
-       guardado aqui e basta tentar de novo — sem precisar achar o arquivo. */
-    (_registroPendente
-      ? '<div style="margin-top:6px"><button id="fav-btn-retentar" style="width:100%;padding:8px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">↻ Tentar registrar de novo</button></div>'
-      : '') +
+    '<div style="margin-top:6px"><button id="fav-btn-retentar" style="display:none;width:100%;padding:8px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">↻ Tentar registrar de novo</button></div>' +
     '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
+  document.body.appendChild(_overlay);
   const bp = _overlay.querySelector('#fav-btn-parar');
   if (bp) bp.onclick = () => {
     window.__FAV_NFA_PARAR__ = true;
@@ -231,6 +237,21 @@ function atualizarStatus(msg, tipo = 'info') {
       } catch (e) { atualizarStatus('❌ Não consegui ler o PDF: ' + e.message, 'erro'); }
     };
   }
+  return _overlay;
+}
+function atualizarStatus(msg, tipo = 'info') {
+  _ultimaMsg = msg; _ultimoTipo = tipo;
+  logFAV( typeof msg === 'string' ? msg.replace(/<[^>]+>/g,' ') : msg);
+  _montarPainel();
+  const cores = { info:'#1a3a6c', ok:'#1a6c3c', erro:'#c0392b', aviso:'#e67e22' };
+  _overlay.style.background = cores[tipo] || cores.info;
+  const passos = _overlay.querySelector('#fav-passos');
+  if (passos) passos.innerHTML = _passosHTML();
+  const m = _overlay.querySelector('#fav-status-msg');
+  if (m) m.innerHTML = msg;
+  // a nota emitida que ainda não foi registrada no app
+  const bret = _overlay.querySelector('#fav-btn-retentar');
+  if (bret) bret.style.display = _registroPendente ? 'block' : 'none';
 }
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
 
