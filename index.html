@@ -1363,6 +1363,9 @@ body.dark .card{background:#1a2d22}
     <div class="ct">🗂️ Arquivos no Drive</div>
     <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Junta pastas repetidas de fotos/tickets criadas por envios simultâneos. Move o conteúdo para a pasta mais antiga.</div>
     <button onclick="consolidarPastasDrive()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🗂️ Consolidar pastas duplicadas</button>
+    <div style="font-size:11px;color:var(--ink3);margin:12px 0 8px;border-top:1px dashed var(--brd);padding-top:10px">As pesagens antigas abrem sem assinatura em quem não colheu, porque o link não era gravado na planilha. A imagem está no Drive — isto vai buscar e gravar o link.</div>
+    <button onclick="recuperarAssinaturas()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🖋️ Recuperar assinaturas antigas</button>
+    <div id="diag-rec-sig" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
   </div>
 
   <!-- Log de eventos -->
@@ -1563,7 +1566,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v185"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v186"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5604,6 +5607,42 @@ function _avisoServidor(ctx){
   toast('❌ O servidor não respondeu — abra 🔍 Diagnóstico e toque em Testar servidor');
   try{ addLog('❌ Aparelho com internet, mas o servidor não respondeu'+(ctx?' ('+ctx+')':'')+'. Conferir a implantação do Apps Script.','erro'); }catch(e){}
 }
+/* Varre a planilha procurando no Drive a assinatura de cada pesagem antiga e
+   grava o link na coluna. Vai em blocos porque o Apps Script corta em 6
+   minutos: o servidor devolve quantas faltam e aqui a gente chama de novo até
+   zerar, mostrando o andamento — uma chamada só pareceria travada. */
+async function recuperarAssinaturas(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  var el=document.getElementById('diag-rec-sig');
+  if(!confirm('Procurar no Drive a assinatura das pesagens antigas e gravar o link na planilha?\n\nPode levar alguns minutos. Nada é apagado.')) return;
+  var inicio=0, achadas=0, vistas=0, voltas=0;
+  if(el) el.innerHTML='⏳ Procurando...';
+  while(voltas++ < 60){
+    var j;
+    try{
+      var r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({acao:'recuperarAssinaturas',inicio:inicio,limite:80,token:TOKEN})});
+      j=JSON.parse(await r.text());
+    }catch(e){
+      if(el) el.innerHTML='<span style="color:var(--r1)">❌ Parou em '+vistas+' pesagens: '+e.message+'</span>';
+      return;
+    }
+    if(!j||!j.ok){
+      if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+((j&&j.erro)||'o servidor recusou')+'</span>';
+      if(j&&/desconhecid|nao encontrad|not a function/i.test(String(j.erro||''))) toast('⚠️ Publique o Code.gs novo');
+      return;
+    }
+    achadas+=j.achadas||0; vistas+=j.vistas||0; inicio=j.proxima||0;
+    if(el) el.innerHTML='⏳ '+vistas+' de '+(j.total||'?')+' conferidas · <b>'+achadas+'</b> assinatura(s) recuperada(s)...';
+    if(!j.restantes) break;
+  }
+  try{ addLog('🖋️ Recuperação de assinaturas: '+achadas+' de '+vistas+' pesagens conferidas','ok'); }catch(e){}
+  if(el) el.innerHTML = achadas
+    ? '<b style="color:var(--g1)">✅ '+achadas+' assinatura(s) recuperada(s)</b> em '+vistas+' pesagens conferidas.<br><span style="color:var(--ink3)">Toque ☁️ no Histórico para recarregar e confira um ticket antigo.</span>'
+    : '<span style="color:var(--a1)">Nenhuma assinatura encontrada no Drive em '+vistas+' pesagens conferidas.</span>';
+}
+
 /* Junta no Drive as pastas repetidas criadas antes da correção (envios
    simultâneos). O conteúdo vai para a pasta mais antiga; as vazias vão p/ lixeira. */
 function consolidarPastasDrive(){
