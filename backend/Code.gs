@@ -153,6 +153,7 @@ function doPost(e){
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
+    if(d.acao==="recuperarAssinaturas") return resposta(recuperarAssinaturas(d.inicio,d.limite));
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame,d.tipo));
@@ -869,6 +870,74 @@ function _urlImagemDrive(u){
   var m=/\/d\/([a-zA-Z0-9_-]{10,})/.exec(u) || /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(u);
   return m ? "https://drive.google.com/thumbnail?id="+m[1]+"&sz=w1000" : u;
 }
+/* ══ RECUPERAR ASSINATURAS ANTIGAS ═══════════════════════════════
+   Até o v183 o link da assinatura não era gravado na planilha, então as
+   pesagens antigas abrem sem assinatura em qualquer aparelho que não seja o
+   que colheu. A imagem, porém, está no Drive desde sempre: o arquivamento das
+   fotos manda a assinatura junto, em
+     <Drive>/Fotos/<contrato>/<data>_<PLACA>/ASSINATURA.jpg
+   Esta rotina percorre a planilha, acha esse arquivo e grava o link na coluna
+   22. Vai em blocos por causa do limite de 6 minutos do Apps Script: devolve
+   quantas faltam e o app chama de novo até zerar. */
+function _pastaPorNome(pai,nome){
+  if(!pai||!nome) return null;
+  var it=pai.getFoldersByName(nome);
+  return it.hasNext()?it.next():null;
+}
+function _acharAssinaturaNoDrive(contrato,dataEntrada,placa,cache){
+  var ref=s(contrato).replace(/[^a-zA-Z0-9.\-]/g,"")||"SEM-CONTRATO";
+  var data=s(dataEntrada).replace(/\//g,"-");
+  var pl=s(placa).replace(/[^a-zA-Z0-9]/g,"")||"SEM-PLACA";
+  if(!data) return null;
+  var chave=(data+"_"+pl).replace(/[\/\\:*?"<>|]/g,"-");
+  var cacheKey=ref+"|"+chave;
+  if(cache.pastas[cacheKey]===undefined){
+    var raiz=cache.raiz||(cache.raiz=_pastaPorNome(DriveApp.getFolderById(DRIVE_ID),"Fotos"));
+    if(!raiz){ cache.pastas[cacheKey]=null; }
+    else{
+      if(cache.contratos[ref]===undefined) cache.contratos[ref]=_pastaPorNome(raiz,ref);
+      var subc=cache.contratos[ref];
+      cache.pastas[cacheKey]=subc?_pastaPorNome(subc,chave):null;
+    }
+  }
+  var ped=cache.pastas[cacheKey];
+  if(!ped) return null;
+  var arqs=ped.getFiles();
+  while(arqs.hasNext()){
+    var f=arqs.next();
+    if(/^ASSINATURA/i.test(f.getName())){
+      try{ f.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
+      return f.getUrl();
+    }
+  }
+  return null;
+}
+function recuperarAssinaturas(inicio,limite){
+  try{
+    inicio=Math.max(0,parseInt(inicio,10)||0);
+    limite=Math.min(150,Math.max(10,parseInt(limite,10)||80));
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("Pesagem");
+    if(!sh||sh.getLastRow()<2) return {ok:true,total:0,vistas:0,achadas:0,proxima:0,restantes:0};
+    var total=sh.getLastRow()-1;
+    var dados=sh.getRange(2,1,total,22).getValues();
+    var cache={raiz:null,contratos:{},pastas:{}};
+    var achadas=0, vistas=0, i;
+    var fim=Math.min(total,inicio+limite);
+    for(i=inicio;i<fim;i++){
+      vistas++;
+      var r=dados[i];
+      if(!s(r[0])) continue;                       // linha sem id
+      var atualCol=s(r[21]);
+      if(atualCol.indexOf("http")===0) continue;   // já tem link
+      if(s(r[17]).toLowerCase().indexOf("finaliz")<0) continue;  // só pesagem finalizada
+      var url=_acharAssinaturaNoDrive(r[3],fmtD(r[1]),r[4],cache);
+      if(url){ sh.getRange(i+2,22).setValue(url); achadas++; }
+    }
+    return {ok:true,total:total,vistas:vistas,achadas:achadas,
+            proxima:fim,restantes:Math.max(0,total-fim)};
+  }catch(e){ return {ok:false,erro:e.message}; }
+}
+
 // Gravar só o link da assinatura, depois que a imagem subiu para o Drive
 function registrarAssinaturaUrl(d){
   try{
