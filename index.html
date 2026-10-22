@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v179"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v180"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -2403,20 +2403,29 @@ function _contratoParecido(num){
   });
   return (melhor && dist<=2) ? melhor : '';
 }
-/* Volume do contrato em KG. A planilha guarda o volume na UNIDADE do contrato e
-   listarContratos manda o número cru — até agora todo contrato era em kg e dava
-   no mesmo. Com produto novo (laranja) a unidade pode ser T ou SC, e aí o mesmo
-   número significa 1.000× ou 60× mais. Quando a lista de Contratos NFA está
-   carregada dá pra saber a unidade; sem ela, vale o comportamento antigo (kg). */
+/* ── Como as duas coisas se encaixam ─────────────────────────────────
+   VOLUME TOTAL do contrato está SEMPRE em quilo na planilha (390.000,
+   600.000, 367.859...), e é em quilo que o entregue é somado — pelo servidor
+   e pelas pesagens. Então o controle do contrato dentro do app é todo em kg.
+   UNIDADE do contrato é a unidade em que a NOTA é emitida (o produto e o
+   preço do SEFAZ): tonelada, saca, quilo ou cabeça. Ela não diz nada sobre o
+   campo Volume Total — serve para converter na hora de escrever a nota.
+   Confundir as duas foi o que fez um contrato de 367.859 kg aparecer como
+   367,859 e o saldo sair negativo. */
 function _unidContrato(n){
   var c=(contratosNFA||[]).find(function(x){ return _mesmoContrato(x.id,n); });
   return c?String(c.unidade||''):'';
 }
 function _volKgContrato(ct){
   if(!ct) return 0;
-  var v=parseFloat(ct.vol)||0; if(!v) return 0;
-  var u=_unidContrato(ct.n);
-  return u?v*_kgPorUnidade(u):v;
+  return parseFloat(ct.vol)||0;   // já é quilo
+}
+/* Volume menor que uma tonelada é quase certo erro de digitação: alguém pôs
+   o número em tonelada num campo que é em quilo (367,859 em vez de 367859).
+   Não mexemos no número — só avisamos, porque adivinhar aqui seria pior. */
+function _volSuspeito(ct){
+  var v=parseFloat(ct&&ct.vol)||0;
+  return v>0 && v<1000;
 }
 // Volume já entregue (kg) de um contrato de venda, medido pelas expedições
 // finalizadas (cloud) ligadas a ele — mesmo critério do card "Contratos".
@@ -2436,14 +2445,16 @@ function _entregueContrato(ctN){
    errado passar calado. */
 function _volumesContrato(o){
   if(!o) return null;
-  var u=_unidContrato(o.n);
   var volKg=_volKgContrato(o);
   if(!(volKg>0)) return null;
   var entKg=_entregueContrato(o.n);
+  var cab=String(_unidContrato(o.n)||'').toUpperCase().indexOf('CAB')===0;
   return {
-    conhecida: !!u,
+    suspeito: _volSuspeito(o),
     volKg: volKg, entKg: entKg, saldoKg: volKg-entKg,
-    fmt: function(kg){ return _qtdUnidNota(kg, u||'KG', o.p); }
+    // Controle do contrato em quilo, como foi pedido. Gado é contado em
+    // cabeça e não leva rótulo de peso.
+    fmt: function(v){ return Math.round(v).toLocaleString('pt-BR')+(cab?' cb':' kg'); }
   };
 }
 // Calcula o estoque por produto DIRETO das recepções (cloudRec) + contratos de venda
@@ -3480,7 +3491,7 @@ function infoOC(v){
     html+='<br>📦 Volume: <b>'+vc.fmt(vc.volKg)+'</b>';
     html+=' · Entregue: <b>'+vc.fmt(vc.entKg)+'</b>';
     html+=' · <span style="color:'+cor+';font-weight:800">Saldo: '+vc.fmt(vc.saldoKg)+'</span>';
-    if(!vc.conhecida) html+='<br><span style="color:var(--a1);font-size:10px;font-weight:700">⚠️ Unidade do contrato ainda não carregada — números acima em kg. Toque ☁️ nos Contratos para confirmar.</span>';
+    if(vc.suspeito) html+='<br><span style="color:var(--a1);font-size:10px;font-weight:700">⚠️ O Volume Total deste contrato está menor que 1 tonelada — confira o cadastro: esse campo é em QUILO (367.859, não 367,859).</span>';
   }
   if(o.o) html+='<br>'+o.o;
   el.style.display='block'; el.innerHTML=html;
@@ -9261,13 +9272,10 @@ function _saldoContratoNFA(n){
   // Gado conta em CABEÇA, não em quilo: converter daria número sem sentido na
   // nota, então aqui a gente devolve nada e o texto usa o que o servidor mandou.
   if(u.indexOf('CAB')===0) return null;
-  const vol=Number(ct.volume_total)||0;
-  if(vol<=0) return null;
-  /* O Volume Total é digitado NA UNIDADE do contrato (300 = 300 toneladas),
-     enquanto o entregue é somado em quilo — tanto pelo servidor quanto pelas
-     pesagens. Por isso o volume vira quilo antes de qualquer comparação; sem
-     isso, um contrato em tonelada ficaria 1.000× menor que o entregue. */
-  const volKg=vol*_kgPorUnidade(u);
+  // O Volume Total já está em quilo, igual ao entregue — a unidade do contrato
+  // só entra na hora de ESCREVER a nota (_qtdUnidNota).
+  const volKg=Number(ct.volume_total)||0;
+  if(volKg<=0) return null;
   const entPlan=Number(ct.volume_entregue)||0;
   const entApp=(cloud||[]).filter(function(o){
       return _mesmoContrato(o.numOrdem,n.contrato_id) && String(o.status||'').includes('Finalizado');
