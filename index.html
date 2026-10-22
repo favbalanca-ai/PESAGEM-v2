@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v176"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v177"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5814,10 +5814,26 @@ function _explicarRespostaBackend(txt,status){
     return 'O servidor devolveu uma página em vez de dados (status '+(status||'?')+') — reimplante o Apps Script como "Nova versão"';
   return 'Resposta inválida do servidor'+(status?(' (status '+status+')'):'');
 }
+/* O ping deixou de exigir sessão (para o Diagnóstico funcionar na tela de
+   login), então "Servidor OK" só diz que a implantação responde — e foi
+   exatamente isso que confundiu: servidor verde e todos os números zerados.
+   Quem está logado leva uma segunda pergunta, essa autenticada: é ela que
+   separa "servidor fora do ar" de "servidor de pé recusando esta sessão". */
+async function _checarSessaoServidor(){
+  if(!TOKEN) return {sem:true};
+  try{
+    const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'listarPermissoes',token:TOKEN})});
+    const j=JSON.parse(await r.text());
+    if(j&&j.ok) return {ok:true};
+    return {ok:false,erro:String((j&&j.erro)||'recusou sem dizer o motivo')};
+  }catch(e){ return {ok:false,erro:e.message}; }
+}
 async function testarBackend(){
   const el=document.getElementById('diag-backend');
   if(el) el.innerHTML='🔌 Testando conexão com o servidor...';
   const r=await pingBackend();
+  const ses=r.ok?await _checarSessaoServidor():null;
   if(el){
     el.style.background = r.ok ? 'var(--g3)' : 'var(--r2)';
     el.innerHTML = (r.ok
@@ -5826,7 +5842,14 @@ async function testarBackend(){
       + (r.ms!=null?' <span style="color:var(--ink3)">· '+r.ms+' ms</span>':'')
       // O que o servidor respondeu de fato — é o que identifica a causa
       + (r.bruto?'<div style="margin-top:6px;font-size:10px;color:var(--ink3);font-family:\'JetBrains Mono\',monospace;word-break:break-all;max-height:90px;overflow:auto">'+
-          r.bruto.replace(/</g,'&lt;')+'</div>':'');
+          r.bruto.replace(/</g,'&lt;')+'</div>':'')
+      // Leitura da planilha: é o que o "Servidor OK" sozinho não respondia
+      + (ses ? (ses.sem
+          ? '<div style="margin-top:6px;font-size:11px;color:var(--a1);font-weight:600">🔐 Sem sessão neste aparelho — entre no app para ler a planilha. Os números acima só enchem depois de entrar.</div>'
+          : (ses.ok
+            ? '<div style="margin-top:6px;font-size:11px;color:var(--g1);font-weight:600">✅ Leitura da planilha liberada para esta sessão</div>'
+            : '<div style="margin-top:6px;font-size:11px;color:var(--r1);font-weight:600">❌ O servidor respondeu, mas recusou esta sessão: '+String(ses.erro).replace(/</g,'&lt;')+'<br>Saia e entre de novo no app.</div>'))
+        : '');
   }
   addLog((r.ok?'✅ Ping servidor OK':'❌ Ping servidor: '+r.msg)+(r.ms!=null?' ('+r.ms+'ms)':''), r.ok?'ok':'erro');
   registrarPing(r);
@@ -5937,6 +5960,9 @@ async function conferirPesagens(){
   if(!log.length){ el.innerHTML='<span style="color:var(--ink3)">Nenhuma pesagem finalizada neste aparelho ainda.</span>'; return; }
   el.innerHTML='⏳ Conferindo '+log.length+' pesagem(ns) com a planilha...';
   if(!navigator.onLine){ el.innerHTML='<span style="color:var(--a1)">📵 Sem internet — conecte para conferir.</span>'; return; }
+  // "Não consegui ler" na tela de login mandava procurar defeito onde não há:
+  // sem sessão o servidor recusa a leitura, e isso é o esperado.
+  if(!TOKEN){ el.innerHTML='<span style="color:var(--a1)">🔐 Entre no app para conferir com a planilha.</span>'; return; }
   var ok=await carregarDaPlanilha();
   if(!ok){ el.innerHTML='<span style="color:var(--r1)">❌ Não consegui ler a planilha agora. Tente de novo.</span>'; return; }
   // Falta = não está na planilha, ou está lá sem o peso finalizado
@@ -5996,16 +6022,22 @@ function renderDiag(){
         <div style="font-size:10px;color:var(--ink3)">O card do dashboard usa a coluna <b>recepções</b> (soma real da planilha). Se a <b>aba Estoque</b> divergir, toque em <b>🔄 Recalcular</b> no dashboard.</div>
       </div>`;
     }catch(e){}
+    /* Sem sessão (Diagnóstico aberto na tela de login) nada da planilha foi
+       carregado. Mostrar "0" ali dizia que a planilha está VAZIA, que é outra
+       coisa bem diferente — por isso vai um traço e um aviso no topo. */
+    const semSessao=!TOKEN;
+    const nSe=v=>semSessao?'—':String(v);
     st.innerHTML=`
       <div style="display:flex;flex-direction:column;gap:6px">
+        ${semSessao?'<div style="background:var(--a2);color:#854F0B;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;line-height:1.4">🔐 Ninguém entrou neste aparelho ainda. Os números da planilha só aparecem depois de entrar no app — o traço (—) abaixo quer dizer "não consultado", não "zero".</div>':''}
         <div>🌐 Rede: <b style="color:${online?'var(--g1)':'var(--r1)'}">${online?'Online':'Offline'}</b></div>
         <div>🕐 Último sync bem-sucedido: <b>${ult}</b></div>
         <div>⏳ Aguardando envio: <b>${pendOk.length}</b></div>
         <div style="color:${pendFalhos.length>0?'var(--r1)':'var(--ink3)'}">🔴 Com falha (${MAX_TENTATIVAS} tentativas): <b>${pendFalhos.length}</b>${pendFalhos.length>0?' — toque em "Reenviar"':''}</div>
-        <div>☁️ Pesagens na planilha: <b>${cloud.length}</b></div>
-        <div>🌾 Recepções na planilha: <b>${(typeof cloudRec!=='undefined'?cloudRec.length:0)}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-rec-v2')||'[]').length}</b></div>
-        <div>🌱 Talhões: <b>${(typeof talhoes!=='undefined'?talhoes.length:0)}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-talhao-v2')||'[]').length}</b></div>
-        <div>📄 Contratos carregados: <b>${(typeof contratosCloud!=='undefined'?contratosCloud.length:0)}</b></div>
+        <div>☁️ Pesagens na planilha: <b>${nSe(cloud.length)}</b></div>
+        <div>🌾 Recepções na planilha: <b>${nSe((typeof cloudRec!=='undefined'?cloudRec.length:0))}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-rec-v2')||'[]').length}</b></div>
+        <div>🌱 Talhões: <b>${nSe((typeof talhoes!=='undefined'?talhoes.length:0))}</b> · pendentes: <b>${JSON.parse(localStorage.getItem('pend-talhao-v2')||'[]').length}</b></div>
+        <div>📄 Contratos carregados: <b>${nSe((typeof contratosCloud!=='undefined'?contratosCloud.length:0))}</b></div>
         ${reconHtml}
         <div style="color:var(--ink3)">👤 ${usr?usr.nome:'—'} · ⚖️ ${nomeBal(usr?usr.bal:0)} · 📦 ${APP_VER}</div>
       </div>`;
