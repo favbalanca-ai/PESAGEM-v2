@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v180"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v181"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3421,7 +3421,9 @@ function renderSelContrato(ocs,lista){
     var o=ocs[i];
     var vol=_volKgContrato(o);
     var entregues=0;
-    for(var j=0;j<cloud.length;j++){var x=cloud[j];if(x.numOrdem===o.n&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
+    // _mesmoContrato e não ===: "2026.cs 10" e "2026.CS-10" são o mesmo
+    // contrato, e com a comparação exata a carga não era descontada aqui
+    for(var j=0;j<cloud.length;j++){var x=cloud[j];if(_mesmoContrato(x.numOrdem,o.n)&&(x.status||'').indexOf('Finalizado')>=0)entregues+=parseFloat(x.cargaLiquida||0)*1000;}
     var saldo=vol>0?vol-entregues:null;
     var cor=saldo<=0?'var(--r1)':saldo<vol*0.1?'var(--a1)':'var(--g1)';
     var balLabel=o.bal===2?'⚖️ Balança 2 — Espora':'⚖️ Balança 1 — Água Viva';
@@ -3434,6 +3436,10 @@ function renderSelContrato(ocs,lista){
     if(adm && !o.lib) html+='<div style="font-size:10px;color:var(--a1);font-weight:700">Não liberado — o operador não vê este contrato</div>';
     html+='<div style="font-size:11px;color:var(--ink3)">'+(o.p||'—')+(o.d?' · '+o.d:'')+'</div>';
     if(vol>0) html+='<div style="font-size:11px;color:'+cor+';font-weight:600">Saldo: '+Math.round(saldo).toLocaleString('pt-BR')+'kg / '+vol.toLocaleString('pt-BR')+'kg</div>';
+    /* O número gravado é mostrado por extenso: "367,859" e "367.859" se
+       parecem demais na tela, e era aí que se perdia tempo achando que o app
+       tinha lido errado quando o cadastro é que estava em tonelada. */
+    if(_volSuspeito(o)) html+='<div style="font-size:10px;color:var(--r1);font-weight:700;margin-top:2px">⚠️ Cadastro em tonelada — este campo é em QUILO. O app leu '+vol.toLocaleString('pt-BR',{minimumFractionDigits:3})+' kg; para 367.859 kg digite 367859.</div>';
     html+='</div>';
   }
   lista.innerHTML=html||'<div style="padding:14px;text-align:center;font-size:12px;color:var(--ink3)">Nenhum contrato cadastrado.</div>';
@@ -3491,7 +3497,7 @@ function infoOC(v){
     html+='<br>📦 Volume: <b>'+vc.fmt(vc.volKg)+'</b>';
     html+=' · Entregue: <b>'+vc.fmt(vc.entKg)+'</b>';
     html+=' · <span style="color:'+cor+';font-weight:800">Saldo: '+vc.fmt(vc.saldoKg)+'</span>';
-    if(vc.suspeito) html+='<br><span style="color:var(--a1);font-size:10px;font-weight:700">⚠️ O Volume Total deste contrato está menor que 1 tonelada — confira o cadastro: esse campo é em QUILO (367.859, não 367,859).</span>';
+    if(vc.suspeito) html+='<br><span style="color:var(--r1);font-size:10px;font-weight:700">⚠️ Cadastro em tonelada — este campo é em QUILO. O app leu '+vol.toLocaleString('pt-BR',{minimumFractionDigits:3})+' kg; para 367.859 kg digite 367859.</span>';
   }
   if(o.o) html+='<br>'+o.o;
   el.style.display='block'; el.innerHTML=html;
