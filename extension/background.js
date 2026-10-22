@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.11 (registro da NFA sem preflight de CORS + retentativas)
+// FAV NFA - Background Service Worker v7.13 (PDF da nota renomeado e guardado na pasta escolhida)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -165,18 +165,63 @@ function ehPDF(item) {
   return /pdf/.test(mime) || /\.pdf$/i.test(nome) ||
          /\.pdf(\?|$)|pdf=|imprimir|impressao|danfe|relatorio|documento/i.test(url);
 }
-function nomeLocalNFA(dados) {
-  const so = (v) => String(v || '').replace(/[^A-Za-z0-9-]/g, '');
+/* ── Nome e lugar do PDF da nota ───────────────────────────────────────────
+   O arquivo pedido é AAAA.MM.DD.PRODUTO.NUMERO.pdf, dentro de uma pasta
+   escolhida no popup. Duas limitações do Chrome mandam no desenho:
+   1) a extensão só grava DENTRO de Downloads — "pasta" é uma subpasta de lá,
+      nada de C:\... ou de uma pasta do Drive;
+   2) o nome é decidido no instante do download, e aí o NÚMERO DA NOTA ainda
+      não existe: ele só aparece depois que o servidor lê o PDF. Por isso o
+      arquivo nasce com um nome provisório e é regravado com o nome final
+      assim que o número chega (o provisório é apagado). */
+const CFG_PADRAO = { cfg_pasta_nfa: 'NFA', cfg_manter_local: true };
+async function lerCfg() {
+  const d = await chrome.storage.local.get(Object.keys(CFG_PADRAO));
+  return {
+    pasta: (d.cfg_pasta_nfa != null ? d.cfg_pasta_nfa : CFG_PADRAO.cfg_pasta_nfa),
+    manter: (d.cfg_manter_local != null ? d.cfg_manter_local : CFG_PADRAO.cfg_manter_local)
+  };
+}
+function _limparPedaco(v, tamanho) {
+  return String(v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // tira acento
+    .toUpperCase().replace(/[^A-Z0-9]+/g, '-').replace(/^-+|-+$/g, '')
+    .slice(0, tamanho || 24);
+}
+function _pastaLimpa(p) {
+  return String(p || '').split('/').map(x => _limparPedaco(x, 40)).filter(Boolean).join('/');
+}
+// AAAA.MM.DD vindo da data do transporte (dd/MM/aaaa); sem ela, a de hoje
+function _dataArquivo(dados) {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(String((dados && dados.data_transporte) || ''));
+  if (m) return m[3] + '.' + m[2] + '.' + m[1];
   const d = new Date();
-  const data = d.getFullYear() + ('0' + (d.getMonth() + 1)).slice(-2) + ('0' + d.getDate()).slice(-2);
-  return ['NFA', so(dados.emitente) || 'FAV', so(dados.ticket_id) || 'ticket', so(dados.placa), data]
-    .filter(Boolean).join('-') + '.pdf';
+  return d.getFullYear() + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + ('0' + d.getDate()).slice(-2);
+}
+function _produtoArquivo(dados) {
+  const p = (dados && dados.produtos && dados.produtos[0]) || {};
+  // o grupo ("SOJA") diz mais num nome de arquivo que o nome inteiro do SEFAZ
+  return _limparPedaco(p.grupo || p.produto || 'PRODUTO', 18) || 'PRODUTO';
+}
+function nomeFinalNFA(dados, numero_nfa) {
+  return [_dataArquivo(dados), _produtoArquivo(dados), _limparPedaco(numero_nfa, 24) || 'SEM-NUMERO']
+    .join('.') + '.pdf';
+}
+function nomeLocalNFA(dados) {
+  // provisório: ainda não se sabe o número da nota
+  return [_dataArquivo(dados), _produtoArquivo(dados), 'AGUARDANDO-NUMERO'].join('.') + '.pdf';
 }
 // Renomeia o arquivo na pasta Downloads enquanto há uma NFA em andamento
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  chrome.storage.local.get('nfa_pendente', (d) => {
-    if (d.nfa_pendente && ehPDF(item)) suggest({ filename: nomeLocalNFA(d.nfa_pendente), conflictAction: 'uniquify' });
-    else suggest();
+  // O arquivo final é gravado por nós com o nome já pronto (vem de um data:);
+  // mexer nele aqui desfaria o trabalho.
+  if (/^data:/i.test(String(item.url || ''))) { suggest(); return; }
+  chrome.storage.local.get(['nfa_pendente', 'cfg_pasta_nfa'], (d) => {
+    if (d.nfa_pendente && ehPDF(item)) {
+      const pasta = _pastaLimpa(d.cfg_pasta_nfa != null ? d.cfg_pasta_nfa : CFG_PADRAO.cfg_pasta_nfa);
+      const nome = nomeLocalNFA(d.nfa_pendente);
+      suggest({ filename: (pasta ? pasta + '/' : '') + nome, conflictAction: 'uniquify' });
+    } else suggest();
   });
   return true; // resposta assíncrona
 });
@@ -244,13 +289,8 @@ async function capturarPDFbaixado(item) {
     const data = await processarPDF({ pdf_base64: b64, dados_nfa: dados });
     if (data && data.ok) {
       console.log('[FAV BG] NFA registrada automaticamente: nº', data.numero_nfa);
-      // "Recortar": a nota já está no Drive (pasta da placa + arquivo fiscal),
-      // então some com a cópia solta da pasta Downloads.
-      try {
-        chrome.downloads.removeFile(item.id, () => chrome.runtime.lastError);
-        chrome.downloads.erase({ id: item.id }, () => chrome.runtime.lastError);
-      } catch (e) { console.log('[FAV BG] não consegui limpar o Downloads:', e); }
-      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa,
+      const nomeFinal = await regravarComNumero(item, b64, dados, data.numero_nfa);
+      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa, arquivo: nomeFinal,
         drive_url: data.drive_url, pasta_url: data.pasta_url, placa: dados.placa });
     } else {
       avisarAbasSefaz({ action: 'NFA_FALHOU', erro: (data && data.erro) || 'o servidor recusou' });
@@ -313,6 +353,38 @@ async function reenviarRegistroPendente() {
     }
     return data;
   } catch (e) { return { ok: false, erro: e.message }; }
+}
+/* Troca o arquivo provisório pelo definitivo, agora que o número da nota
+   existe. Não dá para renomear um download já concluído, então o PDF é
+   gravado de novo (a partir do próprio conteúdo, sem baixar nada de volta) e
+   o provisório é apagado. Quem preferir não guardar cópia local desmarca no
+   popup e aí só o provisório é apagado. */
+async function regravarComNumero(item, b64, dados, numero_nfa) {
+  const cfg = await lerCfg();
+  const apagarProvisorio = () => {
+    try {
+      chrome.downloads.removeFile(item.id, () => chrome.runtime.lastError);
+      chrome.downloads.erase({ id: item.id }, () => chrome.runtime.lastError);
+    } catch (e) { console.log('[FAV BG] não consegui limpar o Downloads:', e); }
+  };
+  if (!cfg.manter) { apagarProvisorio(); return null; }
+  const pasta = _pastaLimpa(cfg.pasta);
+  const nome = (pasta ? pasta + '/' : '') + nomeFinalNFA(dados, numero_nfa);
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.downloads.download({
+        url: 'data:application/pdf;base64,' + b64,
+        filename: nome, conflictAction: 'uniquify', saveAs: false
+      }, (id) => (chrome.runtime.lastError ? reject(new Error(chrome.runtime.lastError.message)) : resolve(id)));
+    });
+    console.log('[FAV BG] NFA guardada como', nome);
+    apagarProvisorio();
+    return nome;
+  } catch (e) {
+    // Falhou a regravação: melhor ficar com o provisório do que sem nada
+    console.log('[FAV BG] não consegui regravar com o número da nota:', e.message);
+    return null;
+  }
 }
 async function processarPDF(msg) {
   const { pdf_base64, pdf_url, dados_nfa } = msg;
