@@ -916,10 +916,6 @@ body.dark .card{background:#1a2d22}
       <div class="tk"><span class="tkl">Funcionário</span><span class="tkv" id="tk-fn">—</span></div>
     </div>
     <div class="st" id="tk-st"></div>
-    <div class="card" id="tk-sig-c" style="display:none">
-      <div class="ct">✍️ Assinatura</div>
-      <img id="tk-sig-i" style="width:100%;border-radius:7px">
-    </div>
     <!-- Ordem de carregamento: o Adm anexa depois, pelo ticket do Histórico.
          Vai para a MESMA pasta da carga no Drive, junto das fotos e do ticket. -->
     <div class="card" id="tk-ordem-c" style="display:none">
@@ -1577,7 +1573,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v189"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v190"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5206,22 +5202,8 @@ function rTicket(o){
   const sb=document.getElementById('tk-st');
   sb.className='st '+(st==='EXCEDIDO'?'er':st==='ATENÇÃO'?'wn':'ok');
   sb.textContent=st==='EXCEDIDO'?'🚨 EXCEDIDO':st==='ATENÇÃO'?'⚠️ ATENÇÃO':'✅ CONFORME';
-  var _sig=_assinaturaDe(o);
-  var _sigC=document.getElementById('tk-sig-c'), _sigI=document.getElementById('tk-sig-i');
-  if(_sig){
-    _sigC.style.display='block';
-    /* A assinatura de outro aparelho vem como link do Drive. Se o arquivo
-       tiver perdido o compartilhamento, a imagem não carrega — melhor dizer
-       isso do que deixar o ícone de figura quebrada no ticket. */
-    _sigI.onerror=function(){
-      _sigI.onerror=null;
-      _sigC.innerHTML='<div style="font-size:11px;color:var(--ink3);text-align:center;padding:10px;border:1px dashed var(--brd);border-radius:7px">'+
-        'Assinado pelo motorista — não consegui abrir a imagem guardada no Drive.</div>';
-    };
-    _sigI.src=_sig;
-  } else {
-    _sigC.style.display='none';
-  }
+  /* A assinatura sai só no PDF, que é a via que o motorista leva e a que fica
+     arquivada. Na tela ela só ocupava espaço entre os pesos e os botões. */
   const btnEdit=document.getElementById('btn-edit-tk');
   if(btnEdit) btnEdit.style.display=(usr&&usr.nivel==='admin')?'block':'none';
   _renderOrdemTicket(o);
