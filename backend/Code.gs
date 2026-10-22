@@ -858,6 +858,17 @@ function _colAssinatura(o,jaGravado){
   if(jaGravado && s(jaGravado).indexOf("http")===0) return jaGravado;
   return (o&&o.assinatura)?"Sim":"Nao";
 }
+/* O link que o Drive devolve (getUrl) é a PÁGINA do arquivo — dentro de uma
+   <img> ela não carrega, aparece em branco. O endereço de miniatura carrega e
+   serve para qualquer tamanho de tela. A conversão é na leitura, então vale
+   também para os links já gravados. */
+function _urlImagemDrive(u){
+  u=s(u);
+  if(u.indexOf("http")!==0) return u;                 // "Sim"/"Nao" passam direto
+  if(u.indexOf("drive.google.com/thumbnail")>=0) return u;
+  var m=/\/d\/([a-zA-Z0-9_-]{10,})/.exec(u) || /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(u);
+  return m ? "https://drive.google.com/thumbnail?id="+m[1]+"&sz=w1000" : u;
+}
 // Gravar só o link da assinatura, depois que a imagem subiu para o Drive
 function registrarAssinaturaUrl(d){
   try{
@@ -954,6 +965,11 @@ function listarPesagens(){
       pbtMax:n(r[13]),limPeso:n(r[13]),tara:n(r[14]),
       pesoBruto:n(r[15]),cargaLiquida:n(r[16]),status:st,
       funcionario:s(r[18]),obs:s(r[19]),dataHoraFim:fmtDH(r[20]),statusPeso:sp,
+      /* A coluna 22 (Assinatura) era PULADA aqui: ia de dataHoraFim (col 21)
+         direto para municipio (col 23). Por isso o ticket aberto em outro
+         aparelho dizia "sem assinatura" mesmo com a nota assinada — o campo
+         nunca saía do servidor. */
+      assinatura:r[21]?_urlImagemDrive(s(r[21])):"",
       municipio:r[22]?s(r[22]):"",estado:r[23]?s(r[23]):"",
       longo:r[24]?s(r[24])==="Sim":false,
       transpCnpj:r[25]?s(r[25]):"",transpNome:r[26]?s(r[26]):"",
