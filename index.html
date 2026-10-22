@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v171"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v172"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3887,6 +3887,10 @@ const NFA_SEP_ADICIONAL='\n#TEXTO-ADICIONAL#\n';
    truque do texto fiscal adicional — então não muda nem o servidor nem a
    planilha. Contrato antigo (sem a linha) = as cinco de sempre. */
 const NFA_SEP_CAMPOS='#CAMPOS-NOTA#';
+/* O número que a EMPRESA compradora dá ao contrato. É dela, não nosso: não
+   tem como o servidor saber nem calcular, então é digitado no cadastro e fica
+   guardado junto com a escolha dos campos, no mesmo esquema de marcador. */
+const NFA_SEP_CTEMP='#CONTRATO-EMPRESA#';
 const NFA_CAMPOS=[
   {k:'CONTRATO',  rot:'Número do contrato'},
   {k:'VOLUME',    rot:'Volume do contrato'},
@@ -3894,7 +3898,8 @@ const NFA_CAMPOS=[
   {k:'MOTORISTA', rot:'Motorista'},
   {k:'CPF',       rot:'CPF do motorista'},
   {k:'PLACA',     rot:'Placa do caminhão'},
-  {k:'SAFRA',     rot:'Safra'}
+  {k:'SAFRA',     rot:'Safra'},
+  {k:'CTEMPRESA', rot:'Nº do contrato da empresa'}
 ];
 // O que o servidor já mandava: é o padrão de quem nunca escolheu nada,
 // para a nota continuar saindo igual até alguém mexer.
@@ -3904,26 +3909,39 @@ function _splitInfoContrato(s){
   s=String(s==null?'':s);
   const i=s.indexOf(NFA_SEP_ADICIONAL);
   const extra = i<0 ? '' : s.slice(i+NFA_SEP_ADICIONAL.length).trim();
-  let campos=null;
+  let campos=null, ctEmpresa='';
+  const reCampos=new RegExp('^\\s*'+NFA_SEP_CAMPOS+'\\s*(.*)$');
+  const reCtEmp =new RegExp('^\\s*'+NFA_SEP_CTEMP+'\\s*(.*)$');
   const base=(i<0?s:s.slice(0,i)).split('\n').filter(function(ln){
-    const m=new RegExp('^\\s*'+NFA_SEP_CAMPOS+'\\s*(.*)$').exec(ln);
-    if(!m) return true;
-    campos=m[1].split(/[,;]/).map(function(x){return x.trim().toUpperCase();}).filter(Boolean);
-    return false;
+    const mc=reCampos.exec(ln);
+    if(mc){
+      campos=mc[1].split(/[,;]/).map(function(x){return x.trim().toUpperCase();}).filter(Boolean);
+      return false;
+    }
+    const me=reCtEmp.exec(ln);
+    if(me){ ctEmpresa=me[1].trim(); return false; }
+    return true;
   }).join('\n').trim();
-  return {base:base, extra:extra, campos:campos||NFA_CAMPOS_PADRAO.slice()};
+  return {base:base, extra:extra, campos:campos||NFA_CAMPOS_PADRAO.slice(), ctEmpresa:ctEmpresa};
 }
-function _joinInfoContrato(base,extra,campos){
+function _joinInfoContrato(base,extra,campos,ctEmpresa){
   base=String(base==null?'':base).trim(); extra=String(extra==null?'':extra).trim();
-  if(campos) base=(base?base+'\n':'')+NFA_SEP_CAMPOS+' '+campos.join(',');
+  ctEmpresa=String(ctEmpresa==null?'':ctEmpresa).trim().replace(/[\r\n]+/g,' ');
+  if(ctEmpresa) base=(base?base+'\n':'')+NFA_SEP_CTEMP+' '+ctEmpresa;
+  if(campos)    base=(base?base+'\n':'')+NFA_SEP_CAMPOS+' '+campos.join(',');
   return extra ? (base+NFA_SEP_ADICIONAL+extra) : base;
 }
 
 /* As caixinhas de seleção. O mesmo HTML serve o cadastro (prefixo nc-cp-) e
    a edição (ec-cp-), para as duas telas nunca ficarem diferentes. */
-function _htmlCamposNota(pre,sel){
+function _htmlCamposNota(pre,sel,ctEmpresa){
   sel=sel||NFA_CAMPOS_PADRAO;
-  return '<div class="f"><label>Informações do contrato que saem na nota</label>'+
+  var esc=function(v){return String(v==null?'':v).replace(/"/g,'&quot;');};
+  return '<div class="f"><label>Nº do contrato da empresa <span style="font-weight:400;color:var(--ink3)">(o número que o comprador usa)</span></label>'+
+    '<input type="text" id="'+pre+'TXT-CTEMPRESA" value="'+esc(ctEmpresa)+'" placeholder="Ex.: 4500123456" '+
+    'oninput="_onCtEmpresaNota(\''+pre+'\')">'+
+  '</div>'+
+  '<div class="f"><label>Informações do contrato que saem na nota</label>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;margin-top:4px">'+
     NFA_CAMPOS.map(function(c){
       return '<label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:500;cursor:pointer;color:var(--ink)">'+
@@ -3946,11 +3964,23 @@ function _lerCamposNota(pre){
     var el=document.getElementById(pre+c.k); return el && el.checked;
   }).map(function(c){return c.k;});
 }
+function _lerCtEmpresa(pre){
+  var el=document.getElementById(pre+'TXT-CTEMPRESA');
+  return el ? el.value.trim() : '';
+}
+/* Quem digita o número da empresa está dizendo que quer ele na nota — marcar
+   a caixinha sozinho evita o caso de preencher e a nota sair sem nada. Quem
+   não quiser é só desmarcar; e apagar o número desmarca de volta. */
+function _onCtEmpresaNota(pre){
+  var chk=document.getElementById(pre+'CTEMPRESA');
+  if(chk) chk.checked=!!_lerCtEmpresa(pre);
+}
 function _marcarCamposNota(pre,sel){
   sel=sel||NFA_CAMPOS_PADRAO;
   NFA_CAMPOS.forEach(function(c){
     var el=document.getElementById(pre+c.k); if(el) el.checked=(sel.indexOf(c.k)>=0);
   });
+  var tx=document.getElementById(pre+'TXT-CTEMPRESA'); if(tx) tx.value='';
 }
 // Monta as caixinhas do cadastro. Este script roda depois do HTML da tela,
 // então o lugar onde elas entram já existe.
@@ -3992,7 +4022,7 @@ function addContratoNFA(){
       return m && u ? (m+' / '+u) : (m||u);
     })(),
     responsavel_frete: document.getElementById('nc-frete').value,
-    info_complementar: _joinInfoContrato(document.getElementById('nc-info').value, document.getElementById('nc-info2')?document.getElementById('nc-info2').value:'', _lerCamposNota('nc-cp-')),
+    info_complementar: _joinInfoContrato(document.getElementById('nc-info').value, document.getElementById('nc-info2')?document.getElementById('nc-info2').value:'', _lerCamposNota('nc-cp-'), _lerCtEmpresa('nc-cp-')),
     balanca: parseInt(document.getElementById('nc-bal').value)||1,
     obs: document.getElementById('nc-obs').value.trim()
   };
@@ -4109,7 +4139,7 @@ function abrirEditarContrato(idx){
       '<div class="f"><label>Responsável pelo Frete</label><select id="ec-frete" style="'+selSty+'">'+opt(['Destinatário','Remetente','Sem Frete'],c.responsavel_frete||'Destinatário')+'</select></div>'+
       '<div class="f"><label>Balança</label><select id="ec-bal" style="'+selSty+'"><option value="1"'+((Number(c.balanca)||1)===1?' selected':'')+'>Balança 1 — Água Viva</option><option value="2"'+(Number(c.balanca)===2?' selected':'')+'>Balança 2 — Espora</option></select></div>'+
       '<div class="f"><label>Informações Complementares (NFA)</label><input id="ec-info" value="'+esc(infoPartes.base)+'"></div>'+
-      _htmlCamposNota('ec-cp-',infoPartes.campos)+
+      _htmlCamposNota('ec-cp-',infoPartes.campos,infoPartes.ctEmpresa)+
       '<div class="f"><label>Texto fiscal adicional (opcional na emissão)</label><textarea id="ec-info2" rows="3" style="width:100%;padding:10px 13px;border:1.5px solid var(--brd);border-radius:var(--r2px);font-size:13px;font-family:\'Inter\',sans-serif;color:var(--ink);background:var(--card);resize:vertical">'+String(infoPartes.extra||'').replace(/</g,'&lt;')+'</textarea></div>'+
       '<div class="f"><label>Obs</label><input id="ec-obs" value="'+esc(c.obs)+'"></div>'+
       '<div class="f"><label>Status</label><select id="ec-status" style="'+selSty+'">'+opt(['Ativo','Inativo'],c.status||'Ativo')+'</select></div>'+
@@ -4147,7 +4177,7 @@ function salvarEditarContrato(idx){
     safra: g('ec-safra').value.trim(),
     origem_mercadoria: g('ec-origem').value.trim(),
     responsavel_frete: g('ec-frete').value,
-    info_complementar: _joinInfoContrato(g('ec-info').value, g('ec-info2')?g('ec-info2').value:'', _lerCamposNota('ec-cp-')),
+    info_complementar: _joinInfoContrato(g('ec-info').value, g('ec-info2')?g('ec-info2').value:'', _lerCamposNota('ec-cp-'), _lerCtEmpresa('ec-cp-')),
     balanca: parseInt(g('ec-bal').value)||1,
     obs: g('ec-obs').value.trim(),
     // preserva campos que não estão no formulário
@@ -9072,12 +9102,15 @@ function _prepararInfoExtraNFA(n){
     if(!k || sel.indexOf(k)>=0) cab.push(ln);   // o servidor manda tudo; aqui fica só o escolhido
     i++;
   }
-  // PLACA e SAFRA o servidor não monta — o app acrescenta quando pedidas
+  // PLACA, SAFRA e o contrato da empresa o servidor não monta — o app
+  // acrescenta quando pedidos
   if(sel.indexOf('PLACA')>=0 && n.placa) cab.push('PLACA: '+n.placa);
   if(sel.indexOf('SAFRA')>=0){
     const ct=(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
     if(ct && ct.safra) cab.push('SAFRA: '+ct.safra);
   }
+  // Marcado mas em branco não vira linha vazia na nota
+  if(sel.indexOf('CTEMPRESA')>=0 && p.ctEmpresa) cab.push('CONTRATO EMPRESA: '+p.ctEmpresa);
   _nfaInfoCab=cab.join('\n');
   _nfaInfoBase=linhas.slice(i).join('\n').trim();
   const lnC=document.getElementById('nfa-ln-cab');
