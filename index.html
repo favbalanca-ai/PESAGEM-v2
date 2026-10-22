@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v174"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v175"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -9125,9 +9125,8 @@ function _comPonto(t){
   t=String(t||'').trim();
   return (!t||/[.;:]$/.test(t)) ? t : t+'.';
 }
-/* Quantidade na MESMA unidade em que a nota declara o produto. O volume e o
-   entregue ficam em quilo na planilha (o servidor soma kg na coluna Entregue,
-   qualquer que seja a unidade do contrato), então a conversão sai daqui. */
+/* Quantidade na MESMA unidade em que a nota declara o produto — a conta por
+   dentro é toda em quilo, só a hora de escrever é que escolhe a unidade. */
 function _qtdUnidNota(kg,prod){
   const u=String((prod&&prod.unidade)||'').toUpperCase();
   if(u==='T')  return (kg/1000).toLocaleString('pt-BR',{minimumFractionDigits:3,maximumFractionDigits:3})+' TON';
@@ -9156,13 +9155,22 @@ function _chaveCampoNota(ln){
 function _saldoContratoNFA(n){
   const ct=(contratosNFA||[]).find(function(x){return _mesmoContrato(x.id,n.contrato_id);});
   if(!ct) return null;
+  const u=String(ct.unidade||'KG').toUpperCase();
+  // Gado conta em CABEÇA, não em quilo: converter daria número sem sentido na
+  // nota, então aqui a gente devolve nada e o texto usa o que o servidor mandou.
+  if(u.indexOf('CAB')===0) return null;
   const vol=Number(ct.volume_total)||0;
   if(vol<=0) return null;
+  /* O Volume Total é digitado NA UNIDADE do contrato (300 = 300 toneladas),
+     enquanto o entregue é somado em quilo — tanto pelo servidor quanto pelas
+     pesagens. Por isso o volume vira quilo antes de qualquer comparação; sem
+     isso, um contrato em tonelada ficaria 1.000× menor que o entregue. */
+  const volKg=vol*_kgPorUnidade(u);
   const entPlan=Number(ct.volume_entregue)||0;
   const entApp=(cloud||[]).filter(function(o){
       return _mesmoContrato(o.numOrdem,n.contrato_id) && String(o.status||'').includes('Finalizado');
     }).reduce(function(s,o){ return s+parseFloat(o.cargaLiquida||0)*1000; },0);
-  return {volKg:vol, saldoKg:vol-Math.max(entPlan,entApp), ct:ct};
+  return {volKg:volKg, saldoKg:volKg-Math.max(entPlan,entApp), ct:ct};
 }
 function _prepararInfoExtraNFA(n){
   /* Sempre a partir do texto ORIGINAL do servidor: _aplicarInfoExtraNFA
@@ -9192,8 +9200,15 @@ function _prepararInfoExtraNFA(n){
   const numEmpresa=(sel.indexOf('CTEMPRESA')>=0 && p.ctEmpresa) ? p.ctEmpresa : '';
   const numNosso  =(sel.indexOf('CONTRATO')>=0 && val.CONTRATO) ? val.CONTRATO : '';
   if(numEmpresa || numNosso) cab.push('CONTRATO '+(numEmpresa||numNosso));
-  if(sel.indexOf('VOLUME')>=0 && sld) cab.push('QUANTIDADE '+_qtdUnidNota(sld.volKg,prod));
-  if(sel.indexOf('SALDO')>=0  && sld) cab.push('SALDO '+_qtdUnidNota(sld.saldoKg,prod));
+  // Sem contrato na lista (ou contrato em cabeça), vale o que o servidor mandou
+  if(sel.indexOf('VOLUME')>=0){
+    const q=sld?_qtdUnidNota(sld.volKg,prod):val.VOLUME;
+    if(q) cab.push('QUANTIDADE '+q);
+  }
+  if(sel.indexOf('SALDO')>=0){
+    const q=sld?_qtdUnidNota(sld.saldoKg,prod):val.SALDO;
+    if(q) cab.push('SALDO '+q);
+  }
   _nfaInfoCab=_comPonto(cab.join(', '));
 
   /* RODAPÉ: depois do texto fiscal, como o comprador espera ler. */
