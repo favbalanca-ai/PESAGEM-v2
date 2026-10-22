@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.11 (registro da NFA sem preflight + nova tentativa)
+// FAV NFA - Content Script v7.12 (espera a caixa por evento, não por tempo fixo)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -447,8 +447,33 @@ function clicarRobusto(el){
   } catch(e){}
 }
 
+/* A página está processando? Enquanto o PrimeFaces trabalha ele põe um
+   bloqueio por cima da tela ("Aguarde..."). Olhar isso é o que permite
+   desistir cedo de esperar uma caixa que não vem. O content script roda em
+   mundo isolado e não enxerga PrimeFaces.ajax nem jQuery.active, então a
+   leitura é pelo DOM mesmo. */
+function _paginaOcupada() {
+  if (document.readyState !== 'complete') return true;
+  const sel = '.ui-blockui, [id$="_blocker"], .ui-ajax-status, #statusDialog, .ui-dialog[role="alertdialog"]';
+  return [...document.querySelectorAll(sel)].some(e => {
+    const st = window.getComputedStyle(e);
+    if (st.display === 'none' || st.visibility === 'hidden' || st.opacity === '0') return false;
+    // offsetParent não serve aqui: o bloqueio do PrimeFaces é position:fixed,
+    // e para esses o offsetParent é sempre null — a tela ficava "parada" com
+    // o bloqueio bem na frente.
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  });
+}
+/* Antes esta função varria o tempo INTEIRO antes de desistir: sem caixa
+   nenhuma na tela eram 8 segundos parados a cada chamada, 14 chamadas por
+   nota — cerca de 2 dos 3,5 minutos da emissão. Agora desiste assim que a
+   página está parada e nenhuma caixa apareceu; o tempo cheio só vale
+   enquanto a página ainda está processando alguma coisa. */
 async function confirmarCaixa(timeout = 8000) {
   const ini = Date.now();
+  const PASSO = 120, PARADA_OK = 700;
+  let parada = 0;
 
   // Um diálogo PrimeFaces está ABERTO se NÃO tem a classe ui-overlay-hidden e está no DOM visível
   function dialogAberto(d){
@@ -478,7 +503,10 @@ async function confirmarCaixa(timeout = 8000) {
       var chkBox = dlgCond.querySelector('.ui-chkbox-box');
       var marcado = chk ? chk.checked : (chkBox && /ui-state-active/.test(chkBox.className||''));
       if (!marcado) {
-        logFAV('confirmarCaixa: Condicionante -> marcando "Aceito os Termos"');
+        // Fica no log qual termo foi aceito em nome de quem emite — o painel
+        // marca sozinho e ninguém chega a ler o texto na tela.
+        const termo = (dlgCond.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+        logFAV('confirmarCaixa: Condicionante -> marcando "Aceito os Termos" | termo: ' + termo);
         if (chkBox) clicarRobusto(chkBox); else if (chk) clicarRobusto(chk);
         await wait(700);
       }
@@ -517,10 +545,18 @@ async function confirmarCaixa(timeout = 8000) {
         [...document.querySelectorAll('.ui-dialog, .ui-confirm-dialog')]
           .some(d => dialogAberto(d) && /alterar a opera|informados novamente|deseja continuar/i.test(d.textContent||''));
       if (!aindaAberta) { await wait(300); return true; }
+      parada = 0;   // a caixa está aberta: não contar como página parada
     }
-    await wait(400);
+    // Nenhuma caixa nesta volta: só continua esperando se a página estiver
+    // trabalhando. Parada e sem caixa = não vai vir nenhuma.
+    if (_paginaOcupada()) parada = 0; else parada += PASSO;
+    if (parada >= PARADA_OK) {
+      logFAV('sem caixa de confirmação (página parada em ' + ((Date.now() - ini) / 1000).toFixed(1) + 's)');
+      return false;
+    }
+    await wait(PASSO);
   }
-  logFAV('sem caixa de confirmação pendente (ok)');
+  logFAV('sem caixa de confirmação pendente (tempo esgotado em ' + (timeout / 1000) + 's)');
   return false;
 }
 
