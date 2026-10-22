@@ -1558,7 +1558,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v177"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v178"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5437,8 +5437,8 @@ function updS(){
   } else if(!navigator.onLine){
     el.textContent='📵 Offline — dados salvos localmente';
   } else {
-    const ult=localStorage.getItem('syncUlt-v2');
-    el.textContent=ult?`☁️ Sincronizado às ${ult}`:'☁️ Sincronizado';
+    const ult=_horaSync('syncUltISO-v2','syncUlt-v2');
+    el.textContent=(ult&&ult!=='nunca')?`☁️ Sincronizado às ${ult}`:'☁️ Sincronizado';
   }
 
   // Banner amarelo
@@ -5591,7 +5591,7 @@ async function enviar(ordem,acao){
     if(j.ok){
       _tirarDaFila(ordem.id);          // confirmado pela planilha: pode sair da fila
       addLog(`✅ ${acao} — ${ordem.placa||ordem.id}`,'ok');
-      localStorage.setItem('syncUlt-v2',new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+      _marcarSync('envio');
       updS(); return true;
     } else {
       // continua na fila (foi gravado antes) — o sync tenta de novo
@@ -5680,7 +5680,7 @@ async function _syncPcorpo(){
   saveDB();
 
   if(ok>0){
-    localStorage.setItem('syncUlt-v2',new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+    _marcarSync('envio');
     toast(`☁️ ${ok} pesagem(s) enviada(s)!`);
     await carregarDaPlanilha();
     saveCloud();
@@ -5702,6 +5702,34 @@ function reenviarFalhou(id){
 }
 
 // Carregar TUDO da planilha — substitui cache local
+/* ── Hora do último sync ───────────────────────────────────────────
+   Era gravada SÓ quando alguma pesagem pendente conseguia subir. Com a fila
+   vazia — que é o caso normal — sincronizar lia a planilha inteira e não
+   mexia na hora: ela ficava congelada e parecia que o sync não funcionava.
+   Agora toda LEITURA aceita pela planilha marca a hora, e o último ENVIO
+   aceito ganhou linha própria no Diagnóstico, que é o que o número antigo
+   realmente queria dizer. Guarda também a data: só "06:47" na tela parece
+   de hoje mesmo quando é de ontem. */
+function _marcarSync(tipo){
+  try{
+    var agora=new Date();
+    localStorage.setItem('syncUltISO-v2',agora.toISOString());
+    localStorage.setItem('syncUlt-v2',agora.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}));
+    if(tipo==='envio'){
+      localStorage.setItem('syncUltEnvioISO-v2',agora.toISOString());
+    }
+  }catch(e){}
+}
+function _horaSync(chaveISO,chaveTxt){
+  var iso=null, txt=null;
+  try{ iso=localStorage.getItem(chaveISO); txt=chaveTxt?localStorage.getItem(chaveTxt):null; }catch(e){}
+  if(!iso) return txt||'nunca';
+  var d=new Date(iso); if(isNaN(d.getTime())) return txt||'nunca';
+  var hh=d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'});
+  return d.toDateString()===new Date().toDateString()
+    ? hh
+    : d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+hh;
+}
 async function carregarDaPlanilha(){
   if(!SHEETS_URL||!navigator.onLine) return false;
   try{
@@ -5724,6 +5752,7 @@ async function carregarDaPlanilha(){
       (DB.ordens||[]).forEach(function(o){ if(o&&o.id&&o.fotos&&Object.keys(o.fotos).length) _fotosAntes[o.id]=o.fotos; });
       DB.ordens=cloud.map(function(o){ return _fotosAntes[o.id]?Object.assign({},o,{fotos:_fotosAntes[o.id]}):o; });
       saveCloud(); // salvar para acesso offline imediato
+      _marcarSync('leitura');   // falou com a planilha e ela respondeu: isto É sync
       addLog(`☁️ ${j.ordens.length} registro(s) carregados da planilha`,'ok');
       return true;
     }
@@ -5998,7 +6027,8 @@ function renderDiag(){
   const st=document.getElementById('diag-status');
   if(st){
     const online=navigator.onLine;
-    const ult=localStorage.getItem('syncUlt-v2')||'nunca';
+    const ult=_horaSync('syncUltISO-v2','syncUlt-v2');
+    const ultEnvio=_horaSync('syncUltEnvioISO-v2');
     const pendOk=pend.filter(p=>!p.falhou);
     const pendFalhos=pend.filter(p=>p.falhou);
     // ── Reconciliação da recepção (soma real vs aba Estoque) ──
@@ -6031,7 +6061,8 @@ function renderDiag(){
       <div style="display:flex;flex-direction:column;gap:6px">
         ${semSessao?'<div style="background:var(--a2);color:#854F0B;border-radius:8px;padding:7px 10px;font-size:11px;font-weight:700;line-height:1.4">🔐 Ninguém entrou neste aparelho ainda. Os números da planilha só aparecem depois de entrar no app — o traço (—) abaixo quer dizer "não consultado", não "zero".</div>':''}
         <div>🌐 Rede: <b style="color:${online?'var(--g1)':'var(--r1)'}">${online?'Online':'Offline'}</b></div>
-        <div>🕐 Último sync bem-sucedido: <b>${ult}</b></div>
+        <div>🕐 Última leitura da planilha: <b>${ult}</b></div>
+        <div style="color:var(--ink3)">📤 Último envio aceito: <b>${ultEnvio}</b></div>
         <div>⏳ Aguardando envio: <b>${pendOk.length}</b></div>
         <div style="color:${pendFalhos.length>0?'var(--r1)':'var(--ink3)'}">🔴 Com falha (${MAX_TENTATIVAS} tentativas): <b>${pendFalhos.length}</b>${pendFalhos.length>0?' — toque em "Reenviar"':''}</div>
         <div>☁️ Pesagens na planilha: <b>${nSe(cloud.length)}</b></div>
