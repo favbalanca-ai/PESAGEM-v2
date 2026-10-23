@@ -165,6 +165,8 @@ function _montarPainel() {
     '<button id="fav-btn-xml" style="flex:1;padding:7px;background:#2c7a7b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 XML da nota</button>' +
     '<button id="fav-btn-xmls" style="flex:1;padding:7px;background:#4a5568;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 XMLs da consulta</button>' +
     '</div>' +
+    '<div style="margin-top:6px"><button id="fav-btn-xml-mao" style="width:100%;padding:7px;background:#718096;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 Anexar XML (escolher arquivo)</button></div>' +
+    '<input type="file" id="fav-xml-input" accept="text/xml,application/xml,.xml" style="display:none">' +
     '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
   document.body.appendChild(_overlay);
   const bp = _overlay.querySelector('#fav-btn-parar');
@@ -288,6 +290,38 @@ function _montarPainel() {
       (erros.length ? '<div style="font-size:11px;margin-top:5px">Faltaram: ' + erros.slice(0, 4).join(' · ') + '</div>' : ''),
       erros.length ? 'aviso' : 'ok');
   };
+  /* Saída de sempre: a pessoa pega o XML em Downloads e escolhe o arquivo.
+     Funciona mesmo quando a página muda e o caminho automático para. */
+  const bxmlm = _overlay.querySelector('#fav-btn-xml-mao');
+  const finpx = _overlay.querySelector('#fav-xml-input');
+  if (bxmlm && finpx) {
+    bxmlm.onclick = () => finpx.click();
+    finpx.onchange = async () => {
+      const f = finpx.files && finpx.files[0];
+      finpx.value = '';
+      if (!f) return;
+      let num = _ultimaNFAnum || _numeroNFAnaTela();
+      const lista = _notasNaConsulta();
+      if (!num && lista.length === 1) num = lista[0].numero;
+      num = (prompt('Número da nota deste XML:', num || '') || '').replace(/\D/g, '');
+      if (!num) return;
+      bxmlm.disabled = true; bxmlm.textContent = '🧾 Enviando...';
+      try {
+        const texto = await f.text();
+        const dados = await obterDadosNFA().catch(() => null);
+        const r = await new Promise((res) => {
+          try { chrome.runtime.sendMessage({ action: 'ANEXAR_XML', numero: num, texto: texto, dados: dados || null }, x => res(x || { ok: false, erro: 'sem resposta' })); }
+          catch (e) { res({ ok: false, erro: e.message }); }
+        });
+        if (!r.ok) atualizarStatus('❌ XML da nota ' + num + ': ' + (r.erro || 'não deu'), 'erro');
+        // o resultado bom chega pelo XML_RESULTADO
+      } catch (e) {
+        atualizarStatus('❌ Não consegui ler o arquivo: ' + e.message, 'erro');
+      } finally {
+        bxmlm.disabled = false; bxmlm.textContent = '🧾 Anexar XML (escolher arquivo)';
+      }
+    };
+  }
   // Registrar a nota já emitida anexando o PDF que a SEFAZ baixou
   const breg = _overlay.querySelector('#fav-btn-registrar');
   const finp = _overlay.querySelector('#fav-pdf-input');
@@ -406,26 +440,75 @@ function _chaveDaNota(numero) {
   if (naTela) return naTela;
   return lista.length === 1 ? lista[0].chave : '';
 }
-// Espera o background avisar como terminou este XML (ou desiste no tempo)
+/* Caminho manual, para quando a chave não está na tabela: marcar a linha da
+   nota e clicar em "Visualizar NOTA". A tela de detalhe mostra a Chave de
+   Acesso NFE, e é de lá que ela sai. */
+async function _chavePeloVisualizarNota(numero) {
+  const n = String(numero || '').replace(/\D/g, '');
+  if (!n) return '';
+  const tr = [...document.querySelectorAll('table tbody tr')].find(linha =>
+    [...linha.querySelectorAll('td')].some(td => String(td.textContent || '').replace(/\s/g, '') === n));
+  if (!tr) { logFAV('Visualizar NOTA: a nota ' + n + ' não está na tabela desta tela'); return ''; }
+  const radio = tr.querySelector('input[type="radio"]');
+  if (radio) { radio.click(); await wait(500).catch(() => {}); }
+  const bt = [...document.querySelectorAll('button,input[type="submit"],input[type="button"],a')]
+    .find(b => /visualizar\s*nota/i.test(_semAcento(String(b.textContent || b.value || ''))));
+  if (!bt) { logFAV('Visualizar NOTA: não achei o botão nesta tela'); return ''; }
+  logFAV('Abrindo "Visualizar NOTA" da ' + n + ' para pegar a chave...');
+  bt.click();
+  for (let i = 0; i < 30; i++) {
+    await wait(500).catch(() => {});
+    const c = _chaveNaTela();
+    if (c) { logFAV('Chave de acesso lida na tela de detalhe: ...' + c.slice(-6)); return c; }
+  }
+  logFAV('Visualizar NOTA: a tela de detalhe não trouxe a chave em 15s');
+  return '';
+}
+/* Espera o background avisar como terminou este XML.
+   O ouvinte é armado ANTES de pedir: o robô pode falhar em 1 ou 2 segundos, e
+   quem armava depois perdia o aviso e só via "demorou demais" 25 segundos
+   mais tarde — mandando a pessoa procurar lentidão onde havia erro. */
+let _aguardandoXML = null;
 function _esperarXML(numero, ms) {
   return new Promise((resolve) => {
-    const fim = setTimeout(() => { _aguardandoXML = null; resolve({ ok: false, erro: 'demorou demais' }); }, ms || 25000);
+    const fim = setTimeout(() => { _aguardandoXML = null; resolve({ ok: false, erro: 'demorou demais' }); }, ms || 60000);
     _aguardandoXML = { numero: String(numero), pronto: (r) => { clearTimeout(fim); _aguardandoXML = null; resolve(r); } };
   });
 }
-let _aguardandoXML = null;
+function _pararEsperaXML() {
+  if (_aguardandoXML) _aguardandoXML.pronto({ ok: false, erro: 'cancelado' });
+}
 async function baixarXMLdaNota(numero, chave) {
   const num = String(numero || '').replace(/\D/g, '');
-  const ch = String(chave || _chaveDaNota(num) || '').replace(/\D/g, '');
   if (!num) return { ok: false, erro: 'sem o número da nota' };
-  if (ch.length !== 44) return { ok: false, erro: 'não achei a chave de acesso da nota ' + num + ' nesta tela' };
-  const dados = await obterDadosNFA();
+  let ch = String(chave || _chaveDaNota(num) || '').replace(/\D/g, '');
+  if (ch.length === 44) logFAV('XML ' + num + ': chave achada na tela (...' + ch.slice(-6) + ')');
+  else {
+    // não estava na tabela: fazer o mesmo que a pessoa faz à mão
+    logFAV('XML ' + num + ': chave não está na tabela — indo pelo "Visualizar NOTA"');
+    ch = String(await _chavePeloVisualizarNota(num)).replace(/\D/g, '');
+  }
+  if (ch.length !== 44)
+    return { ok: false, erro: 'não achei a chave de acesso da nota ' + num + ' (nem na tabela, nem no Visualizar NOTA)' };
+
+  let dados = null;
+  try { dados = await obterDadosNFA(); } catch (e) { logFAV('XML ' + num + ': sem os dados da pesagem (' + e.message + ') — sigo assim mesmo'); }
+
+  const espera = _esperarXML(num, 60000);          // armado antes de pedir
   const r = await new Promise((res) => {
-    try { chrome.runtime.sendMessage({ action: 'BAIXAR_XML_NFA', numero: num, chave: ch, dados: dados || null }, x => res(x || { ok: false, erro: 'sem resposta' })); }
-    catch (e) { res({ ok: false, erro: e.message }); }
+    try {
+      chrome.runtime.sendMessage({ action: 'BAIXAR_XML_NFA', numero: num, chave: ch, dados: dados || null }, (x) => {
+        if (chrome.runtime.lastError)
+          return res({ ok: false, erro: 'o robô não respondeu: ' + chrome.runtime.lastError.message });
+        res(x || { ok: false, erro: 'o robô respondeu vazio — recarregue a página (F5) e tente de novo' });
+      });
+    } catch (e) { res({ ok: false, erro: e.message }); }
   });
-  if (!r.ok) return r;
-  return await _esperarXML(num, 25000);
+  logFAV('XML ' + num + ': robô respondeu ' + JSON.stringify(r));
+  if (!r.ok) { _pararEsperaXML(); return r; }
+  const fim = await espera;
+  logFAV('XML ' + num + ': ' + (fim.ok ? 'arquivado' : 'não arquivado — ' + (fim.erro || '')));
+  return fim;
 }
 
 async function registrarNFAcomPDF(pdf_base64, origem) {
@@ -501,6 +584,11 @@ if (!window.__FAV_NFA_MSG__) {
         })
         .catch(e => sendResponse({ ok: false, erro: e.message }));
       return true; // resposta assíncrona
+    }
+    if (msg.action === 'XML_ANDAMENTO') {
+      logFAV('XML ' + (msg.numero || '') + ': ' + (msg.passo || ''));
+      atualizarStatus('🧾 Nota ' + (msg.numero || '') + ' — ' + (msg.passo || '') + '...', 'info');
+      return true;
     }
     if (msg.action === 'XML_RESULTADO') {
       const num = String(msg.numero || '');
