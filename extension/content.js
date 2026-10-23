@@ -1,4 +1,4 @@
-// FAV NFA - Content Script v7.14 (painel montado uma vez, não refeito a cada aviso)
+// FAV NFA - Content Script v7.15 (numero da nota lido na tela, sem acento, nao recomeca sozinho)
 if (window.__FAV_NFA_LOADED__) {
   console.log('[FAV NFA] content.js já carregado — ignorando segunda injeção');
 } else {
@@ -278,13 +278,39 @@ async function obterDadosNFA() {
   try { return await new Promise(r => chrome.runtime.sendMessage({ action: 'GET_NFA_PENDENTE' }, x => r(x || null))); }
   catch (e) { return null; }
 }
+/* O número da nota estava saindo como "T"+relógio (T855748, T956080...): o
+   servidor tentava achá-lo DENTRO do PDF e nunca achava. Mas ele está escrito
+   na tela, na lista de notas emitidas — a linha de cima é a nota recém-feita.
+   Lido aqui, vai no registro e o servidor usa esse. */
+function _semAcento(t) {
+  return String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function _numeroNFAnaTela() {
+  try {
+    // 1) lista de notas emitidas: primeira linha, primeira coluna com 6+ dígitos
+    const linhas = [...document.querySelectorAll('table tbody tr')];
+    for (const tr of linhas) {
+      for (const td of tr.querySelectorAll('td')) {
+        const t = (td.textContent || '').trim();
+        if (/^\d{6,10}$/.test(t)) return t;
+      }
+      if (tr.querySelector('td')) break;   // só a primeira linha com dados
+    }
+    // 2) DANFE/resumo aberto na própria página
+    const m = (document.body.innerText || '').match(/N[ºo°]\s*(\d{6,10})/);
+    return m ? m[1] : '';
+  } catch (e) { return ''; }
+}
 async function registrarNFAcomPDF(pdf_base64, origem) {
   const dados = await obterDadosNFA();
   if (!dados) { atualizarStatus('⚠️ Sem os dados da NFA nesta aba — emita pelo app para registrar.', 'erro'); return false; }
   logFAV('Registrando NFA no backend (' + origem + ')');
   atualizarStatus('📤 Registrando a nota — Drive, planilha e envio ao destinatário...', 'info');
   const resp = await new Promise(r => {
-    try { chrome.runtime.sendMessage({ action: 'PROCESSAR_PDF_NFA', pdf_base64: pdf_base64, dados_nfa: dados }, x => r(x || null)); }
+    const numeroTela = _numeroNFAnaTela();
+    if (numeroTela) logFAV('Número da nota lido na tela: ' + numeroTela);
+    else logFAV('Número da nota não encontrado na tela — o servidor vai tentar pelo PDF');
+    try { chrome.runtime.sendMessage({ action: 'PROCESSAR_PDF_NFA', pdf_base64: pdf_base64, dados_nfa: dados, numero_nfa: numeroTela }, x => r(x || null)); }
     catch (e) { r({ erro: e.message }); }
   });
   if (resp && resp.ok) {
@@ -982,7 +1008,10 @@ async function etapa_Produtos(dados) {
       // 5.5) Observações Complementares (aba Produtos) — o texto vem do CONTRATO
       //      (info_complementar). Sequência da página: ... dispositivo legal →
       //      informações complementares → Adicionar.
-      const obsTexto = String(dados.info_complementar || prod.obs || '').trim();
+      /* Sem acento: o nome do motorista saiu "JOSAA ANDRAA" na nota impressa.
+         Texto fiscal é escrito em maiúsculas sem acento de qualquer forma, e
+         assim nenhum caractere se perde pelo caminho. */
+      const obsTexto = _semAcento(String(dados.info_complementar || prod.obs || '').trim());
       if (obsTexto) {
         const ta = [...document.querySelectorAll('textarea')].find(t =>
           t.offsetParent !== null && /observac|complement/i.test((t.id||'') + ' ' + (t.name||'')));
@@ -1104,6 +1133,21 @@ async function detectarPaginaEExecutar(dados) {
   const temResumo = txtPagina.includes('Resumo da Nota');
   const enviarVisivel = [...document.querySelectorAll('input,button')].some(e => /enviar nota|finalizar/i.test(((e.value||'')+(e.textContent||'')).toLowerCase()) && e.offsetParent !== null);
   if (url.includes('ConsultaNFA') && !abaEmitente && !abaDestinat && !abaTransporte && !abaProdutos) {
+    /* Depois de enviar, a SEFAZ volta para esta lista. Começar outra nota aqui
+       é o contrário do que se quer — a carga já foi emitida, e foi o que
+       aconteceu: o robô recomeçou sozinho e alguém teve de apertar PARAR.
+       Sem NFA pendente no armazenamento, não há nota nova a fazer. */
+    const pend = await new Promise(r => {
+      try { chrome.runtime.sendMessage({ action: 'GET_NFA_PENDENTE' }, x => r(x || null)); }
+      catch (e) { r(null); }
+    });
+    if (!pend) {
+      definirEtapa('registrar');
+      const num = _numeroNFAnaTela();
+      atualizarStatus('✅ <b>Nota já registrada.</b>' + (num ? ' Nº ' + num + '.' : '') +
+        '<div style="font-size:11px;margin-top:5px">Para emitir outra, volte ao app e toque em <b>Emitir NFA</b> na pesagem.</div>', 'ok');
+      return;
+    }
     definirEtapa('tipo');
     atualizarStatus('Iniciando nova nota...');
     await wait(1000);

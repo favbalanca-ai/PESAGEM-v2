@@ -448,7 +448,7 @@ function processarNFA(payload){
     var contrato_id=s(payload.contrato_id);
     var produtos=payload.produtos||[];
 
-    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome);
+    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome,s(payload.numero_nfa));
     var drive_url=driveRes.url;
     var numero_nfa=driveRes.numero_nfa;
     var nome_arquivo=driveRes.nome;
@@ -556,7 +556,9 @@ function enviarDocsTicket(p){
   }catch(e){ return{ok:false,erro:e.message}; }
 }
 
-function salvarPDFnfa(pdf_base64,emitente,dest_nome){
+// numeroInformado: o número lido na tela da SEFAZ pela extensão — vale mais
+// que qualquer tentativa de achar o número dentro do PDF.
+function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado){
   var agr=new Date();
   var ano=String(agr.getFullYear());
   var meses=["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
@@ -565,7 +567,7 @@ function salvarPDFnfa(pdf_base64,emitente,dest_nome){
   var pEm=obterOuCriar(raiz,emitente.toUpperCase());
   var pAno=obterOuCriar(pEm,ano);
   var pMes=obterOuCriar(pAno,mes);
-  var numero_nfa=extrairNumeroNFA(pdf_base64)||("T"+String(agr.getTime()).slice(-6));
+  var numero_nfa=s(numeroInformado)||extrairNumeroNFA(pdf_base64)||("T"+String(agr.getTime()).slice(-6));
   var dataStr=Utilities.formatDate(agr,Session.getScriptTimeZone(),"ddMMyyyy");
   var destNome=dest_nome.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g,"").trim().toUpperCase().substring(0,30);
   var nome="NFA-"+numero_nfa+"-"+destNome+"-"+dataStr+".pdf";
@@ -653,11 +655,20 @@ function consolidarPastasDrive(){
   finally{ try{ lock.releaseLock(); }catch(e){} }
 }
 
+/* O número saía SEMPRE como "T" + relógio (T855748, T956080...), nunca o
+   número de verdade da nota. O motivo: base64Decode devolve um vetor de
+   BYTES, e .toString() nele dá "37,80,68,70,..." — a busca pelo "Nº" jamais
+   encontrava nada e caía no provisório. Agora os bytes viram texto de
+   verdade. Mesmo assim o PDF pode estar comprimido e não revelar o número;
+   por isso o melhor caminho é a extensão mandar o número lido na tela da
+   SEFAZ (payload.numero_nfa), e este aqui é só o plano B. */
 function extrairNumeroNFA(b64){
   try{
-    var txt=Utilities.base64Decode(b64).toString();
-    var m=txt.match(/N[ºo°\.]\s*(\d{6,9})/i)||txt.match(/Nota\s+Fiscal.*?n[ºo°]\s*(\d+)/i);
-    return m?m[1].padStart(6,"0"):null;
+    var txt=Utilities.newBlob(Utilities.base64Decode(b64)).getDataAsString("ISO-8859-1");
+    var m=txt.match(/N[ºo°\.]\s*(\d{6,9})/i)
+        || txt.match(/Nota\s+Fiscal.*?n[ºo°]\s*(\d{6,9})/i)
+        || txt.match(/\bNFA\s*n?[ºo°]?\s*(\d{6,9})/i);
+    return m?m[1]:null;
   }catch(e){return null;}
 }
 
@@ -723,8 +734,30 @@ function registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa
     if(aba.getMaxColumns()<10) aba.insertColumnsAfter(aba.getMaxColumns(),10-aba.getMaxColumns());
     if(!s(aba.getRange(1,10).getValue()))
       aba.getRange(1,10).setValue("Peso kg").setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
-    aba.appendRow([numero_nfa,ticket_id,contrato_id,emitente,dest_nome,sacas,
-      Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy"),drive_url,agora(),Math.round(n(peso_kg))]);
+    /* Registrar duas vezes a MESMA nota somava tudo em dobro: o app soma as
+       sacas de todas as NFAs do ticket para saber o que falta emitir. Acontecia
+       ao anexar o PDF de novo "por via das dúvidas" — e aconteceu: um ticket
+       ficou com três linhas. Agora, se já existe linha do mesmo ticket com o
+       mesmo número, ou com número provisório (T...), a linha é ATUALIZADA. */
+    var linha=[numero_nfa,ticket_id,contrato_id,emitente,dest_nome,sacas,
+      Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy"),drive_url,agora(),Math.round(n(peso_kg))];
+    var ultima=aba.getLastRow();
+    if(ultima>1){
+      var atuais=aba.getRange(2,1,ultima-1,2).getValues();   // Nº e Ticket
+      var novoProvisorio=/^T\d+$/i.test(s(numero_nfa));
+      for(var i=0;i<atuais.length;i++){
+        if(s(atuais[i][1])!==s(ticket_id)) continue;
+        var numAtual=s(atuais[i][0]);
+        var mesmoNumero=numAtual===s(numero_nfa);
+        var eraProvisorio=/^T\d+$/i.test(numAtual);
+        // nota nova de verdade sobre um registro provisório: troca.
+        if(mesmoNumero || (eraProvisorio && !novoProvisorio)){
+          aba.getRange(i+2,1,1,linha.length).setValues([linha]);
+          return;
+        }
+      }
+    }
+    aba.appendRow(linha);
   }catch(e){Logger.log("registrarNFAEmitida: "+e.message);}
 }
 

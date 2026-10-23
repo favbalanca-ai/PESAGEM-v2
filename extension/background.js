@@ -390,6 +390,7 @@ async function processarPDF(msg) {
   const { pdf_base64, pdf_url, dados_nfa } = msg;
   const payload = {
     action: 'processarNFA', pdf_base64, pdf_url,
+    numero_nfa: msg.numero_nfa || '',      // lido na tela da SEFAZ pelo content script
     ticket_id: dados_nfa.ticket_id, contrato_id: dados_nfa.contrato_id,
     // placa e data → a nota é arquivada também na pasta da placa, junto das fotos
     placa: dados_nfa.placa, data_transporte: dados_nfa.data_transporte,
