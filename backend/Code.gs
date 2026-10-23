@@ -548,6 +548,14 @@ function _arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa){
     var placa=s(payload.placa).replace(/[^A-Za-z0-9]/g,"")||"SEM-PLACA";
     var data=s(payload.data_transporte).replace(/\//g,"-")||
              Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd-MM-yyyy");
+    /* Registrar a mesma nota duas vezes acontece: a tentativa automática e
+       depois a manual, ou uma regravação para trocar um PDF errado. Aqui vale
+       sempre o ÚLTIMO: a versão anterior vai para a lixeira (de onde dá para
+       voltar) e o arquivo novo entra no lugar. Assim a pasta tem um PDF por
+       nota — nunca dois iguais, nunca o errado teimando em ficar. */
+    var jaLa=_pastaDaPesagem(contrato,data,placa,false);
+    if(jaLa) _aposentarNotaDaPasta(jaLa,numero_nfa);
+
     var prod=((payload.produtos||[])[0])||{};
     var r=salvarFoto({contrato:contrato,data:data,placa:placa,pesagem:data+"_"+placa,
       tipo:_nomeArquivoNFA(payload.data_transporte,s(prod.grupo)||s(prod.produto),numero_nfa),
@@ -620,6 +628,18 @@ function _dadosPesagemDoTicket(ticket_id){
    Usa makeCopy: a cópia é feita dentro do Drive, sem baixar nem reenviar o PDF
    (importa: o Apps Script tem 6 minutos por execução). Repetir não duplica —
    se já houver NFA-<nº>.pdf na pasta, não faz nada. */
+/* Manda para a lixeira o PDF que já estava ali para esta mesma nota.
+   Lixeira, não apagar de vez: se alguém regravar por engano, o arquivo volta. */
+function _aposentarNotaDaPasta(pasta,numero){
+  var n=s(numero); if(!n) return 0;
+  var achados=[], it=pasta.getFiles();
+  while(it.hasNext()){ var f=it.next(); if(f.getName().indexOf(n)>=0) achados.push(f); }
+  for(var i=0;i<achados.length;i++){
+    try{ achados[i].setTrashed(true); }
+    catch(e){ Logger.log("aposentar nota antiga: "+e.message); }
+  }
+  return achados.length;
+}
 function _temNotaNaPasta(pasta,numero){
   var n=s(numero); if(!n) return false;
   var it=pasta.getFiles();
@@ -666,7 +686,9 @@ function arquivarNFAsNasPesagens(inicio,limite){
     // Contrato → produto (entra no nome do arquivo: AAAA.MM.DD.PRODUTO.NUMERO)
     var shC=ss.getSheetByName(ABA_CONTRATOS), prods={};
     if(shC&&shC.getLastRow()>1){
-      var ctr=shC.getRange(2,1,shC.getLastRow()-1,Math.max(COL.PRODUTO,shC.getLastColumn())).getValues();
+      // nunca pedir mais colunas do que a aba tem — getRange estoura
+      var nCols=Math.min(Math.max(COL.PRODUTO,shC.getLastColumn()),shC.getMaxColumns());
+      var ctr=shC.getRange(2,1,shC.getLastRow()-1,nCols).getValues();
       for(var c=0;c<ctr.length;c++)
         prods[s(ctr[c][COL.ID-1])]=s(ctr[c][COL.GRUPO-1])||s(ctr[c][COL.PRODUTO-1]);
     }
