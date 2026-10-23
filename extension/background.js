@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.13 (PDF da nota renomeado e guardado na pasta escolhida)
+// FAV NFA - Background Service Worker v7.16 (número de verdade: sem número, não registra)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -33,6 +33,11 @@ function tratarMensagem(msg, sendResponse) {
   }
   if (msg.action === 'PROCESSAR_PDF_NFA') {
     processarPDF(msg).then(sendResponse).catch(e => sendResponse({ erro: e.message }));
+    return true;
+  }
+  // Registro guardado + o número digitado pela pessoa
+  if (msg.action === 'REGISTRAR_COM_NUMERO') {
+    registrarComNumeroInformado(msg.numero).then(sendResponse).catch(e => sendResponse({ ok: false, erro: e.message }));
     return true;
   }
   // Nova tentativa do registro que ficou pendente, pedida pelo painel
@@ -266,6 +271,21 @@ async function lerPDFbase64(url) {
     return arrayBufferParaBase64(buf);
   } catch (e) { return await lerPDFpelaAba(url); }
 }
+// Pergunta à aba da SEFAZ qual número aparece na tela depois de enviar a nota
+function numeroNFAnaAba() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ url: ['https://nfw.sefaz.go.gov.br/*', 'https://sistemas.sefaz.go.gov.br/*'] }, (abas) => {
+      const aba = (abas || [])[0];
+      if (!aba) return resolve('');
+      try {
+        chrome.tabs.sendMessage(aba.id, { action: 'NUMERO_NFA_NA_TELA' }, (r) => {
+          if (chrome.runtime.lastError) return resolve('');
+          resolve((r && r.numero) || '');
+        });
+      } catch (e) { resolve(''); }
+    });
+  });
+}
 function avisarAbasSefaz(msg) {
   chrome.tabs.query({ url: ['https://nfw.sefaz.go.gov.br/*', 'https://sistemas.sefaz.go.gov.br/*'] }, (abas) => {
     (abas || []).forEach((t) => { try { chrome.tabs.sendMessage(t.id, msg, () => chrome.runtime.lastError); } catch (e) {} });
@@ -286,7 +306,21 @@ async function capturarPDFbaixado(item) {
       avisarAbasSefaz({ action: 'NFA_FALHOU', erro: 'não consegui ler o PDF baixado' });
       return;
     }
-    const data = await processarPDF({ pdf_base64: b64, dados_nfa: dados });
+    /* O número lido na tela da SEFAZ vale mais que qualquer tentativa de achá-lo
+       dentro do PDF — e este caminho automático simplesmente não o mandava.
+       Resultado: o servidor nunca recebia número nesta via. */
+    const numeroTela = await numeroNFAnaAba();
+    if (numeroTela) console.log('[FAV BG] número da nota lido na tela:', numeroTela);
+    const data = await processarPDF({ pdf_base64: b64, dados_nfa: dados, numero_nfa: numeroTela });
+    if (data && data.sem_numero) {
+      /* Sem número não se registra nada. Quase sempre quer dizer que o arquivo
+         baixado não é a nota: a própria tela do formulário da SEFAZ também vira
+         PDF, e já foi parar no Drive como se fosse a nota. A emissão continua
+         pendente para o painel pedir o número ou o arquivo certo. */
+      console.log('[FAV BG] registro recusado por falta de número:', data.erro);
+      avisarAbasSefaz({ action: 'NFA_SEM_NUMERO', erro: data.erro, bytes: b64.length });
+      return;
+    }
     if (data && data.ok) {
       console.log('[FAV BG] NFA registrada automaticamente: nº', data.numero_nfa);
       const nomeFinal = await regravarComNumero(item, b64, dados, data.numero_nfa);
@@ -409,6 +443,12 @@ async function processarPDF(msg) {
     try { await chrome.storage.local.set({ [_REG_PEND]: payload }); } catch (_) {}
     throw e;
   }
+  if (data.sem_numero) {
+    // Guarda o envio inteiro: o painel só vai acrescentar o número e reenviar,
+    // sem precisar ler o PDF de novo (que nem sempre dá para reler).
+    try { await chrome.storage.local.set({ [_REG_PEND]: payload }); } catch (_) {}
+    return data;
+  }
   if (data.ok) {
     chrome.storage.local.remove(_REG_PEND);
     chrome.storage.local.remove('nfa_pendente');
@@ -417,4 +457,25 @@ async function processarPDF(msg) {
     chrome.storage.local.set({ nfa_concluida: data });
   }
   return data;
+}
+/* Reenvia o registro guardado acrescentando o número que a pessoa digitou.
+   É a saída quando nem a tela nem o PDF deram o número. */
+async function registrarComNumeroInformado(numero) {
+  numero = String(numero || '').replace(/\D/g, '');
+  if (!numero) return { ok: false, erro: 'número não informado' };
+  const st = await chrome.storage.local.get(_REG_PEND);
+  const pend = st[_REG_PEND];
+  if (!pend) return { ok: false, erro: 'não há registro guardado — use "📄 Registrar NFA emitida"' };
+  pend.numero_nfa = numero;
+  try {
+    const data = await postGAS(pend);
+    if (data && data.ok) {
+      chrome.storage.local.remove(_REG_PEND);
+      chrome.storage.local.remove('nfa_pendente');
+      chrome.storage.local.set({ nfa_concluida: data });
+      avisarAbasSefaz({ action: 'NFA_REGISTRADA', numero_nfa: data.numero_nfa,
+        drive_url: data.drive_url, pasta_url: data.pasta_url, placa: pend.placa });
+    }
+    return data;
+  } catch (e) { return { ok: false, erro: e.message }; }
 }

@@ -160,6 +160,7 @@ function _montarPainel() {
     '<button id="fav-btn-registrar" style="width:100%;padding:8px;background:#0e7c66;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">📄 Registrar NFA emitida (anexar PDF)</button>' +
     '</div>' +
     '<div style="margin-top:6px"><button id="fav-btn-retentar" style="display:none;width:100%;padding:8px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">↻ Tentar registrar de novo</button></div>' +
+    '<div style="margin-top:6px"><button id="fav-btn-numero" style="display:none;width:100%;padding:8px;background:#8e44ad;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🔢 Informar o nº da nota</button></div>' +
     '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
   document.body.appendChild(_overlay);
   const bp = _overlay.querySelector('#fav-btn-parar');
@@ -222,6 +223,26 @@ function _montarPainel() {
         '<div style="font-size:11px;margin-top:5px">Dá para anexar o PDF à mão no botão acima.</div>';
     });
   };
+  /* Saída de emergência: nem a tela nem o PDF deram o número da nota.
+     A pessoa lê o número no documento e digita — o envio guardado é reenviado
+     com ele. Melhor do que o servidor inventar um "T..." que não existe. */
+  const bnum = _overlay.querySelector('#fav-btn-numero');
+  if (bnum) bnum.onclick = () => {
+    const n = (prompt('Número da nota (só os dígitos, como está no documento):') || '').replace(/\D/g, '');
+    if (!n) return;
+    bnum.textContent = '🔢 Registrando...';
+    bnum.disabled = true;
+    logFAV('Registrando com o número informado: ' + n);
+    chrome.runtime.sendMessage({ action: 'REGISTRAR_COM_NUMERO', numero: n }, (r) => {
+      bnum.textContent = '🔢 Informar o nº da nota';
+      bnum.disabled = false;
+      if (r && r.ok) { _registroPendente = false; return; }   // o background avisa com NFA_REGISTRADA
+      logFAV('Não deu: ' + ((r && r.erro) || 'sem resposta'));
+      const m = _overlay.querySelector('#fav-status-msg');
+      if (m) m.innerHTML = '❌ ' + ((r && r.erro) || 'sem resposta do servidor') +
+        '<div style="font-size:11px;margin-top:5px">Dá para anexar o PDF certo no botão acima.</div>';
+    });
+  };
   // Registrar a nota já emitida anexando o PDF que a SEFAZ baixou
   const breg = _overlay.querySelector('#fav-btn-registrar');
   const finp = _overlay.querySelector('#fav-pdf-input');
@@ -252,6 +273,8 @@ function atualizarStatus(msg, tipo = 'info') {
   // a nota emitida que ainda não foi registrada no app
   const bret = _overlay.querySelector('#fav-btn-retentar');
   if (bret) bret.style.display = _registroPendente ? 'block' : 'none';
+  const bnum = _overlay.querySelector('#fav-btn-numero');
+  if (bnum) bnum.style.display = _registroPendente ? 'block' : 'none';
 }
 function removerOverlay() { if (_overlay) { _overlay.remove(); _overlay = null; } }
 
@@ -321,6 +344,14 @@ async function registrarNFAcomPDF(pdf_base64, origem) {
   }
   const err = (resp && (resp.erro || resp.error)) || 'sem resposta do servidor';
   logFAV('Falha ao registrar: ' + err);
+  if (resp && resp.sem_numero) {
+    // Nada foi gravado. O envio ficou guardado: basta o número.
+    _registroPendente = true;
+    atualizarStatus('<b>⚠️ Não registrei: falta o número da nota</b>' +
+      '<div style="font-size:11px;margin-top:5px">Não achei o número dentro desse PDF. Se ele é mesmo a nota, ' +
+      'clique em <b>🔢 Informar o nº da nota</b>. Se for a tela do formulário, escolha o arquivo certo.</div>', 'erro');
+    return false;
+  }
   atualizarStatus('❌ Não consegui registrar a nota: ' + err +
     '<div style="font-size:11px;margin-top:5px">Use "📄 Registrar NFA emitida" e anexe o PDF baixado.</div>', 'erro');
   return false;
@@ -350,12 +381,32 @@ if (!window.__FAV_NFA_MSG__) {
   window.__FAV_NFA_MSG__ = true;
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (!msg || !msg.action) return;
+    if (msg.action === 'NUMERO_NFA_NA_TELA') {
+      sendResponse({ numero: _numeroNFAnaTela() });
+      return true;
+    }
     if (msg.action === 'FETCH_PDF') {
       fetch(msg.url, { credentials: 'include' })
         .then(r => r.arrayBuffer())
-        .then(b => sendResponse({ ok: true, b64: bufferParaBase64(b) }))
+        .then(b => {
+          // Só vale se for PDF de verdade. Sem esta conferência, uma página de
+          // erro ou de login da SEFAZ subia para o Drive com cara de nota.
+          const cab = String.fromCharCode.apply(null, new Uint8Array(b.slice(0, 5)));
+          if (cab !== '%PDF-') return sendResponse({ ok: false, erro: 'o endereço não devolveu um PDF' });
+          sendResponse({ ok: true, b64: bufferParaBase64(b) });
+        })
         .catch(e => sendResponse({ ok: false, erro: e.message }));
       return true; // resposta assíncrona
+    }
+    if (msg.action === 'NFA_SEM_NUMERO') {
+      _registroPendente = true;
+      logFAV('Registro recusado: sem número da nota. ' + (msg.erro || ''));
+      atualizarStatus('<b>⚠️ Não registrei a nota ainda</b>' +
+        '<div style="font-size:11px;margin-top:5px">Não achei o número — nem na tela nem dentro do PDF que foi baixado. ' +
+        'Às vezes o que a SEFAZ baixa é a tela do formulário, não a nota.</div>' +
+        '<div style="font-size:11px;margin-top:6px">Confira o PDF em Downloads. Se for a nota, clique em <b>🔢 Informar o nº da nota</b>. ' +
+        'Se não for, use <b>📄 Registrar NFA emitida</b> e escolha o arquivo certo.</div>', 'erro');
+      return true;
     }
     if (msg.action === 'NFA_REGISTRADA') {
       _registroPendente = false;

@@ -465,7 +465,20 @@ function processarNFA(payload){
     var contrato_id=s(payload.contrato_id);
     var produtos=payload.produtos||[];
 
-    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome,s(payload.numero_nfa));
+    /* Nenhuma nota é registrada sem número de verdade.
+       Antes, não achando o número, era inventado um "T"+relógio. Isso escondia
+       o problema de verdade: o PDF capturado às vezes NÃO é a nota — é a tela
+       do formulário da SEFAZ, que não tem número nenhum. A nota ia para o
+       Drive e para a planilha com um número que não existe, e só se descobria
+       depois, abrindo o arquivo. Agora, sem número, nada é gravado e quem
+       chamou recebe o motivo. */
+    var numero_nfa=s(payload.numero_nfa)||extrairNumeroNFA(pdf_base64);
+    if(!numero_nfa) return{ok:false,sem_numero:true,
+      erro:"Não achei o número da nota — nem na tela da SEFAZ nem dentro do PDF. "+
+           "Pode ser que o arquivo capturado não seja a nota (a tela do formulário também vira PDF). "+
+           "Registre pelo painel escolhendo o PDF da nota, ou informe o número."};
+
+    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome,numero_nfa);
     var drive_url=driveRes.url;
     var numero_nfa=driveRes.numero_nfa;
     var nome_arquivo=driveRes.nome;
@@ -723,9 +736,11 @@ function _nomeDocEnvio(nome,placa,data){
   return pedacos.join("-").replace(/[\/\\:*?"<>|]/g,"-")+ext;
 }
 
-// numeroInformado: o número lido na tela da SEFAZ pela extensão — vale mais
-// que qualquer tentativa de achar o número dentro do PDF.
+// numeroInformado: o número já resolvido por quem chamou (lido na tela da
+// SEFAZ pela extensão ou extraído do PDF). Chegar aqui sem número é erro de
+// programação — não se inventa número de nota fiscal.
 function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado){
+  if(!s(numeroInformado)) throw new Error("salvarPDFnfa sem número da nota");
   var agr=new Date();
   var ano=String(agr.getFullYear());
   var meses=["JANEIRO","FEVEREIRO","MARÇO","ABRIL","MAIO","JUNHO","JULHO","AGOSTO","SETEMBRO","OUTUBRO","NOVEMBRO","DEZEMBRO"];
@@ -734,7 +749,7 @@ function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado){
   var pEm=obterOuCriar(raiz,emitente.toUpperCase());
   var pAno=obterOuCriar(pEm,ano);
   var pMes=obterOuCriar(pAno,mes);
-  var numero_nfa=s(numeroInformado)||extrairNumeroNFA(pdf_base64)||("T"+String(agr.getTime()).slice(-6));
+  var numero_nfa=s(numeroInformado);
   var dataStr=Utilities.formatDate(agr,Session.getScriptTimeZone(),"ddMMyyyy");
   var destNome=dest_nome.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g,"").trim().toUpperCase().substring(0,30);
   var nome="NFA-"+numero_nfa+"-"+destNome+"-"+dataStr+".pdf";
@@ -831,10 +846,19 @@ function consolidarPastasDrive(){
    SEFAZ (payload.numero_nfa), e este aqui é só o plano B. */
 function extrairNumeroNFA(b64){
   try{
-    var txt=Utilities.newBlob(Utilities.base64Decode(b64)).getDataAsString("ISO-8859-1");
-    var m=txt.match(/N[ºo°\.]\s*(\d{6,9})/i)
-        || txt.match(/Nota\s+Fiscal.*?n[ºo°]\s*(\d{6,9})/i)
-        || txt.match(/\bNFA\s*n?[ºo°]?\s*(\d{6,9})/i);
+    var bruto=Utilities.newBlob(Utilities.base64Decode(b64)).getDataAsString("ISO-8859-1");
+    /* PDF gravado em UTF-8 e lido como ISO-8859-1 vira "NÂº 28511146" e
+       "NÃºmero" — e aí nenhum padrão com º casava. Desfazer os pares
+       0xC2/0xC3 devolve o texto ao que ele deveria ser. */
+    var txt=bruto.replace(/Â([ -¿])/g,"$1")
+                 .replace(/Ã([\u0080-¿])/g,function(_,c){ return String.fromCharCode(c.charCodeAt(0)+64); });
+    // [ºo°.]{1,2} cobre "Nº", "N.", "No" e "No." de uma vez
+    var m=txt.match(/N[ºo°\.]{1,2}\s*[:\-]?\s*(\d{6,9})/i)
+        || txt.match(/Nota\s+Fiscal.*?n[ºo°\.]{1,2}\s*[:\-]?\s*(\d{6,9})/i)
+        || txt.match(/\bNFA\s*n?[ºo°\.]{0,2}\s*[:\-]?\s*(\d{6,9})/i)
+        // "Número da Nota: 28511146" — exige a palavra Número, para não pescar
+        // inscrição estadual, CEP ou qualquer número solto do documento
+        || txt.match(/N[úu]mero\s*(?:d[ao]\s*Nota\s*)?[:\-]?\s*(\d{6,9})/i);
     return m?m[1]:null;
   }catch(e){return null;}
 }
