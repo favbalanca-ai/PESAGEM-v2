@@ -28,6 +28,21 @@ var EMITENTES = {
   "JOAO":    { nome: "<<<NOME EMITENTE 4>>>", ie: "<<<IE_4>>>", cpf: "<<<CPF_4>>>" }
 };
 
+/* Opcional, e recomendado: propriedade do script EMITENTES com o mesmo
+   conteúdo em JSON. Assim os nomes/IE/CPF ficam fora do código e não se
+   perdem quando o Code.gs é colado de novo — o esquecimento desse bloco faz a
+   nota sair com "<<<NOME EMITENTE 1>>>" no lugar do emitente.
+   {"JOVANE":{"nome":"...","ie":"...","cpf":"..."}, "JOAQUIM":{...}}
+   Sem a propriedade, vale a tabela acima. */
+(function(){
+  try{
+    var j=PropertiesService.getScriptProperties().getProperty("EMITENTES");
+    if(!j) return;
+    var o=JSON.parse(j);
+    if(o && typeof o==="object" && Object.keys(o).length) EMITENTES=o;
+  }catch(e){ Logger.log("propriedade EMITENTES ignorada: "+e.message); }
+})();
+
 /* ══ LOGIN E SESSÃO ════════════════════════════════════════════
    O app é um arquivo público (GitHub Pages): tudo que estiver nele, qualquer
    um lê — inclusive as senhas e a chave da planilha, que era o que havia até
@@ -155,6 +170,7 @@ function doPost(e){
     if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
     if(d.acao==="ordemUrl")           return resposta(registrarOrdemUrl(d.dados||{}));
     if(d.acao==="recuperarAssinaturas") return resposta(recuperarAssinaturas(d.inicio,d.limite));
+    if(d.acao==="arquivarNFAsPesagem") return resposta(arquivarNFAsNasPesagens(d.inicio,d.limite));
     if(d.acao==="lerDisplay")         return resposta(lerDisplay(d.frames,d.contexto));
     if(d.acao==="lerPlaca")           return resposta(lerPlaca(d.frame));
     if(d.acao==="lerDocumento")       return resposta(lerDocumento(d.frame,d.tipo));
@@ -481,11 +497,25 @@ function processarNFA(payload){
 
     registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa,drive_url,sacas,pesoKg);
 
-    // Guarda a nota TAMBÉM na pasta da placa (junto das fotos e do ticket)
+    // Guarda a nota TAMBÉM na pasta da pesagem (junto das fotos e do ticket)
     var naPlaca=_arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa);
+    if(!naPlaca.url){
+      /* Segunda tentativa por outro caminho: em vez de reenviar o PDF em
+         base64 (que gasta tempo e memória da mesma execução), copia o arquivo
+         que ACABOU de ser gravado no arquivo fiscal. A cópia acontece dentro do
+         Drive. Também cobre o caso de o robô não ter mandado placa/data. */
+      try{
+        var alvo=_dadosPesagemDoTicket(ticket_id);
+        var c2=_copiarNFAparaPesagem(drive_url,contrato_id||alvo.contrato,
+          s(payload.data_transporte)||alvo.data,s(payload.placa)||alvo.placa,numero_nfa);
+        if(c2.ok) naPlaca={url:c2.url||"",pasta:c2.pasta||"",erro:""};
+        else naPlaca.erro=(naPlaca.erro?naPlaca.erro+" / ":"")+c2.erro;
+      }catch(e){ naPlaca.erro=(naPlaca.erro?naPlaca.erro+" / ":"")+e.message; }
+    }
 
     return{ok:true,drive_url:drive_url,numero_nfa:numero_nfa,links_whatsapp:links_wa,
-      sacas_registradas:sacas,drive_url_placa:naPlaca.url||"",pasta_url:naPlaca.pasta||""};
+      sacas_registradas:sacas,drive_url_placa:naPlaca.url||"",pasta_url:naPlaca.pasta||"",
+      erro_pasta:naPlaca.erro||""};
   }catch(e){
     Logger.log("processarNFA erro: "+e.message);
     return{ok:false,erro:e.message};
@@ -503,8 +533,103 @@ function _arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa){
              Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd-MM-yyyy");
     var r=salvarFoto({contrato:contrato,data:data,placa:placa,pesagem:data+"_"+placa,
       tipo:"NFA-"+s(numero_nfa),base64:pdf_base64,mime:"application/pdf"},"Fotos");
-    return{url:(r&&r.url)||"",pasta:(r&&r.pasta_url)||""};
-  }catch(e){ Logger.log("arquivar NFA na pasta da placa: "+e.message); return{url:"",pasta:""}; }
+    return{url:(r&&r.url)||"",pasta:(r&&r.pasta_url)||"",erro:""};
+  // Falhar aqui não invalida a nota (ela já está emitida e no arquivo fiscal),
+  // mas ficava SÓ no Logger: ninguém via, e a nota simplesmente não aparecia na
+  // pasta da pesagem. Agora o motivo volta para quem chamou.
+  }catch(e){ Logger.log("arquivar NFA na pasta da pesagem: "+e.message); return{url:"",pasta:"",erro:e.message}; }
+}
+
+/* ── Pasta da pesagem no Drive ───────────────────────────────────
+   Fotos/<contrato>/<dd-MM-yyyy>_<PLACA> — a mesma das fotos, do ticket, da
+   assinatura e da ordem de carregamento. O nome é montado igual ao do app
+   (mesma limpeza de caracteres), senão vira pasta nova em vez de achar a que
+   já existe. */
+function _pastaDaPesagem(contrato,data,placa,criar){
+  var ref=s(contrato).replace(/[^a-zA-Z0-9.\-]/g,"")||"SEM-CONTRATO";
+  var pl=s(placa).replace(/[^a-zA-Z0-9]/g,"")||"SEM-PLACA";
+  var dt=s(data).replace(/\//g,"-");
+  if(!dt) return null;
+  var chave=(dt+"_"+pl).replace(/[\/\\:*?"<>|]/g,"-");
+  var raiz=DriveApp.getFolderById(DRIVE_ID);
+  if(criar) return obterOuCriar(obterOuCriar(obterOuCriar(raiz,"Fotos"),ref),chave);
+  var pF=_pastaMaisAntiga(raiz,"Fotos"); if(!pF) return null;
+  var pC=_pastaMaisAntiga(pF,ref);       if(!pC) return null;
+  return _pastaMaisAntiga(pC,chave);
+}
+
+/* Data, contrato e placa de um ticket — é o que nomeia a pasta da pesagem. */
+function _dadosPesagemDoTicket(ticket_id){
+  var vazio={data:"",contrato:"",placa:""};
+  try{
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("Pesagem");
+    if(!sh||sh.getLastRow()<2) return vazio;
+    var rows=sh.getRange(2,1,sh.getLastRow()-1,5).getValues();
+    for(var i=0;i<rows.length;i++)
+      if(s(rows[i][0])===s(ticket_id))
+        return{data:fmtD(rows[i][1]),contrato:s(rows[i][3]),placa:s(rows[i][4])};
+    return vazio;
+  }catch(e){ return vazio; }
+}
+
+/* Põe na pasta da pesagem a NFA que já está no arquivo fiscal.
+   Usa makeCopy: a cópia é feita dentro do Drive, sem baixar nem reenviar o PDF
+   (importa: o Apps Script tem 6 minutos por execução). Repetir não duplica —
+   se já houver NFA-<nº>.pdf na pasta, não faz nada. */
+function _copiarNFAparaPesagem(driveUrl,contrato,data,placa,numero){
+  var m=/\/d\/([a-zA-Z0-9_-]{10,})/.exec(s(driveUrl)) ||
+        /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(s(driveUrl));
+  if(!m) return{ok:false,erro:"sem link do PDF no Drive"};
+  var pasta=_pastaDaPesagem(contrato,data,placa,true);
+  if(!pasta) return{ok:false,erro:"pesagem sem data — não dá para achar a pasta"};
+  var nome="NFA-"+(s(numero)||"SEM-NUMERO")+".pdf";
+  if(pasta.getFilesByName(nome).hasNext())
+    return{ok:true,ja_existia:true,pasta:pasta.getUrl()};
+  var copia=DriveApp.getFileById(m[1]).makeCopy(nome,pasta);
+  try{ copia.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
+  return{ok:true,url:copia.getUrl(),pasta:pasta.getUrl()};
+}
+
+/* Arquiva na pasta da pesagem TODAS as NFAs já emitidas (aba NFAs_Emitidas).
+   Serve para as notas de antes desta rotina e para as que falharam na hora da
+   emissão. Vai em blocos, como a recuperação de assinaturas. */
+function arquivarNFAsNasPesagens(inicio,limite){
+  try{
+    inicio=Math.max(0,parseInt(inicio,10)||0);
+    limite=Math.min(60,Math.max(5,parseInt(limite,10)||25));
+    var ss=SpreadsheetApp.openById(PLANILHA_ID);
+    var aba=ss.getSheetByName("NFAs_Emitidas");
+    if(!aba||aba.getLastRow()<2)
+      return{ok:true,total:0,vistas:0,copiadas:0,ja_tinham:0,sem_pdf:0,restantes:0,proxima:0,falhas:[]};
+    var notas=aba.getRange(2,1,aba.getLastRow()-1,Math.max(8,aba.getLastColumn())).getValues();
+
+    // Ticket → data e placa da pesagem (o nome da pasta sai daí)
+    var shP=ss.getSheetByName("Pesagem"), mapa={};
+    if(shP&&shP.getLastRow()>1){
+      var pes=shP.getRange(2,1,shP.getLastRow()-1,5).getValues();
+      for(var i=0;i<pes.length;i++)
+        mapa[s(pes[i][0])]={data:fmtD(pes[i][1]),contrato:s(pes[i][3]),placa:s(pes[i][4])};
+    }
+
+    var fim=Math.min(notas.length,inicio+limite);
+    var copiadas=0,jaTinham=0,semPdf=0,falhas=[];
+    for(var k=inicio;k<fim;k++){
+      var numero=s(notas[k][0]), ticket=s(notas[k][1]);
+      var contrato=s(notas[k][2]), url=s(notas[k][7]);
+      if(!ticket) continue;
+      if(!url){ semPdf++; continue; }               // nota lançada à mão: não há PDF
+      var t=mapa[ticket];
+      if(!t){ falhas.push(numero+": ticket "+ticket+" não está na aba Pesagem"); continue; }
+      try{
+        var r=_copiarNFAparaPesagem(url,contrato||t.contrato,t.data,t.placa,numero);
+        if(!r.ok) falhas.push(numero+": "+r.erro);
+        else if(r.ja_existia) jaTinham++;
+        else copiadas++;
+      }catch(e){ falhas.push(numero+": "+e.message); }
+    }
+    return{ok:true,total:notas.length,vistas:fim,copiadas:copiadas,ja_tinham:jaTinham,
+      sem_pdf:semPdf,falhas:falhas.slice(0,6),restantes:notas.length-fim,proxima:fim};
+  }catch(e){ return{ok:false,erro:e.message}; }
 }
 
 /* Envia NFA + ticket da pesagem por e-mail (anexos) e devolve os links do Drive
