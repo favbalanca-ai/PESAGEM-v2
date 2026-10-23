@@ -1373,6 +1373,9 @@ body.dark .card{background:#1a2d22}
     <div style="font-size:11px;color:var(--ink3);margin:12px 0 8px;border-top:1px dashed var(--brd);padding-top:10px">As assinaturas enviadas antes da correção do fundo foram para o Drive como retângulo preto. Este aparelho pode reenviar, com fundo branco, as que ele guardou.</div>
     <button onclick="reenviarAssinaturasDoAparelho()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">♻️ Reenviar assinaturas deste aparelho</button>
     <div id="diag-reenv-sig" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
+    <div style="font-size:11px;color:var(--ink3);margin:12px 0 8px;border-top:1px dashed var(--brd);padding-top:10px">Põe o PDF de cada NFA emitida na pasta da pesagem (junto das fotos, do ticket e da assinatura). Copia dentro do Drive — a nota não é reenviada e nada é apagado.</div>
+    <button onclick="arquivarNFAsNaPesagem()" style="width:100%;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">📄 Arquivar NFAs nas pastas das pesagens</button>
+    <div id="diag-nfa-pasta" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
   </div>
 
   <!-- Log de eventos -->
@@ -1573,7 +1576,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v190"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v191"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5772,6 +5775,49 @@ async function recuperarAssinaturas(){
   if(el) el.innerHTML = achadas
     ? '<b style="color:var(--g1)">✅ '+achadas+' assinatura(s) recuperada(s)</b> em '+vistas+' pesagens conferidas.<br><span style="color:var(--ink3)">Toque ☁️ no Histórico para recarregar e confira um ticket antigo.</span>'
     : '<span style="color:var(--a1)">Nenhuma assinatura encontrada no Drive em '+vistas+' pesagens conferidas.</span>';
+}
+
+/* Põe o PDF de cada NFA emitida na pasta da pesagem — Fotos/<contrato>/<data>_<PLACA>,
+   a mesma das fotos, do ticket e da assinatura. O robô já faz isso ao emitir;
+   isto é para as notas antigas e para as vezes em que aquele passo falhou (ele
+   falhava calado até agora). Vai em blocos por causa do limite de 6 minutos do
+   Apps Script, e repetir não duplica: nota que já está na pasta é pulada. */
+async function arquivarNFAsNaPesagem(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  var el=document.getElementById('diag-nfa-pasta');
+  if(!confirm('Copiar o PDF das NFAs emitidas para a pasta da pesagem de cada uma?\n\nA cópia é feita dentro do Drive. Nada é apagado e nota que já está na pasta é pulada.')) return;
+  var inicio=0, copiadas=0, jaTinham=0, semPdf=0, vistas=0, voltas=0, falhas=[];
+  if(el) el.innerHTML='⏳ Arquivando...';
+  while(voltas++ < 60){
+    var j;
+    try{
+      var r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+        body:JSON.stringify({acao:'arquivarNFAsPesagem',inicio:inicio,limite:25,token:TOKEN})});
+      j=JSON.parse(await r.text());
+    }catch(e){
+      if(el) el.innerHTML='<span style="color:var(--r1)">❌ Parou em '+vistas+' nota(s): '+e.message+'</span>';
+      return;
+    }
+    if(!j||!j.ok){
+      if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+((j&&j.erro)||'o servidor recusou')+'</span>';
+      if(j&&/desconhecid|nao encontrad|not a function/i.test(String(j.erro||''))) toast('⚠️ Publique o Code.gs novo');
+      return;
+    }
+    copiadas+=j.copiadas||0; jaTinham+=j.ja_tinham||0; semPdf+=j.sem_pdf||0;
+    vistas=j.vistas||vistas; inicio=j.proxima||0;
+    if(j.falhas&&j.falhas.length) falhas=falhas.concat(j.falhas);
+    if(el) el.innerHTML='⏳ '+vistas+' de '+(j.total||'?')+' nota(s) · <b>'+copiadas+'</b> arquivada(s)...';
+    if(!j.restantes) break;
+  }
+  try{ addLog('📄 NFAs nas pastas das pesagens: '+copiadas+' arquivada(s), '+jaTinham+' já estavam','ok'); }catch(e){}
+  var txt = copiadas
+    ? '<b style="color:var(--g1)">✅ '+copiadas+' nota(s) arquivada(s)</b> na pasta da pesagem.'
+    : '<span style="color:var(--a1)">Nenhuma nota nova para arquivar.</span>';
+  if(jaTinham) txt+='<br><span style="color:var(--ink3)">'+jaTinham+' já estava(m) na pasta.</span>';
+  if(semPdf)   txt+='<br><span style="color:var(--ink3)">'+semPdf+' sem PDF no Drive (nota lançada à mão).</span>';
+  if(falhas.length) txt+='<br><span style="color:var(--r1)">⚠️ '+falhas.length+': '+falhas.slice(0,3).join(' · ')+'</span>';
+  if(el) el.innerHTML=txt;
 }
 
 /* Junta no Drive as pastas repetidas criadas antes da correção (envios
