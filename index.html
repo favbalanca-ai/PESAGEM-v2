@@ -1586,7 +1586,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v192"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v193"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -9216,7 +9216,9 @@ function abrirEnviarDocs(){
       '<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">'+d.placa+' · '+(d.contrato||'sem contrato')+' · '+d.kg.toLocaleString('pt-BR')+' kg</div>'+
       '<div class="f"><label>E-mail do destinatário</label><input id="env-email" value="'+String(d.email).replace(/"/g,'&quot;')+'" placeholder="nome@empresa.com.br"></div>'+
       '<button onclick="enviarDocsEmail()" style="width:100%;margin-top:4px;padding:12px;border:none;border-radius:10px;background:#1a3a6c;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">✉️ Enviar por e-mail (com anexos)</button>'+
-      '<div style="font-size:11px;color:var(--ink3);margin:14px 0 6px">WhatsApp — abre a conversa com os links dos documentos</div>'+
+      '<div style="font-size:11px;color:var(--ink3);margin:14px 0 6px">WhatsApp — com os PDFs anexados na conversa</div>'+
+      '<button onclick="enviarDocsAnexo()" style="width:100%;margin-bottom:8px;padding:12px;border:none;border-radius:10px;background:#128c7e;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">📎 Mandar os PDFs anexados</button>'+
+      '<div style="font-size:11px;color:var(--ink3);margin:10px 0 6px;border-top:1px dashed var(--brd);padding-top:10px">Ou abrir a conversa só com os links</div>'+
       '<div id="env-wa-btns"></div>'+
       '<div id="env-status" style="font-size:11px;color:var(--ink3);margin-top:10px;text-align:center"></div>'+
       '<button onclick="document.getElementById(\'modal-env-docs\').remove()" style="width:100%;margin-top:12px;padding:11px;border:1px solid var(--brd);border-radius:10px;background:none;color:var(--ink3);font-size:13px;cursor:pointer;font-family:\'Inter\',sans-serif">Fechar</button>'+
@@ -9272,6 +9274,67 @@ function enviarDocsEmail(){
     .then(function(j){
       if(j&&j.ok&&j.enviado_email){ _envLinks=j.links||_envLinks; _statusEnv('✅ enviado para '+em); toast('✉️ NFA + Ticket enviados'); }
       else { _statusEnv('❌ '+((j&&j.erro)||'não consegui enviar')); toast('❌ '+((j&&j.erro)||'falha no envio')); }
+    })
+    .catch(function(){ _statusEnv('❌ erro de conexão'); });
+}
+/* Mandar o NFA e o ticket ANEXADOS na conversa.
+   O link wa.me só carrega texto — não existe jeito de pendurar um arquivo nele.
+   Quem entrega arquivo de verdade ao WhatsApp é o compartilhamento do próprio
+   aparelho (navigator.share com files): o celular abre a folha de
+   compartilhamento, você escolhe WhatsApp e o contato, e os PDFs entram como
+   anexo. No PC isso depende do Windows ter o WhatsApp como destino; quando não
+   tem, os PDFs são baixados e é só arrastar para dentro da conversa. */
+function _bytesDeB64(b64){
+  const bin=atob(String(b64||''));
+  const u=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+  return u;
+}
+function _baixarDocsPC(arqs){
+  arqs.forEach(function(f,i){
+    setTimeout(function(){
+      const u=URL.createObjectURL(f);
+      const a=document.createElement('a');
+      a.href=u; a.download=f.name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function(){ URL.revokeObjectURL(u); },4000);
+    }, i*400);
+  });
+  _statusEnv('⬇️ '+arqs.length+' PDF(s) baixado(s) — arraste para dentro da conversa do WhatsApp');
+  toast('⬇️ PDFs baixados — arraste para a conversa');
+}
+function enviarDocsAnexo(){
+  const d=_dadosEnvioDocs(); if(!d) return;
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  _statusEnv('⏳ pegando os PDFs no Drive...');
+  fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:'baixarDocsTicket',dados:{contrato:d.contrato,placa:d.placa,data:d.data},token:TOKEN})})
+    .then(function(r){return r.json();})
+    .then(function(j){
+      if(!j||!j.ok){
+        _statusEnv('⚠️ '+((j&&j.erro)||'não achei os arquivos'));
+        if(j&&/desconhecid|not a function/i.test(String(j.erro||''))) toast('⚠️ Publique o Code.gs novo');
+        return;
+      }
+      if(j.wa_escritorio) _envWaEsc=j.wa_escritorio;
+      const arqs=(j.arquivos||[]).map(function(a){
+        return new File([_bytesDeB64(a.base64)], a.nome, {type:a.mime||'application/pdf'});
+      });
+      if(!arqs.length){ _statusEnv('⚠️ nenhum PDF na pasta da pesagem'); return; }
+      const texto='📄 *NFA + Ticket — '+d.placa+'*\n'+
+        (d.contrato?('Contrato: '+d.contrato+'\n'):'')+
+        (d.motorista?('Motorista: '+d.motorista+'\n'):'')+
+        'Carga: '+d.kg.toLocaleString('pt-BR')+' kg\n\n_Fazenda Água Viva_';
+      let podeAnexar=false;
+      try{ podeAnexar=!!(navigator.canShare && navigator.canShare({files:arqs})); }catch(e){}
+      if(!podeAnexar){ _baixarDocsPC(arqs); return; }
+      _statusEnv('📎 escolha o WhatsApp e o contato...');
+      navigator.share({files:arqs,text:texto,title:'NFA + Ticket — '+d.placa})
+        .then(function(){ _statusEnv('✅ '+arqs.length+' PDF(s) entregues ao WhatsApp'); })
+        .catch(function(e){
+          // Desistir no meio não é erro — baixar à força só atrapalharia.
+          if(e && e.name==='AbortError'){ _statusEnv('envio cancelado'); return; }
+          _baixarDocsPC(arqs);
+        });
     })
     .catch(function(){ _statusEnv('❌ erro de conexão'); });
 }
