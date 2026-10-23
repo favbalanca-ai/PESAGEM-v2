@@ -478,10 +478,11 @@ function processarNFA(payload){
            "Pode ser que o arquivo capturado não seja a nota (a tela do formulário também vira PDF). "+
            "Registre pelo painel escolhendo o PDF da nota, ou informe o número."};
 
-    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome,numero_nfa);
+    var prod0=(produtos[0])||{};
+    var driveRes=salvarPDFnfa(pdf_base64,emitente,dest_nome,numero_nfa,
+      s(payload.data_transporte),s(prod0.grupo)||s(prod0.produto));
     var drive_url=driveRes.url;
-    var numero_nfa=driveRes.numero_nfa;
-    var nome_arquivo=driveRes.nome;
+    var nome_arquivo=driveRes.nome;   // numero_nfa já está resolvido acima
 
     if(dest_email){
       enviarEmailNFA(dest_email,dest_nome,emitente_nome,numero_nfa,drive_url,pdf_base64,nome_arquivo,produtos);
@@ -520,8 +521,10 @@ function processarNFA(payload){
          Drive. Também cobre o caso de o robô não ter mandado placa/data. */
       try{
         var alvo=_dadosPesagemDoTicket(ticket_id);
+        var p1=(produtos[0])||{};
         var c2=_copiarNFAparaPesagem(drive_url,contrato_id||alvo.contrato,
-          s(payload.data_transporte)||alvo.data,s(payload.placa)||alvo.placa,numero_nfa);
+          s(payload.data_transporte)||alvo.data,s(payload.placa)||alvo.placa,numero_nfa,
+          s(p1.grupo)||s(p1.produto));
         if(c2.ok) naPlaca={url:c2.url||"",pasta:c2.pasta||"",erro:""};
         else naPlaca.erro=(naPlaca.erro?naPlaca.erro+" / ":"")+c2.erro;
       }catch(e){ naPlaca.erro=(naPlaca.erro?naPlaca.erro+" / ":"")+e.message; }
@@ -545,8 +548,10 @@ function _arquivarNFAnaPastaDaPlaca(pdf_base64,payload,numero_nfa){
     var placa=s(payload.placa).replace(/[^A-Za-z0-9]/g,"")||"SEM-PLACA";
     var data=s(payload.data_transporte).replace(/\//g,"-")||
              Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd-MM-yyyy");
+    var prod=((payload.produtos||[])[0])||{};
     var r=salvarFoto({contrato:contrato,data:data,placa:placa,pesagem:data+"_"+placa,
-      tipo:"NFA-"+s(numero_nfa),base64:pdf_base64,mime:"application/pdf"},"Fotos");
+      tipo:_nomeArquivoNFA(payload.data_transporte,s(prod.grupo)||s(prod.produto),numero_nfa),
+      base64:pdf_base64,mime:"application/pdf"},"Fotos");
     return{url:(r&&r.url)||"",pasta:(r&&r.pasta_url)||"",erro:""};
   // Falhar aqui não invalida a nota (ela já está emitida e no arquivo fiscal),
   // mas ficava SÓ no Logger: ninguém via, e a nota simplesmente não aparecia na
@@ -572,6 +577,31 @@ function _pastaDaPesagem(contrato,data,placa,criar){
   return _pastaMaisAntiga(pC,chave);
 }
 
+/* ── Nome do arquivo da NFA: AAAA.MM.DD.PRODUTO.NUMERO.pdf ──────
+   O mesmo nome nos três lugares: no Downloads do computador (quem monta é a
+   extensão), na pasta da pesagem e no arquivo fiscal. Procurar uma nota pelo
+   número, pela data ou pelo produto funciona igual em qualquer um deles. */
+function _pedacoNomeNFA(v,tam){
+  var t=s(v);
+  try{ t=t.normalize("NFD").replace(/[̀-ͯ]/g,""); }catch(e){}
+  return t.toUpperCase().replace(/[^A-Z0-9]+/g,"-").replace(/^-+|-+$/g,"").substring(0,tam||24);
+}
+/* Reconhece a nota na pasta da pesagem pelos DOIS nomes: o novo
+   (2026.10.23.SOJA.28512778.pdf) e o antigo (NFA-28512778.pdf), que continua
+   nas pastas das notas já arquivadas. */
+function _ehArquivoNFA(nome){
+  var n=s(nome);
+  return /^NFA/i.test(n) || /^\d{4}\.\d{2}\.\d{2}\..+\.\d{4,}\.pdf$/i.test(n);
+}
+function _nomeArquivoNFA(dataTransporte,produto,numero){
+  var m=/^(\d{2})\/(\d{2})\/(\d{4})/.exec(s(dataTransporte)) ||
+        /^(\d{2})-(\d{2})-(\d{4})/.exec(s(dataTransporte));
+  var data=m ? (m[3]+"."+m[2]+"."+m[1])
+             : Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"yyyy.MM.dd");
+  return data+"."+(_pedacoNomeNFA(produto,18)||"PRODUTO")+"."+
+         (_pedacoNomeNFA(numero,24)||"SEM-NUMERO");
+}
+
 /* Data, contrato e placa de um ticket — é o que nomeia a pasta da pesagem. */
 function _dadosPesagemDoTicket(ticket_id){
   var vazio={data:"",contrato:"",placa:""};
@@ -590,14 +620,23 @@ function _dadosPesagemDoTicket(ticket_id){
    Usa makeCopy: a cópia é feita dentro do Drive, sem baixar nem reenviar o PDF
    (importa: o Apps Script tem 6 minutos por execução). Repetir não duplica —
    se já houver NFA-<nº>.pdf na pasta, não faz nada. */
-function _copiarNFAparaPesagem(driveUrl,contrato,data,placa,numero){
+function _temNotaNaPasta(pasta,numero){
+  var n=s(numero); if(!n) return false;
+  var it=pasta.getFiles();
+  while(it.hasNext()) if(it.next().getName().indexOf(n)>=0) return true;
+  return false;
+}
+function _copiarNFAparaPesagem(driveUrl,contrato,data,placa,numero,produto){
   var m=/\/d\/([a-zA-Z0-9_-]{10,})/.exec(s(driveUrl)) ||
         /[?&]id=([a-zA-Z0-9_-]{10,})/.exec(s(driveUrl));
   if(!m) return{ok:false,erro:"sem link do PDF no Drive"};
   var pasta=_pastaDaPesagem(contrato,data,placa,true);
   if(!pasta) return{ok:false,erro:"pesagem sem data — não dá para achar a pasta"};
-  var nome="NFA-"+(s(numero)||"SEM-NUMERO")+".pdf";
-  if(pasta.getFilesByName(nome).hasNext())
+  var nome=_nomeArquivoNFA(data,produto,numero)+".pdf";
+  /* "Já está aqui?" se pergunta pelo NÚMERO, não pelo nome: as notas gravadas
+     antes se chamam NFA-<nº>.pdf, e procurar pelo nome novo faria uma segunda
+     cópia de cada uma delas. */
+  if(_temNotaNaPasta(pasta,numero))
     return{ok:true,ja_existia:true,pasta:pasta.getUrl()};
   var copia=DriveApp.getFileById(m[1]).makeCopy(nome,pasta);
   try{ copia.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
@@ -624,6 +663,13 @@ function arquivarNFAsNasPesagens(inicio,limite){
       for(var i=0;i<pes.length;i++)
         mapa[s(pes[i][0])]={data:fmtD(pes[i][1]),contrato:s(pes[i][3]),placa:s(pes[i][4])};
     }
+    // Contrato → produto (entra no nome do arquivo: AAAA.MM.DD.PRODUTO.NUMERO)
+    var shC=ss.getSheetByName(ABA_CONTRATOS), prods={};
+    if(shC&&shC.getLastRow()>1){
+      var ctr=shC.getRange(2,1,shC.getLastRow()-1,Math.max(COL.PRODUTO,shC.getLastColumn())).getValues();
+      for(var c=0;c<ctr.length;c++)
+        prods[s(ctr[c][COL.ID-1])]=s(ctr[c][COL.GRUPO-1])||s(ctr[c][COL.PRODUTO-1]);
+    }
 
     var fim=Math.min(notas.length,inicio+limite);
     var copiadas=0,jaTinham=0,semPdf=0,falhas=[];
@@ -635,7 +681,8 @@ function arquivarNFAsNasPesagens(inicio,limite){
       var t=mapa[ticket];
       if(!t){ falhas.push(numero+": ticket "+ticket+" não está na aba Pesagem"); continue; }
       try{
-        var r=_copiarNFAparaPesagem(url,contrato||t.contrato,t.data,t.placa,numero);
+        var r=_copiarNFAparaPesagem(url,contrato||t.contrato,t.data,t.placa,numero,
+          prods[contrato]||prods[t.contrato]||"");
         if(!r.ok) falhas.push(numero+": "+r.erro);
         else if(r.ja_existia) jaTinham++;
         else copiadas++;
@@ -664,7 +711,7 @@ function enviarDocsTicket(p){
     var it=pasta.getFiles();
     while(it.hasNext()){
       var f=it.next(), nm=f.getName();
-      if(/^NFA/i.test(nm)){ links.nfa=f.getUrl(); anexos.push(f.getBlob()); }
+      if(_ehArquivoNFA(nm)){ links.nfa=f.getUrl(); anexos.push(f.getBlob()); }
       else if(/^TICKET/i.test(nm)){ links.ticket=f.getUrl(); anexos.push(f.getBlob()); }
     }
     if(!anexos.length) return{ok:false,erro:"Nenhum NFA/TICKET nesta pasta ainda"};
@@ -711,7 +758,7 @@ function baixarDocsTicket(p){
     var arqs=[], it=pasta.getFiles(), bytesTotal=0;
     while(it.hasNext()){
       var f=it.next(), nm=f.getName();
-      if(!/^(NFA|TICKET)/i.test(nm)) continue;
+      if(!_ehArquivoNFA(nm) && !/^TICKET/i.test(nm)) continue;
       var b=f.getBlob(), by=b.getBytes();
       // Teto de segurança: a resposta do Apps Script é um texto só, e base64
       // engorda ~33%. Passando disso, melhor mandar o link do que estourar.
@@ -726,9 +773,11 @@ function baixarDocsTicket(p){
     return{ok:true,arquivos:arqs,pasta:pasta.getUrl(),wa_escritorio:s(FAV_WA_ESCRITORIO)};
   }catch(e){ return{ok:false,erro:e.message}; }
 }
-/* Na pasta os arquivos se chamam TICKET.pdf e NFA-<nº>.pdf — bom para a pasta,
-   ruim na conversa, onde chegariam todos com o mesmo nome. */
+/* Na pasta, o ticket se chama só TICKET.pdf — na conversa, todos chegariam com
+   o mesmo nome. A nota já vai nomeada (2026.10.23.SOJA.28512778.pdf), e nessa
+   não se mexe: ela já diz data, produto e número. */
 function _nomeDocEnvio(nome,placa,data){
+  if(_ehArquivoNFA(nome) && /\d{4,}/.test(nome)) return nome;
   var ext=(nome.match(/\.[A-Za-z0-9]+$/)||[".pdf"])[0];
   var base=nome.replace(/\.[A-Za-z0-9]+$/,"");
   var pedacos=[base,placa];
@@ -739,7 +788,7 @@ function _nomeDocEnvio(nome,placa,data){
 // numeroInformado: o número já resolvido por quem chamou (lido na tela da
 // SEFAZ pela extensão ou extraído do PDF). Chegar aqui sem número é erro de
 // programação — não se inventa número de nota fiscal.
-function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado){
+function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado,dataTransporte,produto){
   if(!s(numeroInformado)) throw new Error("salvarPDFnfa sem número da nota");
   var agr=new Date();
   var ano=String(agr.getFullYear());
@@ -750,9 +799,10 @@ function salvarPDFnfa(pdf_base64,emitente,dest_nome,numeroInformado){
   var pAno=obterOuCriar(pEm,ano);
   var pMes=obterOuCriar(pAno,mes);
   var numero_nfa=s(numeroInformado);
-  var dataStr=Utilities.formatDate(agr,Session.getScriptTimeZone(),"ddMMyyyy");
-  var destNome=dest_nome.replace(/[^a-zA-ZÀ-ÿ0-9\s]/g,"").trim().toUpperCase().substring(0,30);
-  var nome="NFA-"+numero_nfa+"-"+destNome+"-"+dataStr+".pdf";
+  // Mesmo nome do Downloads e da pasta da pesagem: AAAA.MM.DD.PRODUTO.NUMERO.
+  // A pasta já diz o emitente, o ano e o mês; o destinatário no nome só
+  // alongava o arquivo e deixava os três lugares diferentes entre si.
+  var nome=_nomeArquivoNFA(dataTransporte,produto,numero_nfa)+".pdf";
   var blob=Utilities.newBlob(Utilities.base64Decode(pdf_base64),"application/pdf",nome);
   var arq=pMes.createFile(blob);
   arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
