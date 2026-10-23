@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.16 (número de verdade: sem número, não registra)
+// FAV NFA - Background Service Worker v7.17 (XML da nota: baixa pela chave, renomeia e arquiva no Drive)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -33,6 +33,11 @@ function tratarMensagem(msg, sendResponse) {
   }
   if (msg.action === 'PROCESSAR_PDF_NFA') {
     processarPDF(msg).then(sendResponse).catch(e => sendResponse({ erro: e.message }));
+    return true;
+  }
+  // XML da nota: abre a consulta pela chave, clica em "Baixar XML" e arquiva
+  if (msg.action === 'BAIXAR_XML_NFA') {
+    baixarXMLdaNota(msg).then(sendResponse).catch(e => sendResponse({ ok: false, erro: e.message }));
     return true;
   }
   // Registro guardado + o número digitado pela pessoa
@@ -218,7 +223,11 @@ function nomeLocalNFA(dados) {
 }
 // Renomeia o arquivo na pasta Downloads enquanto há uma NFA em andamento
 chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  // O arquivo final é gravado por nós com o nome já pronto (vem de um data:);
+  /* O XML vem ANTES da regra dos data: abaixo de propósito: a página da nota
+     monta o XML no próprio navegador e baixa por um data:, sem pedir nada ao
+     servidor. É dali que sai tanto o nome quanto o conteúdo que vai ao Drive. */
+  if (ehXML(item)) { tratarXMLbaixado(item, suggest); return true; }
+  // O PDF final é gravado por nós com o nome já pronto (vem de um data:);
   // mexer nele aqui desfaria o trabalho.
   if (/^data:/i.test(String(item.url || ''))) { suggest(); return; }
   chrome.storage.local.get(['nfa_pendente', 'cfg_pasta_nfa'], (d) => {
@@ -230,6 +239,123 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
   });
   return true; // resposta assíncrona
 });
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   XML DA NOTA
+   O PDF é a representação; o XML é o documento fiscal. Na SEFAZ ele está em
+   outro site (nfeweb), na consulta completa pela chave de acesso de 44
+   dígitos. O botão "Baixar XML" de lá não chama o servidor: a página monta o
+   arquivo no próprio navegador e baixa por um data: URL. Isso é bom para nós —
+   o endereço do download JÁ CARREGA o conteúdo, então dá para renomear o
+   arquivo e mandar o XML para o Drive sem baixar nada duas vezes.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const _XML_PEND = 'nfa_xml_pendente';   // { numero, chave, dados, ts }
+const URL_CONSULTA_XML = 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfe/consulta-completa-interna?chaveAcesso=';
+
+function ehXML(item) {
+  const mime = String(item.mime || '').toLowerCase();
+  const nome = String(item.filename || '');
+  const url  = String(item.url || '');
+  return /xml/.test(mime) || /\.xml$/i.test(nome) || /^data:[^,]*xml/i.test(url);
+}
+function nomeFinalXML(dados, numero_nfa) {
+  return nomeFinalNFA(dados, numero_nfa).replace(/\.pdf$/i, '.xml');
+}
+// Conteúdo do XML a partir do próprio endereço do download (data:...)
+function xmlDoDataURL(url) {
+  const u = String(url || '');
+  const virg = u.indexOf(',');
+  if (!/^data:/i.test(u) || virg < 0) return '';
+  const cabecalho = u.slice(0, virg), corpo = u.slice(virg + 1);
+  try {
+    if (/;base64/i.test(cabecalho)) return corpo;
+    // data: sem base64 vem com percent-encoding; o Drive quer base64
+    const txt = decodeURIComponent(corpo);
+    const bytes = new TextEncoder().encode(txt);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+    return btoa(bin);
+  } catch (e) { return ''; }
+}
+function tratarXMLbaixado(item, suggest) {
+  chrome.storage.local.get([_XML_PEND, 'cfg_pasta_nfa'], (d) => {
+    const p = d[_XML_PEND];
+    if (!p) { suggest(); return; }                 // XML que não é nosso: não mexer
+    const pasta = _pastaLimpa(d.cfg_pasta_nfa != null ? d.cfg_pasta_nfa : CFG_PADRAO.cfg_pasta_nfa);
+    const nome = nomeFinalXML(p.dados, p.numero);
+    // overwrite e não uniquify: um XML por nota, sem "(1).xml" acumulando
+    suggest({ filename: (pasta ? pasta + '/' : '') + nome, conflictAction: 'overwrite' });
+    guardarXMLnoDrive(item, p, nome);
+  });
+}
+async function guardarXMLnoDrive(item, pend, nomeLocal) {
+  const b64 = xmlDoDataURL(item.url);
+  if (!b64) {
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: pend.numero,
+      erro: 'baixei o arquivo, mas não consegui ler o conteúdo para mandar ao Drive' });
+    return;
+  }
+  try {
+    const d = pend.dados || {};
+    const resp = await postGAS({
+      action: 'arquivarXMLnfa',
+      numero_nfa: pend.numero, chave: pend.chave, base64: b64,
+      ticket_id: d.ticket_id || '', contrato: d.contrato_id || '',
+      data: d.data_transporte || '', placa: d.placa || ''
+    });
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: !!(resp && resp.ok), numero: pend.numero,
+      arquivo: nomeLocal, url: (resp && resp.url) || '', erro: (resp && resp.erro) || '' });
+  } catch (e) {
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: pend.numero,
+      arquivo: nomeLocal, erro: 'o arquivo baixou, mas o Drive não respondeu: ' + e.message });
+  }
+}
+// Abre a consulta da nota, espera o botão e clica UMA vez (duas geram "(1).xml")
+function clicarBaixarXML(tabId) {
+  return new Promise((resolve) => {
+    const tentar = (n) => {
+      chrome.scripting.executeScript({
+        target: { tabId: tabId },
+        func: () => {
+          if (window.__FAV_XML_CLICADO__) return 'ja-clicado';
+          const b = document.querySelector('button.download-nfe-xml');
+          if (!b) return document.body && /não|nao|erro|indispon/i.test(document.body.innerText || '') ? 'pagina-erro' : 'sem-botao';
+          window.__FAV_XML_CLICADO__ = true;
+          b.click();
+          return 'clicado';
+        }
+      }).then((res) => {
+        const r = res && res[0] && res[0].result;
+        if (r === 'clicado' || r === 'ja-clicado') return resolve({ ok: true });
+        if (n >= 25) return resolve({ ok: false, erro: 'não achei o botão "Baixar XML" nessa página' });
+        setTimeout(() => tentar(n + 1), 700);
+      }).catch((e) => {
+        if (n >= 25) return resolve({ ok: false, erro: e.message });
+        setTimeout(() => tentar(n + 1), 700);
+      });
+    };
+    tentar(0);
+  });
+}
+async function baixarXMLdaNota(msg) {
+  const chave = String((msg && msg.chave) || '').replace(/\D/g, '');
+  const numero = String((msg && msg.numero) || '').replace(/\D/g, '');
+  if (chave.length !== 44) return { ok: false, erro: 'chave de acesso com ' + chave.length + ' dígitos (precisa de 44)' };
+  if (!numero) return { ok: false, erro: 'sem o número da nota' };
+  const store = await chrome.storage.local.get('nfa_pendente');
+  const dados = (msg && msg.dados) || store.nfa_pendente || {};
+  await chrome.storage.local.set({ [_XML_PEND]: { numero, chave, dados, ts: Date.now() } });
+
+  let tab;
+  try { tab = await chrome.tabs.create({ url: URL_CONSULTA_XML + chave, active: false }); }
+  catch (e) { await chrome.storage.local.remove(_XML_PEND); return { ok: false, erro: e.message }; }
+
+  const r = await clicarBaixarXML(tab.id);
+  // A aba já fez o que tinha de fazer; o download segue sozinho.
+  setTimeout(() => { try { chrome.tabs.remove(tab.id, () => chrome.runtime.lastError); } catch (e) {} }, r.ok ? 2500 : 500);
+  if (!r.ok) { await chrome.storage.local.remove(_XML_PEND); return r; }
+  return { ok: true, numero: numero };
+}
 
 const _downloadsVistos = new Set();
 chrome.downloads.onCreated.addListener((item) => capturarPDFbaixado(item));
