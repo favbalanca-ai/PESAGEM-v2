@@ -165,6 +165,7 @@ function doPost(e){
     if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
     if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
+    if(d.acao==="baixarDocsTicket")   return resposta(baixarDocsTicket(d.dados||{}));
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
@@ -679,6 +680,47 @@ function enviarDocsTicket(p){
     return{ok:true,enviado_email:enviado,links:links,arquivos:anexos.length,
       wa_escritorio:s(FAV_WA_ESCRITORIO)};
   }catch(e){ return{ok:false,erro:e.message}; }
+}
+
+/* Devolve o NFA e o ticket da pasta da pesagem em base64.
+   É o que permite mandar os PDFs ANEXADOS na conversa do WhatsApp: o link
+   wa.me só carrega texto, nunca arquivo. Com os bytes na mão, o app monta os
+   arquivos e entrega ao compartilhamento do aparelho, que põe os anexos na
+   conversa. */
+function baixarDocsTicket(p){
+  try{
+    var contrato=s(p.contrato)||"SEM-CONTRATO";
+    var placa=s(p.placa).replace(/[^A-Za-z0-9]/g,"")||"SEM-PLACA";
+    var data=s(p.data).replace(/\//g,"-");
+    var pasta=_pastaDaPesagem(contrato,data,placa,false);
+    if(!pasta) return{ok:false,erro:"Pasta da pesagem não encontrada: "+contrato+"/"+data+"_"+placa};
+
+    var arqs=[], it=pasta.getFiles(), bytesTotal=0;
+    while(it.hasNext()){
+      var f=it.next(), nm=f.getName();
+      if(!/^(NFA|TICKET)/i.test(nm)) continue;
+      var b=f.getBlob(), by=b.getBytes();
+      // Teto de segurança: a resposta do Apps Script é um texto só, e base64
+      // engorda ~33%. Passando disso, melhor mandar o link do que estourar.
+      if(bytesTotal+by.length > 18*1024*1024) continue;
+      bytesTotal+=by.length;
+      arqs.push({nome:_nomeDocEnvio(nm,placa,data),
+        mime:b.getContentType()||"application/pdf",
+        base64:Utilities.base64Encode(by),
+        url:f.getUrl()});
+    }
+    if(!arqs.length) return{ok:false,erro:"Nenhum NFA/TICKET nesta pasta ainda"};
+    return{ok:true,arquivos:arqs,pasta:pasta.getUrl(),wa_escritorio:s(FAV_WA_ESCRITORIO)};
+  }catch(e){ return{ok:false,erro:e.message}; }
+}
+/* Na pasta os arquivos se chamam TICKET.pdf e NFA-<nº>.pdf — bom para a pasta,
+   ruim na conversa, onde chegariam todos com o mesmo nome. */
+function _nomeDocEnvio(nome,placa,data){
+  var ext=(nome.match(/\.[A-Za-z0-9]+$/)||[".pdf"])[0];
+  var base=nome.replace(/\.[A-Za-z0-9]+$/,"");
+  var pedacos=[base,placa];
+  if(data) pedacos.push(data);
+  return pedacos.join("-").replace(/[\/\\:*?"<>|]/g,"-")+ext;
 }
 
 // numeroInformado: o número lido na tela da SEFAZ pela extensão — vale mais
