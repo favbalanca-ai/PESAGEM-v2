@@ -934,6 +934,12 @@ body.dark .card{background:#1a2d22}
       <button class="btn btns bsm" id="tk-ordem-btn" onclick="document.getElementById('tk-ordem-inp').click()" style="width:100%">📎 Anexar ordem de carregamento</button>
       <input type="file" id="tk-ordem-inp" accept="image/*,application/pdf,.pdf" capture="environment" style="display:none" onchange="anexarOrdemCarregamento(this)">
     </div>
+    <div class="card" id="tk-xml-c" style="display:none">
+      <div class="ct">🧾 XML da nota</div>
+      <div id="tk-xml-info" style="font-size:12px;color:var(--ink3);margin-bottom:9px">Nenhum anexado.</div>
+      <button class="btn btns bsm" id="tk-xml-btn" onclick="document.getElementById('tk-xml-inp').click()" style="width:100%">🧾 Anexar XML da nota</button>
+      <input type="file" id="tk-xml-inp" accept="text/xml,application/xml,.xml" style="display:none" onchange="anexarXMLnota(this)">
+    </div>
     <div class="brow">
       <button class="btn btns bsm" onclick="gerarPDF();imprimirPDF()">🖨️ Imprimir</button>
       <button class="btn btns bsm" onclick="gerarPDF()">📄 PDF</button>
@@ -1586,7 +1592,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v193"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v194"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5275,6 +5281,7 @@ function rTicket(o){
   const btnEdit=document.getElementById('btn-edit-tk');
   if(btnEdit) btnEdit.style.display=(usr&&usr.nivel==='admin')?'block':'none';
   _renderOrdemTicket(o);
+  _renderXMLTicket(o);
   // Botões de NFA: autorizar (celular) / emitir (PC) / imprimir (emitida)
   atualizarBotoesNFA(o);
   // Botões de envio para classificador/comprador do contrato
@@ -5309,6 +5316,74 @@ function _renderOrdemTicket(o){
     btn.textContent=url?'📎 Trocar a ordem anexada':'📎 Anexar ordem de carregamento';
   }
 }
+/* ══ XML DA NOTA NO TICKET (Adm) ═══════════════════════════════
+   O XML é o documento fiscal de verdade; o PDF é a representação dele. Vai
+   para a MESMA pasta da pesagem e com o MESMO nome do PDF, mudando só a
+   extensão — os dois ficam lado a lado. O card só aparece depois que a nota
+   foi emitida: sem o número, não dá nem para nomear o arquivo. */
+function _renderXMLTicket(o){
+  var card=document.getElementById('tk-xml-c');
+  if(!card) return;
+  var adm=!!(usr && usr.nivel==='admin');
+  var num=(o&&o.nfa_numero)||'';
+  var url=(o&&o.nfa_xml_url)||'';
+  card.style.display=(num&&(adm||url))?'block':'none';
+  var info=document.getElementById('tk-xml-info');
+  if(info){
+    info.innerHTML = url
+      ? '✅ Anexado · <a href="'+url+'" target="_blank" rel="noopener" style="color:var(--g1);font-weight:700;text-decoration:underline">abrir</a>'
+      : 'Nenhum anexado — nota '+num+'.';
+  }
+  var btn=document.getElementById('tk-xml-btn');
+  if(btn){
+    btn.style.display=adm?'block':'none';
+    btn.textContent=url?'🧾 Trocar o XML anexado':'🧾 Anexar XML da nota';
+  }
+}
+async function anexarXMLnota(inp){
+  var f=inp&&inp.files&&inp.files[0];
+  if(inp) inp.value='';
+  if(!f) return;
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — anexar exige internet'); return; }
+  var o=atual; if(!o||!o.id){ toast('⚠️ Abra o ticket primeiro'); return; }
+  if(!o.nfa_numero){ toast('⚠️ A nota precisa estar emitida'); return; }
+  if(!/\.xml$/i.test(f.name)){ toast('⚠️ Escolha o arquivo .xml da nota'); return; }
+  var btn=document.getElementById('tk-xml-btn');
+  var rot=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Enviando...'; }
+  try{
+    // XML é texto: vai inteiro, sem passar por comprimirImagem
+    var b64=await new Promise(function(res,rej){
+      var r=new FileReader();
+      r.onload=function(){ res(String(r.result).split(',')[1]||''); };
+      r.onerror=function(){ rej(new Error('não consegui ler o arquivo')); };
+      r.readAsDataURL(f);
+    });
+    if(!b64) throw new Error('arquivo vazio');
+    var dados={ticket_id:o.id, numero_nfa:String(o.nfa_numero),
+      contrato:(o.numOrdem||'').replace(/[^a-zA-Z0-9.\-]/g,''),
+      data:(o.dataEntrada||'').replace(/\//g,'-'),
+      placa:(o.placa||'').replace(/[^a-zA-Z0-9]/g,''), base64:b64};
+    var r1=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+      body:JSON.stringify({acao:'arquivarXMLnfa',dados:dados,token:TOKEN})});
+    var j=JSON.parse(await r1.text());
+    if(!j.ok) throw new Error(j.erro||'o servidor recusou');
+    o.nfa_xml_url=j.url;
+    var i=(cloud||[]).findIndex(function(x){return x.id===o.id;}); if(i>=0) cloud[i].nfa_xml_url=j.url;
+    var k=(DB.ordens||[]).findIndex(function(x){return x.id===o.id;}); if(k>=0){ DB.ordens[k].nfa_xml_url=j.url; saveDB(); }
+    try{ addLog('🧾 XML da nota '+o.nfa_numero+' anexado — '+(o.placa||o.id),'ok'); }catch(e){}
+    // O arquivo subiu mesmo quando a linha da nota ainda não existe na planilha
+    toast(j.na_planilha ? '✅ XML anexado!' : '✅ XML no Drive (a nota ainda não está na planilha)');
+  }catch(e){
+    toast('❌ '+e.message);
+    try{ addLog('❌ XML não anexado ('+(o.placa||o.id)+'): '+e.message,'erro'); }catch(_){}
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent=rot||'🧾 Anexar XML da nota'; }
+    _renderXMLTicket(o);
+  }
+}
+
 async function anexarOrdemCarregamento(inp){
   var f=inp&&inp.files&&inp.files[0];
   if(inp) inp.value='';

@@ -166,6 +166,7 @@ function doPost(e){
     if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
     if(d.acao==="baixarDocsTicket")   return resposta(baixarDocsTicket(d.dados||{}));
+    if(d.acao==="arquivarXMLnfa")     return resposta(arquivarXMLnfa(d.dados||{}));
     if(d.acao==="registrarNFmanual")  return resposta(registrarNFmanual(d.dados||{}));
     if(d.acao==="auditLog")           return resposta(registrarAudit(d.log));
     if(d.acao==="assinaturaUrl")      return resposta(registrarAssinaturaUrl(d.dados||{}));
@@ -628,23 +629,34 @@ function _dadosPesagemDoTicket(ticket_id){
    Usa makeCopy: a cópia é feita dentro do Drive, sem baixar nem reenviar o PDF
    (importa: o Apps Script tem 6 minutos por execução). Repetir não duplica —
    se já houver NFA-<nº>.pdf na pasta, não faz nada. */
-/* Manda para a lixeira o PDF que já estava ali para esta mesma nota.
+/* Arquivos desta nota na pasta, de UM tipo só.
+   O tipo não é detalhe: a mesma nota tem PDF e XML com o mesmo nome, mudando
+   só a extensão. Sem separar, regravar o PDF mandaria o XML para a lixeira
+   junto — e procurar "a nota" acharia o XML e deixaria de gravar o PDF. */
+function _arquivosDaNotaNaPasta(pasta,numero,ext){
+  var n=s(numero), e=s(ext).toLowerCase(), achados=[];
+  if(!n||!pasta) return achados;
+  var it=pasta.getFiles();
+  while(it.hasNext()){
+    var f=it.next(), nm=f.getName(), low=nm.toLowerCase();
+    if(nm.indexOf(n)<0) continue;
+    if(e && low.lastIndexOf(e)!==low.length-e.length) continue;
+    achados.push(f);
+  }
+  return achados;
+}
+/* Manda para a lixeira o que já estava ali para esta mesma nota, daquele tipo.
    Lixeira, não apagar de vez: se alguém regravar por engano, o arquivo volta. */
-function _aposentarNotaDaPasta(pasta,numero){
-  var n=s(numero); if(!n) return 0;
-  var achados=[], it=pasta.getFiles();
-  while(it.hasNext()){ var f=it.next(); if(f.getName().indexOf(n)>=0) achados.push(f); }
+function _aposentarNotaDaPasta(pasta,numero,ext){
+  var achados=_arquivosDaNotaNaPasta(pasta,numero,ext||".pdf");
   for(var i=0;i<achados.length;i++){
     try{ achados[i].setTrashed(true); }
-    catch(e){ Logger.log("aposentar nota antiga: "+e.message); }
+    catch(e){ Logger.log("aposentar arquivo antigo da nota: "+e.message); }
   }
   return achados.length;
 }
 function _temNotaNaPasta(pasta,numero){
-  var n=s(numero); if(!n) return false;
-  var it=pasta.getFiles();
-  while(it.hasNext()) if(it.next().getName().indexOf(n)>=0) return true;
-  return false;
+  return _arquivosDaNotaNaPasta(pasta,numero,".pdf").length>0;
 }
 function _copiarNFAparaPesagem(driveUrl,contrato,data,placa,numero,produto){
   var m=/\/d\/([a-zA-Z0-9_-]{10,})/.exec(s(driveUrl)) ||
@@ -762,6 +774,70 @@ function enviarDocsTicket(p){
     return{ok:true,enviado_email:enviado,links:links,arquivos:anexos.length,
       wa_escritorio:s(FAV_WA_ESCRITORIO)};
   }catch(e){ return{ok:false,erro:e.message}; }
+}
+
+/* ── XML da nota ────────────────────────────────────────────────
+   O XML é o documento fiscal de verdade; o PDF é só a representação dele. Vai
+   para a MESMA pasta da pesagem e com o MESMO nome do PDF, mudando só a
+   extensão: 2026.10.23.SOJA.28512778.pdf e .xml, lado a lado.
+   O link fica na coluna 11 da aba NFAs_Emitidas, para o ticket mostrar em
+   qualquer aparelho. Reanexar troca o anterior (o velho vai para a lixeira). */
+function arquivarXMLnfa(d){
+  try{
+    d=d||{};
+    var numero=s(d.numero_nfa);
+    if(!numero) return{ok:false,erro:"Sem o número da nota — não dá para nomear o arquivo"};
+    var b64=s(d.base64);
+    if(!b64) return{ok:false,erro:"Sem o arquivo"};
+
+    var t=_dadosPesagemDoTicket(s(d.ticket_id));
+    var contrato=s(d.contrato)||t.contrato;
+    var data=s(d.data)||t.data;
+    var placa=s(d.placa)||t.placa;
+    var pasta=_pastaDaPesagem(contrato,data,placa,true);
+    if(!pasta) return{ok:false,erro:"Pesagem sem data — não achei a pasta"};
+
+    var nome=_nomeArquivoNFA(data,s(d.produto)||_produtoDoContrato(contrato),numero)+".xml";
+    _aposentarNotaDaPasta(pasta,numero,".xml");          // só o XML; o PDF fica
+    var blob=Utilities.newBlob(Utilities.base64Decode(b64),"text/xml",nome);
+    var arq=pasta.createFile(blob);
+    try{ arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
+
+    var gravou=_gravarXMLnaPlanilha(s(d.ticket_id),numero,arq.getUrl());
+    return{ok:true,url:arq.getUrl(),nome:nome,pasta:pasta.getUrl(),na_planilha:gravou};
+  }catch(e){ return{ok:false,erro:e.message}; }
+}
+function _produtoDoContrato(id){
+  try{
+    if(!s(id)) return "";
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName(ABA_CONTRATOS);
+    if(!sh||sh.getLastRow()<2) return "";
+    var nc=Math.min(Math.max(COL.PRODUTO,sh.getLastColumn()),sh.getMaxColumns());
+    var rows=sh.getRange(2,1,sh.getLastRow()-1,nc).getValues();
+    for(var i=0;i<rows.length;i++)
+      if(s(rows[i][COL.ID-1])===s(id))
+        return s(rows[i][COL.GRUPO-1])||s(rows[i][COL.PRODUTO-1]);
+    return "";
+  }catch(e){ return ""; }
+}
+/* Coluna 11 da aba NFAs_Emitidas: link do XML. Cria o cabeçalho se faltar. */
+function _gravarXMLnaPlanilha(ticket,numero,url){
+  try{
+    var aba=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("NFAs_Emitidas");
+    if(!aba||aba.getLastRow()<2) return false;
+    if(aba.getMaxColumns()<11) aba.insertColumnsAfter(aba.getMaxColumns(),11-aba.getMaxColumns());
+    if(!s(aba.getRange(1,11).getValue()))
+      aba.getRange(1,11).setValue("XML URL").setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
+    var rows=aba.getRange(2,1,aba.getLastRow()-1,2).getValues();   // Nº e Ticket
+    var linha=-1;
+    for(var i=0;i<rows.length;i++){
+      if(s(rows[i][0])===s(numero)){ linha=i; break; }              // pelo número: é a nota
+      if(linha<0 && s(ticket) && s(rows[i][1])===s(ticket)) linha=i; // reserva: a linha do ticket
+    }
+    if(linha<0) return false;   // nota ainda não registrada; o XML foi para o Drive assim mesmo
+    aba.getRange(linha+2,11).setValue(url);
+    return true;
+  }catch(e){ Logger.log("gravar link do XML: "+e.message); return false; }
 }
 
 /* Devolve o NFA e o ticket da pasta da pesagem em base64.
@@ -988,7 +1064,7 @@ function registrarNFAEmitida(ticket_id,contrato_id,emitente,dest_nome,numero_nfa
     var aba=ss.getSheetByName("NFAs_Emitidas");
     if(!aba){
       aba=ss.insertSheet("NFAs_Emitidas");
-      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg"];
+      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg","XML URL"];
       aba.getRange(1,1,1,cab.length).setValues([cab]).setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
       aba.setFrozenRows(1);
     }
@@ -1038,7 +1114,7 @@ function registrarNFmanual(p){
     var aba=ss.getSheetByName("NFAs_Emitidas");
     if(!aba){
       aba=ss.insertSheet("NFAs_Emitidas");
-      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg"];
+      var cab=["Nº NFA","Ticket","Contrato","Emitente","Destinatário","Sacas","Data Emissão","Drive URL","Registrado Em","Peso kg","XML URL"];
       aba.getRange(1,1,1,cab.length).setValues([cab]).setBackground("#1a3a6c").setFontColor("white").setFontWeight("bold");
       aba.setFrozenRows(1);
     }
@@ -1315,14 +1391,15 @@ function listarPesagens(){
   var ticketsComNFA={};
   var shN=ss.getSheetByName("NFAs_Emitidas");
   if(shN&&shN.getLastRow()>1){
-    var nCn=Math.min(shN.getLastColumn(),10); // Nº, Ticket, Contrato, Emit, Dest, Sacas(6), Data, Drive(8), Reg(9), Peso kg(10)
+    var nCn=Math.min(shN.getLastColumn(),11); // Nº, Ticket, Contrato, Emit, Dest, Sacas(6), Data, Drive(8), Reg(9), Peso kg(10), XML(11)
     var nfaRows=shN.getRange(2,1,shN.getLastRow()-1,nCn).getValues();
     for(var k=0;k<nfaRows.length;k++){
       var tk=s(nfaRows[k][1]);
       if(!tk) continue;
-      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",sacas:0,kg:0,qtd:0};
+      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",xml:"",sacas:0,kg:0,qtd:0};
       ticketsComNFA[tk].numero=s(nfaRows[k][0]);
       ticketsComNFA[tk].drive=s(nfaRows[k][7]);
+      if(nCn>=11 && s(nfaRows[k][10])) ticketsComNFA[tk].xml=s(nfaRows[k][10]);
       var scLin=n(nfaRows[k][5]);
       var kgLin=nCn>=10?n(nfaRows[k][9]):0;      // kg exato (NFAs novas)
       if(!kgLin) kgLin=scLin*60;                 // NFAs antigas: converte das sacas
@@ -1358,6 +1435,7 @@ function listarPesagens(){
       nfa_emitida:!!ticketsComNFA[idTicket],
       nfa_numero:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].numero:"",
       nfa_drive_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].drive:"", // [NFA-AUTORIZACAO]
+      nfa_xml_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].xml:"",     // XML arquivado na pasta da pesagem
       nfa_sacas:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].sacas:0,      // sacas já emitidas em NFA (soma)
       nfa_kg:ticketsComNFA[idTicket]?Math.round(ticketsComNFA[idTicket].kg):0,// kg já emitidos em NFA (soma)
       nfa_qtd:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].qtd:0,          // quantas NFAs o ticket já tem
