@@ -884,9 +884,19 @@ body.dark .card{background:#1a2d22}
         <button onclick="fecharSig()" style="background:rgba(255,255,255,.15);border:none;color:#fff;padding:6px 10px;border-radius:7px;font-size:13px;cursor:pointer">✕</button>
       </div>
     </div>
-    <div style="flex:1;position:relative;overflow:hidden">
-      <canvas id="sig-c" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;touch-action:none;-webkit-user-select:none"></canvas>
-      <div id="sig-h" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:.25;font-size:20px;color:#1a5c45">✍️ Assine aqui</div>
+    <!-- A área é a tela toda; o PRANCHETA (#sig-rot) é sempre deitado. Em
+         retrato ele entra girado 90°, então quem vira o celular para o lado
+         assina no sentido natural e a imagem sai na horizontal. -->
+    <div id="sig-area" style="flex:1;position:relative;overflow:hidden">
+      <div id="sig-rot" style="position:absolute;top:50%;left:50%;transform-origin:center center">
+        <!-- border:0 de propósito: com box-sizing:border-box a borda da regra
+             #sig-c encolheria a área de desenho e o traço sairia deslocado -->
+        <canvas id="sig-c" style="display:block;border:0;border-radius:0;cursor:crosshair;touch-action:none;-webkit-user-select:none"></canvas>
+        <!-- linha de apoio: fica só na tela, não entra na imagem salva -->
+        <div id="sig-linha" style="position:absolute;left:7%;right:7%;bottom:22%;border-bottom:2px dashed #b9c8c2;pointer-events:none"></div>
+        <div id="sig-linha-x" style="position:absolute;left:7%;bottom:22%;transform:translate(-2px,-2px);color:#b9c8c2;font-size:18px;font-weight:700;pointer-events:none">✕</div>
+        <div id="sig-h" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;opacity:.3;font-size:20px;color:#1a5c45;text-align:center;line-height:1.6">✍️ Assine na linha<br><span style="font-size:13px">↻ vire o celular para assinar</span></div>
+      </div>
     </div>
     <div style="background:#f5f5f5;padding:10px 14px;display:flex;gap:8px;flex-shrink:0">
       <button onclick="confirmarSig()" style="flex:1;background:#1a5c45;border:none;color:#fff;padding:12px;border-radius:9px;font-size:14px;font-weight:700;cursor:pointer">✅ Confirmar assinatura</button>
@@ -1576,7 +1586,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v191"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v192"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5046,21 +5056,67 @@ function confBr(){
 }
 
 /* ══ ASSINATURA (overlay fullscreen) ══════════════════════════ */
+/* A assinatura TEM de sair na horizontal.
+   O app é instalado como "portrait-primary": virar o celular não vira a tela.
+   O motorista virava o aparelho para assinar com o braço no sentido natural, e
+   os traços caíam num campo em pé — a assinatura ia para o ticket deitada de
+   lado. Agora a prancheta é sempre deitada: em retrato ela entra girada 90°,
+   então quem vira o celular vê o campo no sentido certo e a imagem salva sai
+   mais larga que alta, sempre.
+   O giro é só na apresentação (CSS). O canvas continua com as coordenadas dele,
+   e é por isso que o toque passa pela conversão de _pontoSig(). */
+let sigGirado=false;
+function _layoutSig(preservar){
+  const area=document.getElementById('sig-area');
+  if(!area||!sigC||!sigX) return;
+  const W=Math.round(area.clientWidth), H=Math.round(area.clientHeight);
+  if(W<40||H<40) return;
+  sigGirado = H>W;                       // tela em pé → prancheta girada
+  const cw = sigGirado?H:W, ch = sigGirado?W:H;   // tamanho da prancheta (deitada)
+  const antes = preservar && sigOk ? sigC.toDataURL('image/png') : null;
+
+  const rot=document.getElementById('sig-rot');
+  rot.style.width=cw+'px'; rot.style.height=ch+'px';
+  rot.style.transform='translate(-50%,-50%) rotate('+(sigGirado?90:0)+'deg)';
+  sigC.style.width=cw+'px'; sigC.style.height=ch+'px';
+
+  const dpr=window.devicePixelRatio||1;
+  sigC.width=Math.floor(cw*dpr); sigC.height=Math.floor(ch*dpr);
+  sigX.setTransform(1,0,0,1,0,0); sigX.scale(dpr,dpr);
+  sigX.strokeStyle='#1a5c45'; sigX.lineWidth=3; sigX.lineCap='round'; sigX.lineJoin='round';
+
+  // Girar o celular redimensiona o canvas, e redimensionar APAGA o desenho.
+  // Quem já assinou não pode perder a assinatura por causa disso.
+  if(antes){
+    const img=new Image();
+    img.onload=()=>sigX.drawImage(img,0,0,cw,ch);
+    img.src=antes;
+  }
+}
+/* Toque/clique → coordenada dentro do canvas.
+   Com a prancheta girada, getBoundingClientRect() devolve a caixa JÁ girada e
+   a conta direta sai trocada. Então a conversão é feita a partir da área (que
+   não gira): com rotate(90°), o x do canvas anda no y da tela e o y do canvas
+   anda ao contrário do x da tela. */
+function _pontoSig(e){
+  const area=document.getElementById('sig-area');
+  const r=area.getBoundingClientRect();
+  const s=e.touches?e.touches[0]:e;
+  const sx=s.clientX-r.left, sy=s.clientY-r.top;
+  return sigGirado ? {x:sy, y:r.width-sx} : {x:sx, y:sy};
+}
 function initSig(){
   sigC=document.getElementById('sig-c');if(!sigC)return;
   sigX=sigC.getContext('2d');
   // Tamanho é controlado por abrirSig() quando o overlay abre
   function rsz(){
-    if(!document.getElementById('sig-overlay')||document.getElementById('sig-overlay').style.display==='none') return;
-    const dpr=window.devicePixelRatio||1;
-    const W=window.innerWidth, H=window.innerHeight-52-36; // 52=header 36=footer
-    sigC.width=Math.floor(W*dpr); sigC.height=Math.floor(H*dpr);
-    sigX.setTransform(1,0,0,1,0,0); sigX.scale(dpr,dpr);
-    sigX.strokeStyle='#1a5c45'; sigX.lineWidth=3; sigX.lineCap='round'; sigX.lineJoin='round';
+    const ov=document.getElementById('sig-overlay');
+    if(!ov||ov.style.display==='none') return;
+    _layoutSig(true);
   }
   window.addEventListener('resize', rsz);
   window.addEventListener('orientationchange', ()=>setTimeout(rsz,200));
-  const gp=e=>{const r=sigC.getBoundingClientRect(),s=e.touches?e.touches[0]:e;return{x:s.clientX-r.left,y:s.clientY-r.top};};
+  const gp=e=>_pontoSig(e);
   const st=(x,y)=>{sigDraw=true;sigOk=true;sigX.beginPath();sigX.moveTo(x,y);const h=document.getElementById('sig-h');if(h)h.style.display='none';};
   const dr=(x,y)=>{if(!sigDraw)return;sigX.lineTo(x,y);sigX.stroke();sigX.beginPath();sigX.moveTo(x,y);};
   const sp=()=>{sigDraw=false;sigX.beginPath();};
@@ -5077,16 +5133,23 @@ function initSig(){
 function abrirSig(){
   const ov=document.getElementById('sig-overlay');
   ov.style.display='flex';
-  // Redimensionar canvas para tela cheia
-  const dpr=window.devicePixelRatio||1;
-  const W=window.innerWidth, H=window.innerHeight-52-36;
-  sigC.width=Math.floor(W*dpr); sigC.height=Math.floor(H*dpr);
-  sigX.setTransform(1,0,0,1,0,0); sigX.scale(dpr,dpr);
-  sigX.strokeStyle='#1a5c45'; sigX.lineWidth=3; sigX.lineCap='round'; sigX.lineJoin='round';
+  /* Melhor caso: pedir ao aparelho para deitar a tela de verdade. Aí o cabeçalho
+     e os botões também ficam no lugar certo e _layoutSig() nem precisa girar
+     nada. O app está instalado como portrait-primary, então isso vale só
+     enquanto a assinatura está aberta — fecharSig() devolve. Nem todo navegador
+     deixa (iPhone não deixa): quando não deixa, fica o giro por CSS. */
+  try{
+    if(screen.orientation && screen.orientation.lock)
+      screen.orientation.lock('landscape')
+        .then(function(){ setTimeout(function(){ _layoutSig(true); },180); })
+        .catch(function(){});
+  }catch(e){}
+  // A prancheta só tem tamanho depois do display:flex — daí o layout vir aqui
+  _layoutSig(false);
   // Restaurar assinatura existente se houver
   if(sigOk && document.getElementById('sig-preview-img').src){
     const img=new Image();
-    img.onload=()=>sigX.drawImage(img,0,0,W,H);
+    img.onload=()=>sigX.drawImage(img,0,0,sigC.width/(window.devicePixelRatio||1),sigC.height/(window.devicePixelRatio||1));
     img.src=document.getElementById('sig-preview-img').src;
     document.getElementById('sig-h').style.display='none';
   }
@@ -5097,6 +5160,8 @@ function abrirSig(){
 }
 function fecharSig(){
   document.getElementById('sig-overlay').style.display='none';
+  // devolve a tela ao retrato do app
+  try{ if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }catch(e){}
   document.body.style.overflow='';
   document.body.style.position='';
   document.body.style.width='';
