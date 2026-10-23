@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.17 (XML da nota: baixa pela chave, renomeia e arquiva no Drive)
+// FAV NFA - Background Service Worker v7.19 (XML lido na propria pagina, anexo manual e um registro por vez)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -33,6 +33,16 @@ function tratarMensagem(msg, sendResponse) {
   }
   if (msg.action === 'PROCESSAR_PDF_NFA') {
     processarPDF(msg).then(sendResponse).catch(e => sendResponse({ erro: e.message }));
+    return true;
+  }
+  // XML escolhido à mão pela pessoa (saída quando o automático não dá)
+  if (msg.action === 'ANEXAR_XML') {
+    chrome.storage.local.get('nfa_pendente', (d) => {
+      mandarXMLaoDrive(String(msg.numero || '').replace(/\D/g, ''), '',
+        { dados: msg.dados || d.nfa_pendente || {} }, msg.texto)
+        .then(() => sendResponse({ ok: true }))
+        .catch(e => sendResponse({ ok: false, erro: e.message }));
+    });
     return true;
   }
   // XML da nota: abre a consulta pela chave, clica em "Baixar XML" e arquiva
@@ -234,7 +244,10 @@ chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
     if (d.nfa_pendente && ehPDF(item)) {
       const pasta = _pastaLimpa(d.cfg_pasta_nfa != null ? d.cfg_pasta_nfa : CFG_PADRAO.cfg_pasta_nfa);
       const nome = nomeLocalNFA(d.nfa_pendente);
-      suggest({ filename: (pasta ? pasta + '/' : '') + nome, conflictAction: 'uniquify' });
+      // overwrite: o provisório é sempre o mesmo arquivo da emissão em
+      // andamento. Com uniquify virava "AGUARDANDO-NUMERO (6).pdf", e aí dava
+      // para anexar à mão o PDF errado de uma emissão antiga.
+      suggest({ filename: (pasta ? pasta + '/' : '') + nome, conflictAction: 'overwrite' });
     } else suggest();
   });
   return true; // resposta assíncrona
@@ -285,76 +298,205 @@ function tratarXMLbaixado(item, suggest) {
     const nome = nomeFinalXML(p.dados, p.numero);
     // overwrite e não uniquify: um XML por nota, sem "(1).xml" acumulando
     suggest({ filename: (pasta ? pasta + '/' : '') + nome, conflictAction: 'overwrite' });
-    guardarXMLnoDrive(item, p, nome);
+    /* Aqui só se renomeia. Quem manda o conteúdo ao Drive é o grampo na
+       página: o endereço deste download não dá para reler depois. */
   });
 }
-async function guardarXMLnoDrive(item, pend, nomeLocal) {
-  const b64 = xmlDoDataURL(item.url);
-  if (!b64) {
-    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: pend.numero,
-      erro: 'baixei o arquivo, mas não consegui ler o conteúdo para mandar ao Drive' });
+/* Confere se o que veio é mesmo o XML da nota e manda ao Drive.
+   Sem conferir, uma tela de sessão expirada (HTML) subiria como se fosse a
+   nota — foi o que já aconteceu com o PDF do formulário. */
+function textoParaBase64(txt) {
+  const bytes = new TextEncoder().encode(String(txt || ''));
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
+  return btoa(bin);
+}
+async function mandarXMLaoDrive(numero, chave, pend, texto) {
+  const amostra = String(texto || '').slice(0, 120).replace(/\s+/g, ' ');
+  if (!/<\s*(nfeProc|NFe|procEventoNFe)\b/i.test(String(texto || ''))) {
+    await chrome.storage.local.remove(_XML_PEND);
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: numero,
+      erro: (/^\s*</.test(texto || '') ? 'veio uma página em vez do XML' : 'o arquivo não parece um XML de NF-e') +
+            ' (' + String(texto || '').length + ' caracteres: "' + amostra + '")' });
     return;
   }
+  const d = (pend && pend.dados) || {};
   try {
-    const d = pend.dados || {};
     const resp = await postGAS({
       action: 'arquivarXMLnfa',
-      numero_nfa: pend.numero, chave: pend.chave, base64: b64,
+      numero_nfa: numero, chave: chave, base64: textoParaBase64(texto),
       ticket_id: d.ticket_id || '', contrato: d.contrato_id || '',
       data: d.data_transporte || '', placa: d.placa || ''
     });
-    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: !!(resp && resp.ok), numero: pend.numero,
-      arquivo: nomeLocal, url: (resp && resp.url) || '', erro: (resp && resp.erro) || '' });
+    await chrome.storage.local.remove(_XML_PEND);
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: !!(resp && resp.ok), numero: numero,
+      url: (resp && resp.url) || '', erro: (resp && resp.erro) || '' });
   } catch (e) {
-    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: pend.numero,
-      arquivo: nomeLocal, erro: 'o arquivo baixou, mas o Drive não respondeu: ' + e.message });
+    await chrome.storage.local.remove(_XML_PEND);
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: numero,
+      erro: 'li o XML, mas o servidor não respondeu: ' + e.message });
   }
 }
-// Abre a consulta da nota, espera o botão e clica UMA vez (duas geram "(1).xml")
-function clicarBaixarXML(tabId) {
-  return new Promise((resolve) => {
-    const tentar = (n) => {
-      chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        func: () => {
-          if (window.__FAV_XML_CLICADO__) return 'ja-clicado';
-          const b = document.querySelector('button.download-nfe-xml');
-          if (!b) return document.body && /não|nao|erro|indispon/i.test(document.body.innerText || '') ? 'pagina-erro' : 'sem-botao';
-          window.__FAV_XML_CLICADO__ = true;
-          b.click();
-          return 'clicado';
-        }
-      }).then((res) => {
-        const r = res && res[0] && res[0].result;
-        if (r === 'clicado' || r === 'ja-clicado') return resolve({ ok: true });
-        if (n >= 25) return resolve({ ok: false, erro: 'não achei o botão "Baixar XML" nessa página' });
-        setTimeout(() => tentar(n + 1), 700);
-      }).catch((e) => {
-        if (n >= 25) return resolve({ ok: false, erro: e.message });
-        setTimeout(() => tentar(n + 1), 700);
-      });
-    };
-    tentar(0);
-  });
+/* Procura o botão "Baixar XML" e clica UMA vez (duas geram "(1).xml").
+   Devolve também o que estava na tela quando desistiu — é o que permite dizer
+   "a SEFAZ respondeu 503" em vez de um "não deu" sem explicação. */
+/* Grampo no mundo da PÁGINA (world:'MAIN').
+   O botão "Baixar XML" monta o arquivo no navegador e manda baixar. O endereço
+   desse download NÃO serve para ler o conteúdo depois: ele é descartável
+   (blob:) ou nem chega inteiro ao gancho de download — foi por isso que todas
+   as tentativas davam "baixei, mas não consegui ler". A saída é pegar o
+   conteúdo no momento em que a página o cria, ali dentro, antes de virar
+   arquivo. Daí o grampo em createObjectURL e no clique de link. */
+function grampearXML(tabId) {
+  return chrome.scripting.executeScript({
+    target: { tabId: tabId }, world: 'MAIN',
+    func: () => {
+      if (window.__FAV_XML_GRAMPO__) return true;
+      window.__FAV_XML_GRAMPO__ = true;
+      window.__FAV_XML_URL__ = '';
+      try {
+        const criar = URL.createObjectURL;
+        URL.createObjectURL = function (b) {
+          const u = criar.apply(URL, arguments);
+          try { window.__FAV_XML_URL__ = u; } catch (e) {}
+          return u;
+        };
+      } catch (e) {}
+      try {
+        const clicar = HTMLAnchorElement.prototype.click;
+        HTMLAnchorElement.prototype.click = function () {
+          try { if (this.href && /^(blob|data):/i.test(this.href)) window.__FAV_XML_URL__ = this.href; } catch (e) {}
+          return clicar.apply(this, arguments);
+        };
+      } catch (e) {}
+      return true;
+    }
+  }).then(() => true).catch(() => false);
 }
-async function baixarXMLdaNota(msg) {
+/* Lê o que o grampo pegou. Roda no mundo da página porque um blob: só pode ser
+   lido por quem o criou. */
+function colherXML(tabId) {
+  return chrome.scripting.executeScript({
+    target: { tabId: tabId }, world: 'MAIN',
+    func: async () => {
+      const u = window.__FAV_XML_URL__;
+      if (!u) return { pronto: false };
+      try {
+        const r = await fetch(u);
+        const txt = await r.text();
+        return { pronto: true, txt: txt, tam: txt.length };
+      } catch (e) { return { pronto: false, erro: String(e && e.message || e) }; }
+    }
+  }).then(res => (res && res[0] && res[0].result) || { pronto: false })
+    .catch(e => ({ pronto: false, erro: String(e && e.message || e) }));
+}
+function olharPaginaXML(tabId) {
+  return chrome.scripting.executeScript({
+    target: { tabId: tabId },
+    func: () => {
+      const txt = (document.body && document.body.innerText || '').slice(0, 400);
+      if (window.__FAV_XML_CLICADO__) return { estado: 'ja-clicado', txt: txt };
+      const b = document.querySelector('button.download-nfe-xml');
+      if (b) { window.__FAV_XML_CLICADO__ = true; b.click(); return { estado: 'clicado', txt: txt }; }
+      if (/503|servi(ç|c)o indispon|indisponível|temporariamente|erro interno|gateway/i.test(txt))
+        return { estado: 'fora-do-ar', txt: txt };
+      if (/n(ã|a)o (foi )?encontrad|inexistente|inv(á|a)lid/i.test(txt))
+        return { estado: 'nao-achou', txt: txt };
+      return { estado: 'esperando', txt: txt };
+    }
+  }).then(res => (res && res[0] && res[0].result) || { estado: 'sem-resposta', txt: '' })
+    .catch(e => ({ estado: 'erro', txt: String(e && e.message || e) }));
+}
+/* Espera a página da nota e clica. Quando a SEFAZ está fora do ar (503), não
+   adianta insistir no mesmo HTML: recarrega a aba e tenta de novo. */
+async function clicarBaixarXML(tabId, aoAndar, antesDeClicar) {
+  let recargas = 0;
+  for (let n = 0; n < 30; n++) {
+    // o grampo tem de estar posto ANTES do clique, senão o conteúdo escapa
+    if (antesDeClicar) { try { await antesDeClicar(); } catch (e) {} }
+    const r = await olharPaginaXML(tabId);
+    if (r.estado === 'clicado' || r.estado === 'ja-clicado') return { ok: true };
+    if (r.estado === 'nao-achou') return { ok: false, erro: 'a SEFAZ não achou essa chave de acesso' };
+    /* Página que nem carregou (site fora, conexão caída) não é página
+       esperando: insistir em olhar o mesmo nada custava 20 segundos para no
+       fim dizer que faltava o botão. Recarregar é o que pode resolver. */
+    if (r.estado === 'erro' && /showing error page|cannot be scripted|chrome-error/i.test(r.txt || '')) {
+      if (recargas >= 2) return { ok: false, erro: 'a página do NFeWeb não carregou (site fora do ar ou sem internet)' };
+      recargas++;
+      if (aoAndar) aoAndar('a página não carregou — recarregando (' + recargas + '/2)');
+      try { await chrome.tabs.reload(tabId); } catch (e) {}
+      await new Promise(r2 => setTimeout(r2, 3000));
+      continue;
+    }
+    if (r.estado === 'fora-do-ar') {
+      if (recargas >= 2) return { ok: false, erro: 'a SEFAZ respondeu que está indisponível (503) — tente daqui a pouco' };
+      recargas++;
+      if (aoAndar) aoAndar('SEFAZ fora do ar — recarregando (' + recargas + '/2)');
+      try { await chrome.tabs.reload(tabId); } catch (e) {}
+      await new Promise(r2 => setTimeout(r2, 3000));
+      continue;
+    }
+    if (n === 8 && aoAndar) aoAndar('ainda esperando a página da nota abrir');
+    await new Promise(r2 => setTimeout(r2, 700));
+  }
+  return { ok: false, erro: 'a página da nota não mostrou o botão "Baixar XML"' };
+}
+/* Responde JÁ e faz o trabalho depois.
+   Antes, a resposta só saía no fim — e o fim podia demorar 20 segundos entre
+   abrir a aba, esperar a página e clicar. Mensagem de extensão não foi feita
+   para esperar tudo isso: quem perguntou recebia vazio ("sem resposta") sem
+   nenhuma pista do que tinha acontecido. Agora o andamento vai pelo
+   XML_RESULTADO, que o painel já escuta. */
+function baixarXMLdaNota(msg) {
   const chave = String((msg && msg.chave) || '').replace(/\D/g, '');
   const numero = String((msg && msg.numero) || '').replace(/\D/g, '');
-  if (chave.length !== 44) return { ok: false, erro: 'chave de acesso com ' + chave.length + ' dígitos (precisa de 44)' };
-  if (!numero) return { ok: false, erro: 'sem o número da nota' };
-  const store = await chrome.storage.local.get('nfa_pendente');
-  const dados = (msg && msg.dados) || store.nfa_pendente || {};
-  await chrome.storage.local.set({ [_XML_PEND]: { numero, chave, dados, ts: Date.now() } });
+  if (chave.length !== 44) return Promise.resolve({ ok: false, erro: 'chave de acesso com ' + chave.length + ' dígitos (precisa de 44)' });
+  if (!numero) return Promise.resolve({ ok: false, erro: 'sem o número da nota' });
+  trabalharXML(numero, chave, (msg && msg.dados) || null);
+  return Promise.resolve({ ok: true, iniciado: true, numero: numero });
+}
+function _passoXML(numero, texto) {
+  avisarAbasSefaz({ action: 'XML_ANDAMENTO', numero: numero, passo: texto });
+}
+async function trabalharXML(numero, chave, dadosMsg) {
+  let tab = null;
+  try {
+    const store = await chrome.storage.local.get('nfa_pendente');
+    const dados = dadosMsg || store.nfa_pendente || {};
+    await chrome.storage.local.set({ [_XML_PEND]: { numero, chave, dados, ts: Date.now() } });
 
-  let tab;
-  try { tab = await chrome.tabs.create({ url: URL_CONSULTA_XML + chave, active: false }); }
-  catch (e) { await chrome.storage.local.remove(_XML_PEND); return { ok: false, erro: e.message }; }
+    _passoXML(numero, 'abrindo a nota no NFeWeb');
+    tab = await chrome.tabs.create({ url: URL_CONSULTA_XML + chave, active: false });
 
-  const r = await clicarBaixarXML(tab.id);
-  // A aba já fez o que tinha de fazer; o download segue sozinho.
-  setTimeout(() => { try { chrome.tabs.remove(tab.id, () => chrome.runtime.lastError); } catch (e) {} }, r.ok ? 2500 : 500);
-  if (!r.ok) { await chrome.storage.local.remove(_XML_PEND); return r; }
-  return { ok: true, numero: numero };
+    const r = await clicarBaixarXML(tab.id, (t) => _passoXML(numero, t), () => grampearXML(tab.id));
+    if (!r.ok) {
+      await chrome.storage.local.remove(_XML_PEND);
+      avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: numero, erro: r.erro });
+      return;
+    }
+    _passoXML(numero, 'lendo o XML');
+    // O arquivo também cai em Downloads (renomeado pelo onDeterminingFilename),
+    // mas quem manda o conteúdo ao Drive é o grampo: o endereço do download não
+    // dá para reler.
+    let colhido = { pronto: false };
+    for (let i = 0; i < 20 && !colhido.pronto; i++) {
+      await new Promise(r2 => setTimeout(r2, 400));
+      colhido = await colherXML(tab.id);
+    }
+    if (!colhido.pronto) {
+      await chrome.storage.local.remove(_XML_PEND);
+      avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: numero,
+        erro: 'o arquivo baixou, mas não consegui ler o conteúdo na página' +
+              (colhido.erro ? ' (' + colhido.erro + ')' : '') + ' — use "🧾 Anexar XML"' });
+      return;
+    }
+    await mandarXMLaoDrive(numero, chave, (await chrome.storage.local.get(_XML_PEND))[_XML_PEND], colhido.txt);
+  } catch (e) {
+    await chrome.storage.local.remove(_XML_PEND);
+    avisarAbasSefaz({ action: 'XML_RESULTADO', ok: false, numero: numero, erro: e.message });
+  } finally {
+    if (tab) setTimeout(() => { try { chrome.tabs.remove(tab.id, () => chrome.runtime.lastError); } catch (e) {} }, 4000);
+  }
 }
 
 const _downloadsVistos = new Set();
@@ -421,10 +563,14 @@ async function capturarPDFbaixado(item) {
   try {
     if (!item || !item.url || _downloadsVistos.has(item.id)) return;
     if (!ehPDF(item)) return;
+    // o registro manual pode estar em curso: dois ao mesmo tempo davam duas
+    // mensagens contrárias na tela, uma de erro e uma de sucesso
+    if (_registrandoAgora) { console.log('[FAV BG] já há um registro em andamento — ignorando este PDF'); return; }
     const store = await chrome.storage.local.get('nfa_pendente');
     const dados = store.nfa_pendente;
     if (!dados) return;                       // nenhuma emissão em andamento
     _downloadsVistos.add(item.id);
+    _registrandoAgora = true;
     console.log('[FAV BG] PDF baixado detectado — registrando NFA...', item.url);
     const b64 = await lerPDFbase64(item.url);
     if (!b64) {
@@ -458,6 +604,8 @@ async function capturarPDFbaixado(item) {
   } catch (e) {
     console.error('[FAV BG] captura do PDF falhou:', e);
     avisarAbasSefaz({ action: 'NFA_FALHOU', erro: e.message, pendente: true });
+  } finally {
+    _registrandoAgora = false;
   }
 }
 
@@ -474,6 +622,10 @@ async function capturarPDFbaixado(item) {
    descartava a nota emitida. Agora tenta de novo e, se não for, guarda o
    registro como pendente para uma nova tentativa. */
 const _REG_PEND = 'nfa_registro_pendente';
+/* Um registro por vez. O automático (PDF baixado) e o manual (número digitado)
+   corriam juntos e apareciam na tela no mesmo segundo: "não registrei, falta o
+   número" e "nota registrada". Os dois eram verdade — de execuções diferentes. */
+let _registrandoAgora = false;
 async function postGAS(payload, tentativas) {
   tentativas = tentativas || 3;
   const espera = [0, 1500, 4000];
@@ -589,6 +741,11 @@ async function processarPDF(msg) {
 async function registrarComNumeroInformado(numero) {
   numero = String(numero || '').replace(/\D/g, '');
   if (!numero) return { ok: false, erro: 'número não informado' };
+  if (_registrandoAgora) return { ok: false, erro: 'já tem um registro em andamento — espere terminar' };
+  _registrandoAgora = true;
+  try { return await _registrarComNumero(numero); } finally { _registrandoAgora = false; }
+}
+async function _registrarComNumero(numero) {
   const st = await chrome.storage.local.get(_REG_PEND);
   const pend = st[_REG_PEND];
   if (!pend) return { ok: false, erro: 'não há registro guardado — use "📄 Registrar NFA emitida"' };
