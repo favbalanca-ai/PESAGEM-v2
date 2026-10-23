@@ -134,6 +134,8 @@ function doPost(e){
 
     // NFA: processamento pós-emissão (sem token — vem da extensão Chrome)
     if(d.action==="processarNFA") return resposta(processarNFA(d));
+    // XML da nota, mandado pela extensão (mesmo caminho sem token do processarNFA)
+    if(d.action==="arquivarXMLnfa") return resposta(arquivarXMLnfa(d));
 
     // Login: é o que ENTREGA a sessão, então não pode exigir sessão
     if(d.acao==="login") return resposta(loginUsuario(d.usuario,d.senha));
@@ -790,10 +792,15 @@ function arquivarXMLnfa(d){
     var b64=s(d.base64);
     if(!b64) return{ok:false,erro:"Sem o arquivo"};
 
-    var t=_dadosPesagemDoTicket(s(d.ticket_id));
+    /* Em lote, o robô tem só o número da nota — nem ticket, nem placa, nem
+       data. A aba NFAs_Emitidas liga número → ticket, e o ticket dá o resto.
+       Com isso dá para arquivar o XML de qualquer nota já registrada. */
+    var ticket=s(d.ticket_id)||_ticketDaNota(numero);
+    var t=_dadosPesagemDoTicket(ticket);
     var contrato=s(d.contrato)||t.contrato;
     var data=s(d.data)||t.data;
     var placa=s(d.placa)||t.placa;
+    if(!data) return{ok:false,erro:"Não achei a pesagem da nota "+numero+" — registre a nota no app primeiro"};
     var pasta=_pastaDaPesagem(contrato,data,placa,true);
     if(!pasta) return{ok:false,erro:"Pesagem sem data — não achei a pasta"};
 
@@ -803,9 +810,21 @@ function arquivarXMLnfa(d){
     var arq=pasta.createFile(blob);
     try{ arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW); }catch(e){}
 
-    var gravou=_gravarXMLnaPlanilha(s(d.ticket_id),numero,arq.getUrl());
-    return{ok:true,url:arq.getUrl(),nome:nome,pasta:pasta.getUrl(),na_planilha:gravou};
+    var gravou=_gravarXMLnaPlanilha(ticket,numero,arq.getUrl());
+    return{ok:true,url:arq.getUrl(),nome:nome,pasta:pasta.getUrl(),na_planilha:gravou,
+      ticket:ticket,placa:placa};
   }catch(e){ return{ok:false,erro:e.message}; }
+}
+/* Qual ticket é a nota de número X (aba NFAs_Emitidas). */
+function _ticketDaNota(numero){
+  try{
+    var n=s(numero); if(!n) return "";
+    var aba=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("NFAs_Emitidas");
+    if(!aba||aba.getLastRow()<2) return "";
+    var rows=aba.getRange(2,1,aba.getLastRow()-1,3).getValues();   // Nº, Ticket, Contrato
+    for(var i=0;i<rows.length;i++) if(s(rows[i][0])===n) return s(rows[i][1]);
+    return "";
+  }catch(e){ return ""; }
 }
 function _produtoDoContrato(id){
   try{

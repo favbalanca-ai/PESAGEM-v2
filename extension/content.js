@@ -161,6 +161,10 @@ function _montarPainel() {
     '</div>' +
     '<div style="margin-top:6px"><button id="fav-btn-retentar" style="display:none;width:100%;padding:8px;background:#e67e22;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">↻ Tentar registrar de novo</button></div>' +
     '<div style="margin-top:6px"><button id="fav-btn-numero" style="display:none;width:100%;padding:8px;background:#8e44ad;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🔢 Informar o nº da nota</button></div>' +
+    '<div style="margin-top:6px;display:flex;gap:6px">' +
+    '<button id="fav-btn-xml" style="flex:1;padding:7px;background:#2c7a7b;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 XML da nota</button>' +
+    '<button id="fav-btn-xmls" style="flex:1;padding:7px;background:#4a5568;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;font-weight:bold;">🧾 XMLs da consulta</button>' +
+    '</div>' +
     '<input type="file" id="fav-pdf-input" accept="application/pdf,.pdf" style="display:none">';
   document.body.appendChild(_overlay);
   const bp = _overlay.querySelector('#fav-btn-parar');
@@ -243,6 +247,47 @@ function _montarPainel() {
         '<div style="font-size:11px;margin-top:5px">Dá para anexar o PDF certo no botão acima.</div>';
     });
   };
+  /* XML de UMA nota: a que acabou de ser registrada ou a que a pessoa digitar.
+     A chave vem da tabela da consulta ou da tela de detalhe. */
+  const bxml = _overlay.querySelector('#fav-btn-xml');
+  if (bxml) bxml.onclick = async () => {
+    let num = _ultimaNFAnum || _numeroNFAnaTela();
+    const lista = _notasNaConsulta();
+    if (!num && lista.length === 1) num = lista[0].numero;
+    if (!num) num = (prompt('Número da nota para baixar o XML:') || '').replace(/\D/g, '');
+    if (!num) return;
+    bxml.disabled = true; bxml.textContent = '🧾 Baixando...';
+    atualizarStatus('🧾 Baixando o XML da nota ' + num + '...', 'info');
+    const r = await baixarXMLdaNota(num);
+    bxml.disabled = false; bxml.textContent = '🧾 XML da nota';
+    if (!r.ok) atualizarStatus('❌ XML da nota ' + num + ': ' + (r.erro || 'não deu') +
+      '<div style="font-size:11px;margin-top:5px">Abra a <b>Consulta NFA</b>, pesquise a nota e tente de novo — a chave de acesso é lida da tabela.</div>', 'erro');
+  };
+  /* XMLs em lote: as notas da PÁGINA ATUAL da consulta. Uma de cada vez,
+     porque o renomeador do Chrome trabalha com uma nota por vez — duas em
+     paralelo trocariam os nomes entre si. */
+  const bxmls = _overlay.querySelector('#fav-btn-xmls');
+  if (bxmls) bxmls.onclick = async () => {
+    const lista = _notasNaConsulta().filter(x => x.numero && !x.cancelada);
+    if (!lista.length) {
+      atualizarStatus('⚠️ Nenhuma nota nesta tela. Abra a <b>Consulta NFA</b> e pesquise o período primeiro.', 'aviso');
+      return;
+    }
+    if (!confirm('Baixar o XML de ' + lista.length + ' nota(s) desta página?\n\nUma de cada vez. Se houver mais páginas, vire a página e rode de novo.')) return;
+    bxmls.disabled = true;
+    let ok = 0; const erros = [];
+    for (let i = 0; i < lista.length; i++) {
+      bxmls.textContent = '🧾 ' + (i + 1) + '/' + lista.length;
+      atualizarStatus('🧾 XML ' + (i + 1) + ' de ' + lista.length + ' — nota ' + lista[i].numero + '...', 'info');
+      const r = await baixarXMLdaNota(lista[i].numero, lista[i].chave);
+      if (r.ok) ok++; else erros.push(lista[i].numero + ': ' + (r.erro || 'não deu'));
+      await wait(1500).catch(() => {});
+    }
+    bxmls.disabled = false; bxmls.textContent = '🧾 XMLs da consulta';
+    atualizarStatus('<b>' + ok + ' de ' + lista.length + ' XML(s) arquivado(s)</b>' +
+      (erros.length ? '<div style="font-size:11px;margin-top:5px">Faltaram: ' + erros.slice(0, 4).join(' · ') + '</div>' : ''),
+      erros.length ? 'aviso' : 'ok');
+  };
   // Registrar a nota já emitida anexando o PDF que a SEFAZ baixou
   const breg = _overlay.querySelector('#fav-btn-registrar');
   const finp = _overlay.querySelector('#fav-pdf-input');
@@ -324,6 +369,65 @@ function _numeroNFAnaTela() {
     return m ? m[1] : '';
   } catch (e) { return ''; }
 }
+/* ─── XML DA NOTA ────────────────────────────────────────────────────────────
+   O XML mora em outro site da SEFAZ (nfeweb), achado pela CHAVE DE ACESSO de
+   44 dígitos. A chave está na tabela da Consulta NFA e na tela de detalhe
+   (Visualizar NOTA). Daqui a gente só descobre a chave e passa ao background,
+   que abre a consulta, clica uma vez em "Baixar XML" e arquiva. */
+let _ultimaNFAnum = '';
+function _notasNaConsulta() {
+  const notas = [];
+  const linhas = [...document.querySelectorAll('table tbody tr')];
+  for (const tr of linhas) {
+    const cels = [...tr.querySelectorAll('td')].map(td => String(td.textContent || '').replace(/\s/g, ''));
+    const chave = cels.find(t => /^\d{44}$/.test(t)) || '';
+    if (!chave) continue;
+    const numero = cels.find(t => /^\d{6,10}$/.test(t)) || '';
+    notas.push({ numero, chave, cancelada: /cancel/i.test(tr.textContent || '') });
+  }
+  return notas;
+}
+/* Chave na tela de detalhe. Procurada em elementos inteiros, nunca no texto
+   corrido da página: juntando tudo, qualquer sequência de números vizinhos
+   formaria 44 dígitos e viraria uma chave inventada. */
+function _chaveNaTela() {
+  const els = [...document.querySelectorAll('a,span,td,div,input,b,strong,label')];
+  for (const el of els) {
+    const t = String((el.value != null && el.value !== '' ? el.value : el.textContent) || '').replace(/\s/g, '');
+    if (/^\d{44}$/.test(t)) return t;
+  }
+  return '';
+}
+function _chaveDaNota(numero) {
+  const n = String(numero || '').replace(/\D/g, '');
+  const lista = _notasNaConsulta();
+  if (n) { const achou = lista.find(x => x.numero === n); if (achou) return achou.chave; }
+  const naTela = _chaveNaTela();
+  if (naTela) return naTela;
+  return lista.length === 1 ? lista[0].chave : '';
+}
+// Espera o background avisar como terminou este XML (ou desiste no tempo)
+function _esperarXML(numero, ms) {
+  return new Promise((resolve) => {
+    const fim = setTimeout(() => { _aguardandoXML = null; resolve({ ok: false, erro: 'demorou demais' }); }, ms || 25000);
+    _aguardandoXML = { numero: String(numero), pronto: (r) => { clearTimeout(fim); _aguardandoXML = null; resolve(r); } };
+  });
+}
+let _aguardandoXML = null;
+async function baixarXMLdaNota(numero, chave) {
+  const num = String(numero || '').replace(/\D/g, '');
+  const ch = String(chave || _chaveDaNota(num) || '').replace(/\D/g, '');
+  if (!num) return { ok: false, erro: 'sem o número da nota' };
+  if (ch.length !== 44) return { ok: false, erro: 'não achei a chave de acesso da nota ' + num + ' nesta tela' };
+  const dados = await obterDadosNFA();
+  const r = await new Promise((res) => {
+    try { chrome.runtime.sendMessage({ action: 'BAIXAR_XML_NFA', numero: num, chave: ch, dados: dados || null }, x => res(x || { ok: false, erro: 'sem resposta' })); }
+    catch (e) { res({ ok: false, erro: e.message }); }
+  });
+  if (!r.ok) return r;
+  return await _esperarXML(num, 25000);
+}
+
 async function registrarNFAcomPDF(pdf_base64, origem) {
   const dados = await obterDadosNFA();
   if (!dados) { atualizarStatus('⚠️ Sem os dados da NFA nesta aba — emita pelo app para registrar.', 'erro'); return false; }
@@ -398,6 +502,19 @@ if (!window.__FAV_NFA_MSG__) {
         .catch(e => sendResponse({ ok: false, erro: e.message }));
       return true; // resposta assíncrona
     }
+    if (msg.action === 'XML_RESULTADO') {
+      const num = String(msg.numero || '');
+      if (_aguardandoXML && (!_aguardandoXML.numero || _aguardandoXML.numero === num))
+        _aguardandoXML.pronto({ ok: !!msg.ok, erro: msg.erro || '' });
+      if (msg.ok) {
+        logFAV('XML da nota ' + num + ' arquivado' + (msg.arquivo ? ' · ' + msg.arquivo : ''));
+        atualizarStatus('<b>🧾 XML arquivado!</b> Nota ' + num +
+          '<div style="font-size:11px;margin-top:5px">Na mesma pasta do PDF, no Drive e no computador.</div>', 'ok');
+      } else {
+        logFAV('XML da nota ' + num + ' não arquivado: ' + (msg.erro || ''));
+      }
+      return true;
+    }
     if (msg.action === 'NFA_SEM_NUMERO') {
       _registroPendente = true;
       logFAV('Registro recusado: sem número da nota. ' + (msg.erro || ''));
@@ -410,6 +527,8 @@ if (!window.__FAV_NFA_MSG__) {
     }
     if (msg.action === 'NFA_REGISTRADA') {
       _registroPendente = false;
+      // guardado para o botão do XML não precisar perguntar o número
+      if (msg.numero_nfa) _ultimaNFAnum = String(msg.numero_nfa).replace(/\D/g, '');
       definirEtapa('registrar');
       logFAV('NFA registrada automaticamente do PDF baixado: nº ' + (msg.numero_nfa || '?'));
       atualizarStatus('<b>✅ Nota registrada!</b> NFA nº ' + (msg.numero_nfa || '—') +
