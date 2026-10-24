@@ -165,6 +165,8 @@ function doPost(e){
     if(d.acao==="listarEstoque")      return resposta(listarEstoque());
     if(d.acao==="recalcularEstoque")  return resposta(recalcularEstoque());
     if(d.acao==="recalcularContratos")return resposta(recalcularVolumeContratos());
+    if(d.acao==="verDuplicadas")      return resposta(verificarPesagensDuplicadas());
+    if(d.acao==="juntarDuplicadas")   return resposta(juntarPesagensDuplicadas());
     if(d.acao==="consolidarPastas")   return resposta(consolidarPastasDrive());
     if(d.acao==="enviarDocsTicket")   return resposta(enviarDocsTicket(d.dados||{}));
     if(d.acao==="baixarDocsTicket")   return resposta(baixarDocsTicket(d.dados||{}));
@@ -1213,13 +1215,33 @@ function salvarContratoUnico(dados){
 // ══════════════════════════════════════════════════════════════
 // EXPEDIÇÃO
 // ══════════════════════════════════════════════════════════════
-function salvarPesagem(o){
+/* ══ GRAVAÇÃO SERIALIZADA ═══════════════════════════════════════
+   O app grava a pesagem na fila ANTES de enviar e aceita, de propósito, mandar
+   a mesma pesagem duas vezes (fila + sync de 3 min + sync em segundo plano do
+   Android). A promessa era "inofensivo: o servidor atualiza a linha pelo id".
+   Só que isso vale em sequência. Dois envios AO MESMO TEMPO rodam em
+   execuções paralelas do Apps Script: as duas leem a coluna de ids, nenhuma
+   acha o id, as duas fazem appendRow — e a planilha fica com a pesagem em
+   dobro. O cadeado faz os envios entrarem um de cada vez, e aí a promessa
+   passa a ser verdade. */
+function _comLock(fn){
+  var lock=LockService.getScriptLock();
+  var pegou=false;
+  try{ pegou=lock.tryLock(30000); }catch(e){}
+  if(!pegou) return {ok:false,erro:"A planilha está ocupada com outro envio — tente de novo em instantes"};
+  try{ return fn(); }
+  finally{ try{ lock.releaseLock(); }catch(e){} }
+}
+function salvarPesagem(o){ return _comLock(function(){ return _salvarPesagemSemLock(o); }); }
+function atualizarPesagem(o){ return _comLock(function(){ return _atualizarPesagemSemLock(o); }); }
+
+function _salvarPesagemSemLock(o){
   var ss=SpreadsheetApp.openById(PLANILHA_ID);
   var sh=ss.getSheetByName("Pesagem");
   if(!sh){configurarPlanilha();sh=ss.getSheetByName("Pesagem");}
   if(sh.getLastRow()>1){
     var ids=sh.getRange(2,1,sh.getLastRow()-1,1).getValues();
-    for(var i=0;i<ids.length;i++){if(s(ids[i][0])===s(o.id))return atualizarPesagem(o);}
+    for(var i=0;i<ids.length;i++){if(s(ids[i][0])===s(o.id))return _atualizarPesagemSemLock(o);}
   }
   var linha=[
     s(o.id),s(o.dataEntrada),s(o.horaEntrada),s(o.numOrdem),
@@ -1361,42 +1383,128 @@ function registrarAssinaturaUrl(d){
   }catch(e){ return {ok:false,erro:e.message}; }
 }
 
-function atualizarPesagem(o){
+function _atualizarPesagemSemLock(o){
   var ss=SpreadsheetApp.openById(PLANILHA_ID);
   var sh=ss.getSheetByName("Pesagem");
-  if(!sh||sh.getLastRow()<2)return salvarPesagem(o);
+  if(!sh||sh.getLastRow()<2)return _salvarPesagemSemLock(o);
   var ids=sh.getRange(2,1,sh.getLastRow()-1,1).getValues();
   var idx=-1;
   for(var i=0;i<ids.length;i++){if(s(ids[i][0])===s(o.id)){idx=i;break;}}
-  if(idx<0)return salvarPesagem(o);
+  if(idx<0)return _salvarPesagemSemLock(o);
   var row=idx+2;
   var st=s(o.statusPeso).replace(/(Finalizado\s*[-—]\s*)+/gi,"").trim();if(!/CONFORME|ATEN|EXCEDIDO/i.test(st))st="";
   var cor=st==="EXCEDIDO"?"#fce8e8":"#e8f5e9";
-  // Dados editáveis pelo Adm (validação/edição) — antes não eram persistidos
-  if(o.numOrdem!==undefined)  sh.getRange(row,4).setValue(s(o.numOrdem));
-  if(o.placa!==undefined)     sh.getRange(row,5).setValue(s(o.placa));
-  if(o.motorista!==undefined) sh.getRange(row,6).setValue(s(o.motorista));
-  if(o.cpf!==undefined)       sh.getRange(row,7).setValue(s(o.cpf));
-  sh.getRange(row,15).setValue(n(o.tara));
-  sh.getRange(row,16).setValue(n(o.pesoBruto));
-  sh.getRange(row,17).setValue(n(o.cargaLiquida));
-  sh.getRange(row,18).setValue(st!==""?"Finalizado - "+st:s(o.status));
-  sh.getRange(row,21).setValue(s(o.dataHoraFim));
+
+  /* Uma leitura e uma escrita, em vez de quinze setValue.
+     Cada setValue é uma ida ao Sheets (~100 ms): a atualização levava mais de
+     um segundo e, pior, ficava um segundo e meio "meio gravada" — status já
+     finalizado, peso ainda antigo — bem na janela em que o sync de 3 minutos
+     e o sync do Android relêem a planilha. Agora a linha muda inteira, de uma
+     vez. As colunas 4 a 27 vão juntas; o que o app não mandou fica como está. */
+  var faixa=sh.getRange(row,4,1,24);           // colunas 4..27
+  var v=faixa.getValues()[0];
+  var C=function(col){ return col-4; };         // índice dentro da faixa
+  if(o.numOrdem!==undefined)  v[C(4)]=s(o.numOrdem);
+  if(o.placa!==undefined)     v[C(5)]=s(o.placa);
+  if(o.motorista!==undefined) v[C(6)]=s(o.motorista);
+  if(o.cpf!==undefined)       v[C(7)]=s(o.cpf);
+  v[C(15)]=n(o.tara);
+  v[C(16)]=n(o.pesoBruto);
+  v[C(17)]=n(o.cargaLiquida);
+  var statusAntes=s(v[C(18)]);
+  v[C(18)]=st!==""?"Finalizado - "+st:s(o.status);
+  v[C(21)]=s(o.dataHoraFim);
   /* Não sobrescreve o link do Drive com "Sim": quando o app manda um
      'atualizar' depois do arquivamento, o que já está gravado vale mais. */
-  var _ja=s(sh.getRange(row,22).getValue());
-  sh.getRange(row,22).setValue(_colAssinatura(o,_ja));
-  sh.getRange(row,23).setValue(s(o.municipio));
-  sh.getRange(row,24).setValue(s(o.estado));
-  if(o.longo!==undefined)sh.getRange(row,25).setValue(b(o.longo)?"Sim":"Nao");
-  if(o.transpCnpj!==undefined)sh.getRange(row,26).setValue(s(o.transpCnpj));
-  if(o.transpNome!==undefined)sh.getRange(row,27).setValue(s(o.transpNome));
+  v[C(22)]=_colAssinatura(o,s(v[C(22)]));
+  v[C(23)]=s(o.municipio);
+  v[C(24)]=s(o.estado);
+  if(o.longo!==undefined)      v[C(25)]=b(o.longo)?"Sim":"Nao";
+  if(o.transpCnpj!==undefined) v[C(26)]=s(o.transpCnpj);
+  if(o.transpNome!==undefined) v[C(27)]=s(o.transpNome);
+  faixa.setValues([v]);
+
   if(st!==""){sh.getRange(row,1,1,25).setBackground(cor);sh.getRange(row,18).setFontWeight("bold").setFontColor(st==="EXCEDIDO"?"#c0392b":"#1a5c45");}
+  /* Só na VIRADA para finalizado. O app reenvia a mesma pesagem de propósito
+     (fila + sync + Android), e cada reenvio de um ticket já finalizado somava
+     a saída no estoque de novo: 40.000 kg viravam 80.000, 120.000... O que
+     mede se é a primeira vez é o status que estava na planilha. */
+  var jaEstavaFinalizado=statusAntes.toLowerCase().indexOf("finaliz")>=0;
   if(st==="CONFORME"||st==="ATENÇÃO"||st==="EXCEDIDO"){
-    _baixarEstoqueExpedicao(o);
-    recalcularVolumeContratos();   // peso finalizado → atualiza entregue/saldo do contrato
+    if(!jaEstavaFinalizado) _baixarEstoqueExpedicao(o);
+    recalcularVolumeContratos();   // idempotente: recalcula do zero a partir das pesagens
   }
-  return{ok:true,id:s(o.id),atualizado:true};
+  return{ok:true,id:s(o.id),atualizado:true,repetido:jaEstavaFinalizado};
+}
+
+/* ══ PESAGENS DUPLICADAS ════════════════════════════════════════
+   Herança do envio simultâneo sem cadeado: o mesmo id em duas ou mais linhas.
+   O app soma tudo por id — carga, saldo de contrato, "falta emitir" — então
+   cada dupla conta duas vezes. Aqui se acha e se junta: fica a linha mais
+   completa (finalizada, com peso, com assinatura, mais recente) e as outras
+   vão para a aba Pesagem_Duplicadas, de onde dá para trazer de volta. Nada é
+   apagado. */
+function _pontuarLinhaPesagem(r){
+  var p=0;
+  if(s(r[17]).toLowerCase().indexOf("finaliz")>=0) p+=100;
+  if(n(r[16])>0) p+=50;                           // carga líquida
+  if(s(r[21]).indexOf("http")===0) p+=20;         // assinatura no Drive
+  if(s(r[20])) p+=10;                             // data/hora fim
+  if(s(r[30])) p+=5;                              // ordem de carregamento
+  if(s(r[27])==="Sim") p+=5;                      // NFA autorizada
+  return p;
+}
+function verificarPesagensDuplicadas(){
+  try{
+    var sh=SpreadsheetApp.openById(PLANILHA_ID).getSheetByName("Pesagem");
+    if(!sh||sh.getLastRow()<2) return {ok:true,grupos:[],linhas_extras:0};
+    var nCols=Math.min(sh.getLastColumn(),31);
+    var dados=sh.getRange(2,1,sh.getLastRow()-1,nCols).getValues();
+    var porId={};
+    for(var i=0;i<dados.length;i++){
+      var id=s(dados[i][0]); if(!id) continue;
+      (porId[id]=porId[id]||[]).push({linha:i+2,r:dados[i]});
+    }
+    var grupos=[], extras=0;
+    for(var k in porId){
+      if(porId[k].length<2) continue;
+      var g=porId[k].slice().sort(function(a,b){ return _pontuarLinhaPesagem(b.r)-_pontuarLinhaPesagem(a.r) || b.linha-a.linha; });
+      grupos.push({id:k,placa:s(g[0].r[4]),data:fmtD(g[0].r[1]),fica:g[0].linha,
+        saem:g.slice(1).map(function(x){return x.linha;})});
+      extras+=g.length-1;
+    }
+    return {ok:true,grupos:grupos,linhas_extras:extras};
+  }catch(e){ return {ok:false,erro:e.message}; }
+}
+function juntarPesagensDuplicadas(){
+  return _comLock(function(){
+    try{
+      var v=verificarPesagensDuplicadas();
+      if(!v.ok) return v;
+      if(!v.grupos.length) return {ok:true,movidas:0,grupos:0};
+      var ss=SpreadsheetApp.openById(PLANILHA_ID);
+      var sh=ss.getSheetByName("Pesagem");
+      var dest=ss.getSheetByName("Pesagem_Duplicadas");
+      var nCols=sh.getLastColumn();
+      if(!dest){
+        dest=ss.insertSheet("Pesagem_Duplicadas");
+        var cab=sh.getRange(1,1,1,nCols).getValues()[0];
+        dest.getRange(1,1,1,nCols).setValues([cab]).setFontWeight("bold").setBackground("#8e44ad").setFontColor("#fff");
+        dest.setFrozenRows(1);
+      }
+      // de baixo para cima, para o número das linhas não andar enquanto se apaga
+      var linhas=[];
+      v.grupos.forEach(function(g){ g.saem.forEach(function(l){ linhas.push(l); }); });
+      linhas.sort(function(a,b){ return b-a; });
+      for(var i=0;i<linhas.length;i++){
+        var vals=sh.getRange(linhas[i],1,1,nCols).getValues();
+        dest.appendRow(vals[0].concat(["movida em "+agora()]));
+        sh.deleteRow(linhas[i]);
+      }
+      recalcularVolumeContratos();     // o entregue/saldo estava inflado pelas duplas
+      return {ok:true,movidas:linhas.length,grupos:v.grupos.length};
+    }catch(e){ return {ok:false,erro:e.message}; }
+  });
 }
 
 function listarPesagens(){
