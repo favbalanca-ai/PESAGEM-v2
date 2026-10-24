@@ -1,6 +1,6 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v194';
+const CACHE    = 'fav-v2-v195';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
 const TOKEN      = "fav2026v2";
@@ -103,16 +103,19 @@ async function syncBackground() {
   const enviados = [];
   for (const p of pend) {
     if (p.falhou) continue;
+    if (!p.ordem || !p.ordem.id || !p.sessao) continue;   // sem sessão o servidor recusa; não gasta rede
     try {
       const r = await fetch(SHEETS_URL, {
         method: 'POST',
         headers: {'Content-Type': 'text/plain'},
-        body: JSON.stringify({acao: p.acao, ordem: p.ordem, token: p.sessao || TOKEN})
+        body: JSON.stringify({acao: p.acao, ordem: p.ordem, token: p.sessao})
       });
       const j = await r.json();
       if (j.ok) {
         enviados.push(p.ordem.id);
         notificarClients(`✅ ${p.ordem.placa||p.ordem.id} sincronizada!`, p.ordem.id);
+      } else if (j.erro && /sess[aã]o/i.test(j.erro)) {
+        break;   // sessão caiu: o app precisa logar de novo; insistir só repete a recusa
       }
     } catch(_) {}
   }

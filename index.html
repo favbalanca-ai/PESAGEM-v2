@@ -1394,6 +1394,17 @@ body.dark .card{background:#1a2d22}
     <div id="diag-nfa-pasta" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
   </div>
 
+  <!-- Planilha: pesagens em dobro -->
+  <div class="card adm-only" style="display:none">
+    <div class="ct">🧹 Pesagens em dobro na planilha</div>
+    <div style="font-size:11px;color:var(--ink3);margin-bottom:8px">Dois envios ao mesmo tempo gravavam a mesma pesagem em duas linhas, e o app somava as duas (carga, saldo do contrato, o que falta emitir). Isto confere e, se você quiser, junta: fica a linha mais completa e as outras vão para a aba <b>Pesagem_Duplicadas</b> — nada é apagado.</div>
+    <div style="display:flex;gap:7px">
+      <button onclick="verificarDuplicadas()" style="flex:1;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif">🔎 Conferir</button>
+      <button onclick="juntarDuplicadas()" id="btn-juntar-dup" style="flex:1;background:var(--g3);border:1px solid var(--brd);color:var(--g1);padding:9px;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:'Inter',sans-serif;display:none">🧹 Juntar</button>
+    </div>
+    <div id="diag-dup" style="font-size:11px;color:var(--ink2);margin-top:7px"></div>
+  </div>
+
   <!-- Log de eventos -->
   <div class="card">
     <div class="ct">📋 Log de sincronização</div>
@@ -1592,7 +1603,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v194"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v195"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5960,6 +5971,54 @@ async function arquivarNFAsNaPesagem(){
   if(el) el.innerHTML=txt;
 }
 
+/* ── Pesagens em dobro na planilha (Adm) ───────────────────────
+   Envios simultâneos sem cadeado no servidor gravavam o mesmo id em duas
+   linhas. Conferir é só leitura; juntar move as linhas extras para a aba
+   Pesagem_Duplicadas (reversível) e recalcula os saldos dos contratos. */
+let _dupUltimo=null;
+async function _chamarDup(acao){
+  const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+    body:JSON.stringify({acao:acao,token:TOKEN})});
+  return JSON.parse(await r.text());
+}
+async function verificarDuplicadas(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  const el=document.getElementById('diag-dup'), bj=document.getElementById('btn-juntar-dup');
+  if(el) el.innerHTML='⏳ Conferindo a planilha...';
+  if(bj) bj.style.display='none';
+  let j;
+  try{ j=await _chamarDup('verDuplicadas'); }
+  catch(e){ if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+e.message+'</span>'; return; }
+  if(!j||!j.ok){
+    if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+((j&&j.erro)||'o servidor recusou')+'</span>';
+    if(j&&/desconhecid|not a function/i.test(String(j.erro||''))) toast('⚠️ Publique o Code.gs novo');
+    return;
+  }
+  _dupUltimo=j;
+  if(!j.grupos.length){ if(el) el.innerHTML='<b style="color:var(--g1)">✅ Nenhuma pesagem em dobro.</b>'; return; }
+  if(el) el.innerHTML='<b style="color:var(--a1)">⚠️ '+j.grupos.length+' pesagem(ns) em dobro</b> — '+j.linhas_extras+' linha(s) a mais:<br>'+
+    j.grupos.slice(0,8).map(g=>'• '+g.placa+' '+g.data+' (id '+g.id+') — fica a linha '+g.fica+', saem '+g.saem.join(', ')).join('<br>')+
+    (j.grupos.length>8?'<br>… e mais '+(j.grupos.length-8):'');
+  if(bj) bj.style.display='block';
+}
+async function juntarDuplicadas(){
+  if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
+  if(!_dupUltimo||!_dupUltimo.grupos||!_dupUltimo.grupos.length){ toast('Confira primeiro'); return; }
+  if(!confirm('Juntar '+_dupUltimo.grupos.length+' pesagem(ns) em dobro?\n\nFica a linha mais completa de cada uma; as outras ('+_dupUltimo.linhas_extras+') vão para a aba Pesagem_Duplicadas. Nada é apagado.')) return;
+  const el=document.getElementById('diag-dup');
+  if(el) el.innerHTML='⏳ Juntando...';
+  let j;
+  try{ j=await _chamarDup('juntarDuplicadas'); }
+  catch(e){ if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+e.message+'</span>'; return; }
+  if(!j||!j.ok){ if(el) el.innerHTML='<span style="color:var(--r1)">❌ '+((j&&j.erro)||'o servidor recusou')+'</span>'; return; }
+  _dupUltimo=null;
+  const bj=document.getElementById('btn-juntar-dup'); if(bj) bj.style.display='none';
+  if(el) el.innerHTML='<b style="color:var(--g1)">✅ '+j.movidas+' linha(s) movida(s)</b> para Pesagem_Duplicadas ('+j.grupos+' pesagem(ns)). Saldos dos contratos recalculados.';
+  try{ addLog('🧹 Pesagens em dobro juntadas: '+j.movidas+' linha(s) movida(s)','ok'); }catch(e){}
+  carregarDaPlanilha().then(updHome);
+}
+
 /* Junta no Drive as pastas repetidas criadas antes da correção (envios
    simultâneos). O conteúdo vai para a pasta mais antiga; as vazias vão p/ lixeira. */
 function consolidarPastasDrive(){
@@ -6018,6 +6077,11 @@ async function enviar(ordem,acao){
     _ultimoErroEnvio='sem internet';
     updS();return false;
   }
+  /* O mesmo ticket não sai duas vezes ao mesmo tempo. Este envio direto e o
+     sync (de 3 min, de abertura, manual) rodam cada um por si; sem a marca,
+     os dois disparavam o mesmo id no mesmo segundo. */
+  if(_enviando.has(ordem.id)){ addLog(`⏳ ${ordem.placa||ordem.id} já está sendo enviado`,'info'); return false; }
+  _enviando.add(ordem.id);
   try{
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
       body:JSON.stringify({acao,ordem,token:TOKEN})});
@@ -6038,10 +6102,13 @@ async function enviar(ordem,acao){
     // idem: já está na fila, então uma página morta no meio do envio não perde nada
     addLog(`❌ Falha de rede — ${ordem.placa||ordem.id}: ${e.message}`,'erro');
     _ultimoErroEnvio=e.message;
+  }finally{
+    _enviando.delete(ordem.id);
   }
   updS();
   return false;
 }
+const _enviando=new Set();   // ids com envio no ar agora
 let _ultimoErroEnvio='';
 
 /* ── Adicionar à fila com timestamp e contador de tentativas ── */
@@ -6093,6 +6160,8 @@ async function _syncPcorpo(){
     if(p.falhou) continue; // pular os que já falharam demais
     const _id=(p.ordem&&p.ordem.id)||'', _rot=(p.ordem&&(p.ordem.placa||p.ordem.id))||'item';
     if(!_id){ continue; }   // item inválido: não derruba o resto da fila
+    if(_enviando.has(_id)) continue;   // o envio direto já está cuidando deste
+    _enviando.add(_id);
     try{
       const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
         body:JSON.stringify({acao:p.acao,ordem:p.ordem,token:TOKEN})});
@@ -6110,6 +6179,8 @@ async function _syncPcorpo(){
     }catch(e){
       _marcarTentativa(_id,_rot,e.message);
       falhou++;
+    }finally{
+      _enviando.delete(_id);
     }
   }
 
@@ -6120,6 +6191,7 @@ async function _syncPcorpo(){
     toast(`☁️ ${ok} pesagem(s) enviada(s)!`);
     await carregarDaPlanilha();
     saveCloud();
+    _syncJaReleu=true;    // quem chamou não precisa ler a planilha de novo
   }
   if(falhou>0&&ok===0) toast(`❌ ${falhou} pendente(s) com problema — veja diagnóstico`);
   addLog(`Sync concluído — ${ok} ok · ${falhou} falha(s)`,'info');
@@ -6166,7 +6238,18 @@ function _horaSync(chaveISO,chaveTxt){
     ? hh
     : d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+hh;
 }
-async function carregarDaPlanilha(){
+/* Uma leitura por vez. A Home, o Histórico, o sync manual e o sync de abertura
+   pediam a planilha inteira cada um por conta própria — era comum três
+   leituras iguais em dois segundos, e a última a chegar sobrescrevia as
+   outras. Quem pedir enquanto uma leitura está no ar recebe a MESMA
+   resposta. */
+let _lendoPlanilha=null;
+function carregarDaPlanilha(){
+  if(_lendoPlanilha) return _lendoPlanilha;
+  _lendoPlanilha=_carregarDaPlanilhaCorpo().finally(function(){ _lendoPlanilha=null; });
+  return _lendoPlanilha;
+}
+async function _carregarDaPlanilhaCorpo(){
   if(!SHEETS_URL||!navigator.onLine) return false;
   try{
     const r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({acao:'listar',token:TOKEN})});
@@ -6203,11 +6286,15 @@ async function carregarDaPlanilha(){
   }
 }
 
+let _syncJaReleu=false;
 async function syncM(){
   const btn=document.getElementById('btn-sy');
   if(btn){btn.disabled=true;btn.textContent='⏳...';}
+  _syncJaReleu=false;
   await syncP();
-  const ok=await carregarDaPlanilha();
+  // syncP já releu a planilha se mandou alguma coisa: ler de novo era a
+  // segunda leitura igual no mesmo toque do botão
+  const ok=_syncJaReleu?true:await carregarDaPlanilha();
   await loadContratosDaPlanilha();
   updHome();
   if(btn){btn.disabled=false;btn.textContent='Sincronizar';}
