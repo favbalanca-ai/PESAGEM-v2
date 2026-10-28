@@ -1924,6 +1924,13 @@ function salvarFoto(dados,pasta){
   chave=chave.replace(/[\/\\:*?"<>|]/g,"-");
   var ped=obterOuCriar(sub,chave);
   var bytes=Utilities.base64Decode(base64);var blob=Utilities.newBlob(bytes,mime,nome);
+  /* Mesmo nome na mesma pasta = substitui (o anterior vai para a lixeira).
+     Reenviar o arquivamento de um ticket — o que acontece quando a página
+     morreu no meio — não pode deixar dois TICKET.pdf e duas ASSINATURA.jpg. */
+  try{
+    var velhos=ped.getFilesByName(nome);
+    while(velhos.hasNext()) velhos.next().setTrashed(true);
+  }catch(e){}
   var arq=ped.createFile(blob);arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
   /* A assinatura subia num pedido e o LINK dela ia para a planilha em OUTRO,
      disparado sem esperar resposta — e o app abre o WhatsApp 1,5 s depois de
