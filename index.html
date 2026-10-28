@@ -940,6 +940,11 @@ body.dark .card{background:#1a2d22}
       <button class="btn btns bsm" id="tk-xml-btn" onclick="document.getElementById('tk-xml-inp').click()" style="width:100%">🧾 Anexar XML da nota</button>
       <input type="file" id="tk-xml-inp" accept="text/xml,application/xml,.xml" style="display:none" onchange="anexarXMLnota(this)">
     </div>
+    <div class="card" id="tk-drive-c" style="display:none">
+      <div class="ct">📤 Pasta no Drive</div>
+      <div id="tk-drive-info" style="font-size:12px;color:var(--ink3);margin-bottom:9px">Se a pasta desta pesagem não apareceu no Drive (fotos, ticket, assinatura), mande de novo daqui — do aparelho que fez a pesagem, que é onde a assinatura está guardada.</div>
+      <button class="btn btns bsm" id="tk-drive-btn" onclick="rearquivarNoDrive()" style="width:100%">📤 Arquivar no Drive de novo</button>
+    </div>
     <div class="brow">
       <button class="btn btns bsm" onclick="gerarPDF();imprimirPDF()">🖨️ Imprimir</button>
       <button class="btn btns bsm" onclick="gerarPDF()">📄 PDF</button>
@@ -1603,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v196"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v197"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5300,6 +5305,7 @@ function rTicket(o){
   if(btnEdit) btnEdit.style.display=(usr&&usr.nivel==='admin')?'block':'none';
   _renderOrdemTicket(o);
   _renderXMLTicket(o);
+  _renderDriveTicket(o);
   // Botões de NFA: autorizar (celular) / emitir (PC) / imprimir (emitida)
   atualizarBotoesNFA(o);
   // Botões de envio para classificador/comprador do contrato
@@ -5334,6 +5340,43 @@ function _renderOrdemTicket(o){
     btn.textContent=url?'📎 Trocar a ordem anexada':'📎 Anexar ordem de carregamento';
   }
 }
+/* ══ ARQUIVAR NO DRIVE DE NOVO ═════════════════════════════════
+   O arquivamento acontece uma vez, ao finalizar — e morre junto com a página
+   quando o WhatsApp abre 1,5 s depois. Ficava sem pasta no Drive e sem botão
+   para tentar de novo. Daqui vai o que este aparelho ainda tem: a assinatura
+   (sempre guardada), o ticket (gerado na hora) e as fotos que ainda estiverem
+   na memória. O servidor substitui arquivo de mesmo nome, então repetir não
+   duplica. */
+function _renderDriveTicket(o){
+  var card=document.getElementById('tk-drive-c');
+  if(!card) return;
+  var fin=String((o&&o.status)||'').toLowerCase().indexOf('finaliz')>=0;
+  card.style.display=fin?'block':'none';
+}
+async function rearquivarNoDrive(){
+  var o=atual; if(!o||!o.id){ toast('⚠️ Abra o ticket primeiro'); return; }
+  if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão'); return; }
+  var btn=document.getElementById('tk-drive-btn');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Enviando...'; }
+  try{
+    // a assinatura guardada neste aparelho conta, mesmo que o objeto não a tenha
+    if(!(o.assinatura&&o.assinatura.length>100)){
+      try{ var s=localStorage.getItem('sig_'+o.id); if(s&&s.indexOf('data:')===0) o.assinatura=s; }catch(e){}
+    }
+    var temFotos=Object.keys(Object.assign({},o.fotos||{},(_fotosDe===o.id?fotos:{}))).length;
+    o.fotosEnviadas={};                        // mandar tudo de novo; o servidor substitui
+    await _filaDrive(function(){ return uploadFotosDrive(o); });
+    await _filaDrive(function(){ return uploadTicketDrive(o); });
+    var partes=['ticket'];
+    if(o.assinatura&&o.assinatura.length>100) partes.unshift('assinatura');
+    if(temFotos) partes.push(temFotos+' foto(s)');
+    toast('📤 Enviado: '+partes.join(', '));
+    if(!temFotos) addLog('ℹ️ '+(o.placa||o.id)+': as fotos não estão mais neste aparelho — foram ticket e assinatura','info');
+    try{ addLog('📤 Rearquivado no Drive — '+(o.placa||o.id)+': '+partes.join(', '),'ok'); }catch(e){}
+  }catch(e){ toast('❌ '+e.message); }
+  finally{ if(btn){ btn.disabled=false; btn.textContent='📤 Arquivar no Drive de novo'; } }
+}
+
 /* ══ XML DA NOTA NO TICKET (Adm) ═══════════════════════════════
    O XML é o documento fiscal de verdade; o PDF é a representação dele. Vai
    para a MESMA pasta da pesagem e com o MESMO nome do PDF, mudando só a
