@@ -1925,7 +1925,17 @@ function salvarFoto(dados,pasta){
   var ped=obterOuCriar(sub,chave);
   var bytes=Utilities.base64Decode(base64);var blob=Utilities.newBlob(bytes,mime,nome);
   var arq=ped.createFile(blob);arq.setSharing(DriveApp.Access.ANYONE_WITH_LINK,DriveApp.Permission.VIEW);
-  return{ok:true,nome:nome,url:arq.getUrl(),pasta_url:ped.getUrl()};
+  /* A assinatura subia num pedido e o LINK dela ia para a planilha em OUTRO,
+     disparado sem esperar resposta — e o app abre o WhatsApp 1,5 s depois de
+     finalizar, o que no Android congela a página com o segundo pedido ainda no
+     ar. Resultado visto na prática: ASSINATURA.jpg no Drive, coluna 22 com
+     "Sim", e o ticket em qualquer outro aparelho sem assinatura. Agora o
+     arquivo e o link vão no MESMO pedido: se a imagem chegou, o link chegou. */
+  var naPlanilha=false;
+  if(/^ASSINATURA/i.test(tipo) && s(dados.id)){
+    try{ naPlanilha=!!(registrarAssinaturaUrl({id:s(dados.id),url:arq.getUrl()})||{}).ok; }catch(e){}
+  }
+  return{ok:true,nome:nome,url:arq.getUrl(),pasta_url:ped.getUrl(),link_na_planilha:naPlanilha};
 }
 
 // ══════════════════════════════════════════════════════════════

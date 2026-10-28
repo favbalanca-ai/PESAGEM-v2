@@ -1603,7 +1603,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v195"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v196"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -4601,9 +4601,13 @@ async function uploadFotosDrive(ordem){
   Object.keys(tipos).forEach(function(tipo){
     if(mapa[tipo] && !ordem.fotosEnviadas[tipo]) lista.push({tipo:tipo, nome:tipos[tipo], b64:mapa[tipo]});
   });
-  // Adicionar assinatura se existir
+  // Assinatura PRIMEIRO. O WhatsApp abre 1,5 s depois de finalizar e o Android
+  // pode congelar a página com os envios no ar; o que vai antes é o que chega.
+  // A assinatura é o que o ticket dos outros aparelhos precisa — as fotos são
+  // arquivo. (Se morrer aqui, o sync reenvia a assinatura: ela fica guardada
+  // no aparelho; foto que não subiu, não.)
   if(ordem.assinatura && ordem.assinatura.length>100 && !ordem.fotosEnviadas.sig){
-    lista.push({tipo:'sig', nome:'ASSINATURA', b64:ordem.assinatura});
+    lista.unshift({tipo:'sig', nome:'ASSINATURA', b64:ordem.assinatura});
   }
   if(!lista.length){
     // Antes saía calado — e foto que não chegava ao Drive não deixava rastro
@@ -4623,7 +4627,9 @@ async function uploadFotosDrive(ordem){
           var dados_b64=parts[1];
           var payload=JSON.stringify({
             acao:'salvarFoto',
-            dados:{contrato:contrato, data:data, placa:placa, pesagem:pesagem, tipo:item.nome, base64:dados_b64, mime:mime},
+            // id: com ele o servidor grava o link da assinatura na planilha no
+            // MESMO pedido em que guarda a imagem — ver salvarFoto no Code.gs
+            dados:{contrato:contrato, data:data, placa:placa, pesagem:pesagem, tipo:item.nome, base64:dados_b64, mime:mime, id:ordem.id},
             token:TOKEN
           });
           var r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:payload});
@@ -4636,11 +4642,12 @@ async function uploadFotosDrive(ordem){
               ordem.assinaturaUrl = j.url;
               const idx=DB.ordens.findIndex(x=>x.id===ordem.id);
               if(idx>=0){DB.ordens[idx].assinaturaUrl=j.url; saveDB();}
-              /* Guardar só aqui não servia de nada: o comentário dizia "para
-                 outros dispositivos" e a URL nunca saía deste aparelho. Agora
-                 vai para a planilha, que é o que todo mundo lê. Se o servidor
-                 ainda não conhecer a ação, falha sem incomodar ninguém. */
-              try{
+              /* O servidor novo já gravou o link junto com a imagem. O segundo
+                 pedido fica só para um Code.gs antigo — e era ele, disparado
+                 sem esperar e morto pelo WhatsApp abrindo 1,5 s depois, que
+                 deixava a planilha com "Sim" e o ticket sem assinatura nos
+                 outros aparelhos. */
+              if(!j.link_na_planilha) try{
                 fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
                   body:JSON.stringify({acao:'assinaturaUrl',dados:{id:ordem.id,url:j.url},token:TOKEN})})
                   .then(function(r){return r.text();})
@@ -5875,6 +5882,43 @@ async function reenviarAssinaturasDoAparelho(){
       '<br><span style="color:var(--ink3)">Toque ☁️ no Histórico e confira o ticket.</span>'
     : '<span style="color:var(--a1)">Nenhuma reenviada'+(semPesagem?' ('+semPesagem+' sem a pesagem neste aparelho)':'')+'.</span>';
 }
+/* ── Assinatura que ficou só neste aparelho ───────────────────
+   Acontece: o motorista assina, o app finaliza, o WhatsApp abre 1,5 s depois
+   e o Android congela a página com o envio da assinatura no ar. A imagem fica
+   guardada aqui (sig_<id>) e a planilha fica com "Sim" — e o ticket, em
+   qualquer outro aparelho, sai sem assinatura. Toda leitura da planilha
+   confere: pesagem finalizada, sem link, com a imagem aqui → sobe. Sem botão,
+   sem Adm. Poucas por vez e cada id uma vez por sessão, para não virar
+   tempestade em quem tem histórico grande. */
+const _sigJaTentada=new Set();
+function _reenviarAssinaturasPendentes(){
+  if(!SHEETS_URL||!navigator.onLine) return;
+  var lista=[];
+  (cloud||[]).forEach(function(o){
+    if(!o||!o.id||_sigJaTentada.has(o.id)) return;
+    if(String(o.status||'').toLowerCase().indexOf('finaliz')<0) return;
+    /* O que a PLANILHA disse, não o que o app mostra: normOrdem troca
+       'assinatura' pela imagem local quando ela existe aqui, e aí todo ticket
+       assinado neste aparelho pareceria sem link e subiria de novo a cada sync. */
+    var dito=String(o.assinaturaDito!=null?o.assinaturaDito:(o.assinatura||''));
+    if(dito.indexOf('http')===0) return;           // a planilha já tem o link
+    if(String(o.assinaturaUrl||'').indexOf('http')===0) return;
+    var b64=null; try{ b64=localStorage.getItem('sig_'+o.id); }catch(e){}
+    if(!b64||b64.indexOf('data:')!==0) return;     // a imagem não está aqui
+    lista.push({o:o,b64:b64});
+  });
+  if(!lista.length) return;
+  lista.slice(0,3).forEach(function(it){
+    _sigJaTentada.add(it.o.id);
+    _filaDrive(async function(){
+      var url=await _subirAssinatura(it.o,it.b64);
+      if(url){
+        it.o.assinaturaUrl=url; it.o.assinaturaDito=url; saveCloud();
+        addLog('🖋️ Assinatura de '+(it.o.placa||it.o.id)+' subiu para o Drive (estava só neste aparelho)','ok');
+      } else addLog('⚠️ Assinatura de '+(it.o.placa||it.o.id)+' não subiu — tenta de novo no próximo sync','aviso');
+    });
+  });
+}
 // Manda uma assinatura para o Drive e grava o link na planilha
 async function _subirAssinatura(ordem,b64){
   var contrato=(ordem.numOrdem||'SEM-CONTRATO').replace(/[^a-zA-Z0-9.\-]/g,'');
@@ -5884,10 +5928,11 @@ async function _subirAssinatura(ordem,b64){
   var partes=String(comprimida).split(',');
   var r=await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({acao:'salvarFoto',dados:{contrato:contrato,data:data,placa:placa,
-      pesagem:data+'_'+placa,tipo:'ASSINATURA',base64:partes[1],mime:_mimeDataURL(comprimida)},token:TOKEN})});
+      pesagem:data+'_'+placa,tipo:'ASSINATURA',base64:partes[1],mime:_mimeDataURL(comprimida),id:ordem.id},token:TOKEN})});
   var j=JSON.parse(await r.text());
   if(!j.ok||!j.url) return null;
-  await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
+  // Code.gs novo grava o link no mesmo pedido; o antigo precisa do segundo
+  if(!j.link_na_planilha) await fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({acao:'assinaturaUrl',dados:{id:ordem.id,url:j.url},token:TOKEN})});
   return j.url;
 }
@@ -6273,6 +6318,7 @@ async function _carregarDaPlanilhaCorpo(){
       saveCloud(); // salvar para acesso offline imediato
       _marcarSync('leitura');   // falou com a planilha e ela respondeu: isto É sync
       addLog(`☁️ ${j.ordens.length} registro(s) carregados da planilha`,'ok');
+      _reenviarAssinaturasPendentes();   // o que ficou só neste aparelho sobe agora
       return true;
     }
     // A planilha respondeu, mas recusando. Calar aqui era o que fazia a tela
