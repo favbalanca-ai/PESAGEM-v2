@@ -57,10 +57,26 @@ var EMITENTES = {
    A sessão devolvida é assinada (HMAC) e tem validade: o app guarda e manda em
    vez da chave fixa. Ninguém consegue forjar uma sem o segredo. */
 var SESSAO_DIAS = 30;
-/* Enquanto houver aparelho em versão antiga, a chave fixa continua valendo.
-   Depois que TODOS aparecerem em v166+, troque para false: aí o token público
-   antigo deixa de abrir a planilha. */
-var PERMITIR_TOKEN_ANTIGO = true;
+/* A chave fixa (TOKEN_SECRET) NÃO abre mais a planilha. Ela ficou meses
+   publicada no sw.js do GitHub Pages — qualquer pessoa que abrisse o arquivo
+   tinha a URL e a chave, e com as duas lia e escrevia na planilha. Só sessão
+   assinada vale. Todos os aparelhos já entram por login desde o v169. */
+var PERMITIR_TOKEN_ANTIGO = false;
+
+/* ── Trava contra tentativa de senha em série ───────────────────
+   A URL do script é pública por natureza (o app roda no GitHub Pages), então
+   a tela de login é alcançável por qualquer um. Cinco erros seguidos no mesmo
+   usuário travam esse usuário por 15 minutos. Senha certa zera o contador. */
+var LOGIN_MAX_ERROS = 5, LOGIN_TRAVA_MIN = 15;
+function _loginErros(u){ try{ return Number(CacheService.getScriptCache().get("login_err_"+u)||0); }catch(e){ return 0; } }
+function _loginRegistrarErro(u){
+  try{
+    var c=CacheService.getScriptCache(), n=_loginErros(u)+1;
+    c.put("login_err_"+u, String(n), LOGIN_TRAVA_MIN*60);
+    return n;
+  }catch(e){ return 0; }
+}
+function _loginLimpar(u){ try{ CacheService.getScriptCache().remove("login_err_"+u); }catch(e){} }
 
 function _props(){ return PropertiesService.getScriptProperties(); }
 function _usuarios(){ try{ return JSON.parse(_props().getProperty("USUARIOS")||"{}"); }catch(e){ return {}; } }
@@ -75,8 +91,16 @@ function loginUsuario(usuario,senha){
   var chaves=Object.keys(lista);
   if(!chaves.length) return {ok:false,erro:"Nenhum usuário cadastrado no servidor — configure a propriedade USUARIOS no Apps Script"};
   var us=lista[u];
-  if(!us || String(us.senha)!==String(senha)) return {ok:false,erro:"Usuário ou senha incorretos"};
+  if(_loginErros(u)>=LOGIN_MAX_ERROS)
+    return {ok:false,erro:"Usuário travado por "+LOGIN_TRAVA_MIN+" min após muitas tentativas erradas"};
+  if(!us || String(us.senha)!==String(senha)){
+    // nome 'erros', não 'n': 'n' é o ajudante numérico usado logo abaixo
+    var erros=_loginRegistrarErro(u);
+    var restam=Math.max(0,LOGIN_MAX_ERROS-erros);
+    return {ok:false,erro:"Usuário ou senha incorretos"+(restam&&restam<=2?" ("+restam+" tentativa(s) antes de travar)":"")};
+  }
   if(us.ativo===false) return {ok:false,erro:"Usuário desativado"};
+  _loginLimpar(u);
   var exp=new Date().getTime()+SESSAO_DIAS*86400000;
   var corpo=u+"|"+exp;
   return {ok:true, sessao:corpo+"|"+_assinarSessao(corpo), expira:exp,
@@ -113,16 +137,11 @@ function fmtDH(v){if(!v)return"";if(v instanceof Date)return Utilities.formatDat
 function agora(){return Utilities.formatDate(new Date(),Session.getScriptTimeZone(),"dd/MM/yyyy HH:mm:ss");}
 
 // ── doGet ────────────────────────────────────────────────────
+/* doGet só diz "estou de pé". Antes devolvia a lista de contratos (nomes,
+   CNPJ, preços) e os dados da nota para quem abrisse a URL com ?action= —
+   sem senha nenhuma. Nada no app nem na extensão usava isso. */
 function doGet(e){
-  var result;
-  if(e&&e.parameter){
-    var p=e.parameter;
-    if(p.action==="listarContratosNFA")  result=listarContratosNFA(p.filtros?JSON.parse(p.filtros):{});
-    else if(p.action==="montarDadosNFA") result=montarDadosNFA(p.ticket_id,p.contrato_id);
-    else result={ok:true,msg:"FAV v2 ativo!",ts:agora()};
-  } else {
-    result={ok:true,msg:"FAV v2 ativo!",ts:agora()};
-  }
+  var result={ok:true,msg:"FAV v2 ativo!",ts:agora()};
   return ContentService.createTextOutput(JSON.stringify(result)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -132,10 +151,15 @@ function doPost(e){
     if(!e||!e.postData)return resposta({ok:true});
     var d=JSON.parse(e.postData.contents);
 
-    // NFA: processamento pós-emissão (sem token — vem da extensão Chrome)
-    if(d.action==="processarNFA") return resposta(processarNFA(d));
-    // XML da nota, mandado pela extensão (mesmo caminho sem token do processarNFA)
-    if(d.action==="arquivarXMLnfa") return resposta(arquivarXMLnfa(d));
+    /* Extensão Chrome (NFA e XML). Entravam SEM token: com a URL pública,
+       qualquer um registrava nota falsa na planilha e no Drive. O app passa a
+       sessão para a extensão junto com os dados da nota (campo 'sessao'), e
+       ela manda de volta como 'token'. Extensão antiga cai aqui com mensagem
+       clara em vez de "ação desconhecida". */
+    if(d.action==="processarNFA" || d.action==="arquivarXMLnfa"){
+      if(!_autorizado(d)) return resposta({ok:false,erro:"Sessão inválida — abra a emissão de novo pelo app (extensão 7.20 ou mais nova)"});
+      return resposta(d.action==="processarNFA" ? processarNFA(d) : arquivarXMLnfa(d));
+    }
 
     // Login: é o que ENTREGA a sessão, então não pode exigir sessão
     if(d.acao==="login") return resposta(loginUsuario(d.usuario,d.senha));

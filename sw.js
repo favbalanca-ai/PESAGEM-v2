@@ -1,9 +1,11 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v197';
+const CACHE    = 'fav-v2-v198';
 const SYNC_TAG = 'fav-v2-sync';
 const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
-const TOKEN      = "fav2026v2";
+/* Não há mais chave fixa aqui. Este arquivo é público (GitHub Pages) e a chave
+   que ficava nesta linha abria a planilha para qualquer um que a lesse. Cada
+   item da fila carrega a sessão assinada de quem o criou (p.sessao). */
 
 const SHELL = [
   './',

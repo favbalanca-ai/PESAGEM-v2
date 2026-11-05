@@ -1,4 +1,4 @@
-// FAV NFA - Background Service Worker v7.19 (XML lido na propria pagina, anexo manual e um registro por vez)
+// FAV NFA - Background Service Worker v7.20 (registro de nota e XML autenticados com a sessao do app)
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
 
 function tratarMensagem(msg, sendResponse) {
@@ -324,6 +324,7 @@ async function mandarXMLaoDrive(numero, chave, pend, texto) {
   try {
     const resp = await postGAS({
       action: 'arquivarXMLnfa',
+      token: d.sessao || '',
       numero_nfa: numero, chave: chave, base64: textoParaBase64(texto),
       ticket_id: d.ticket_id || '', contrato: d.contrato_id || '',
       data: d.data_transporte || '', placa: d.placa || ''
@@ -702,6 +703,7 @@ async function processarPDF(msg) {
   const { pdf_base64, pdf_url, dados_nfa } = msg;
   const payload = {
     action: 'processarNFA', pdf_base64, pdf_url,
+    token: dados_nfa.sessao || '',         // sessão de quem abriu a emissão no app
     numero_nfa: msg.numero_nfa || '',      // lido na tela da SEFAZ pelo content script
     ticket_id: dados_nfa.ticket_id, contrato_id: dados_nfa.contrato_id,
     // placa e data → a nota é arquivada também na pasta da placa, junto das fotos
