@@ -1608,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v197"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v198"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -10089,6 +10089,8 @@ async function confirmarEmissaoNFA(){
     return;
   }
   if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
+    // a sessão vai junto: o servidor só aceita registro de nota/XML autenticado
+    dadosNFA.sessao=TOKEN;
     chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:dadosNFA},(resp)=>{
       if(resp&&resp.ok){toast('🚀 SEFAZ-GO aberto! Preenchendo automaticamente...');iniciarPollingNFA();}
       else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));abrirNFAManual(dadosNFA);toast('⚠️ Extensão não respondeu — use a emissão manual.');}
