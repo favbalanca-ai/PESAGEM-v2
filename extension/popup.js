@@ -7,14 +7,15 @@ const PADRAO = { cfg_pasta_nfa: 'NFA', cfg_manter_local: true };
 function salvar() {
   const pasta = document.getElementById('pasta').value.trim();
   const manter = document.getElementById('manter').checked;
-  chrome.storage.local.set({ cfg_pasta_nfa: pasta, cfg_manter_local: manter }, () => {
+  const gas = document.getElementById('gas').value.trim();
+  chrome.storage.local.set({ cfg_pasta_nfa: pasta, cfg_manter_local: manter, cfg_gas_url: gas }, () => {
     const a = document.getElementById('aviso');
     a.textContent = '✓ Guardado';
     setTimeout(() => { a.textContent = ''; }, 1500);
   });
 }
 
-chrome.storage.local.get(['nfa_pendente', 'nfa_registro_pendente', 'cfg_pasta_nfa', 'cfg_manter_local'], (d) => {
+chrome.storage.local.get(['nfa_pendente', 'nfa_registro_pendente', 'cfg_pasta_nfa', 'cfg_manter_local', 'cfg_gas_url'], (d) => {
   const s = document.getElementById('status');
   if (d.nfa_pendente) {
     s.innerHTML = '✅ Nota pendente:<br><b>' + (d.nfa_pendente.emitente_nome || '') + '</b><br>→ ' +
@@ -27,10 +28,12 @@ chrome.storage.local.get(['nfa_pendente', 'nfa_registro_pendente', 'cfg_pasta_nf
   }
   document.getElementById('pasta').value = d.cfg_pasta_nfa != null ? d.cfg_pasta_nfa : PADRAO.cfg_pasta_nfa;
   document.getElementById('manter').checked = d.cfg_manter_local != null ? d.cfg_manter_local : PADRAO.cfg_manter_local;
+  document.getElementById('gas').value = d.cfg_gas_url || '';
 });
 
 document.getElementById('pasta').addEventListener('change', salvar);
 document.getElementById('manter').addEventListener('change', salvar);
+document.getElementById('gas').addEventListener('change', salvar);
 document.getElementById('btnLimpar').onclick = () => {
   chrome.runtime.sendMessage({ action: 'LIMPAR_NFA' }, () => {
     document.getElementById('status').textContent = 'Dados limpos.';

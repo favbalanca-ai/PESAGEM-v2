@@ -10,7 +10,7 @@
 // ═══════════════════════════════════════════════════════════════
 var PLANILHA_ID  = "<<<ID_DA_PLANILHA>>>";
 var DRIVE_ID     = "<<<ID_DA_PASTA_DRIVE>>>";
-var TOKEN_SECRET = "<<<TOKEN_SECRETO>>>";   // deve ser igual ao TOKEN do app
+var TOKEN_SECRET = "<<<TOKEN_SECRETO>>>";   // LEGADO: só vale com PERMITIR_TOKEN_ANTIGO = true (o app não manda mais chave fixa)
 
 // ── NFA: IDs de pasta e emitentes ────────────────────────────
 var DRIVE_PASTA_NFA   = "<<<ID_DA_PASTA_NFA>>>";
@@ -57,14 +57,17 @@ var EMITENTES = {
    A sessão devolvida é assinada (HMAC) e tem validade: o app guarda e manda em
    vez da chave fixa. Ninguém consegue forjar uma sem o segredo. */
 var SESSAO_DIAS = 30;
-/* Enquanto houver aparelho em versão antiga, a chave fixa continua valendo.
-   Depois que TODOS aparecerem em v166+, troque para false: aí o token público
-   antigo deixa de abrir a planilha. */
-var PERMITIR_TOKEN_ANTIGO = true;
+/* A chave fixa ("token" escrito no app) vazou no repositório público e NÃO vale mais: toda chamada precisa da
+   sessão assinada que o login devolve. Só volte para true, por pouco tempo, se algum aparelho muito antigo
+   (anterior à v166) ainda precisar entrar — e troque o TOKEN_SECRET antes. */
+var PERMITIR_TOKEN_ANTIGO = false;
 
 function _props(){ return PropertiesService.getScriptProperties(); }
 function _usuarios(){ try{ return JSON.parse(_props().getProperty("USUARIOS")||"{}"); }catch(e){ return {}; } }
-function _segredoSessao(){ return _props().getProperty("SEGREDO_SESSAO")||TOKEN_SECRET; }
+/* Segredo que assina as sessões. Antes caía no TOKEN_SECRET quando a propriedade não existia — e esse valor
+   estava público. Agora, se não houver SEGREDO_SESSAO, o script cria um aleatório e guarda (as sessões antigas
+   deixam de valer uma vez; todo mundo entra de novo). */
+function _segredoSessao(){ var p=_props(), s=p.getProperty("SEGREDO_SESSAO"); if(!s){ s=Utilities.getUuid()+Utilities.getUuid(); p.setProperty("SEGREDO_SESSAO",s); } return s; }
 function _assinarSessao(txt){
   return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(txt,_segredoSessao()));
 }

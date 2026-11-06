@@ -11,11 +11,12 @@ projeto da extensão (Manifest V3).
   com a extensão por `chrome.runtime.sendMessage`).
 - `background.js` — service worker: recebe `INICIAR_NFA` do app, abre a página
   da SEFAZ e injeta o `content.js`; em `processarNFA` envia o PDF emitido ao
-  Apps Script (`GAS_URL`).
+  Apps Script (URL que o app manda em `INICIAR_NFA` → `gasUrl`, guardada em
+  `chrome.storage`; ou colada no popup).
 - `content.js` — automação do formulário (etapas: tipo de nota → emitente →
   destinatário → transporte → produtos → resumo). Tem overlay com
   **Parar / Continuar**. Para nas telas e deixa o **Enviar Nota** para o usuário.
-- `popup.html` — popup simples (status + limpar dados pendentes).
+- `popup.html` — popup simples (status, pasta das notas, **URL do servidor** e limpar dados pendentes).
 
 ## Como o app conversa com a extensão
 1. App (`confirmarEmissaoNFA`) → `chrome.runtime.sendMessage(extId, {action:'INICIAR_NFA', dados})`.

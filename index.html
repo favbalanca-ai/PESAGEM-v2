@@ -356,6 +356,12 @@ body.dark .card{background:#1a2d22}
     <input class="li" type="password" id="l-pw" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()">
     <button class="lbtn" onclick="login()">Entrar →</button>
     <div class="lerr" id="l-err">Nome ou senha incorretos</div>
+    <div id="l-srv" style="display:none;margin-top:12px;text-align:left">
+      <div class="ll">Servidor (URL do Apps Script)</div>
+      <input class="li" type="text" id="l-srv-url" placeholder="https://script.google.com/macros/s/…/exec" autocapitalize="off" autocomplete="off">
+      <button class="lbtn" onclick="salvarServidorLogin()" style="margin-top:6px">Guardar servidor</button>
+      <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:6px">Peça ao administrador o <b>link de configuração</b>: ele abre o app já com o servidor certo. Esta caixa é só para colar a URL à mão.</div>
+    </div>
   </div>
   <!-- Diagnóstico acessível ANTES do login: quando o app de um funcionário não
        sincroniza, muitas vezes nem dá para entrar — e é justamente aí que se
@@ -1600,7 +1606,23 @@ body.dark .card{background:#1a2d22}
 
 <script>
 /* ══ CONFIG ═══════════════════════════════════════════════════ */
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
+/* O endereço do servidor (URL /exec da implantação do Apps Script) NÃO fica mais escrito neste arquivo — o
+   repositório é público e quem lia o código ficava com o endereço. Cada aparelho recebe a URL UMA vez, pelo link
+   de configuração (…/?servidor=URL, que o administrador manda por WhatsApp) ou pela caixa "Servidor" da tela de
+   entrar, e guarda em localStorage (fav_sheets_url). Trocou a implantação? Manda o link novo. */
+const SRV_KEY = 'fav_sheets_url';
+const SRV_RX  = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+let SHEETS_URL = (function(){ try{
+  const u=new URL(location.href), q=(u.searchParams.get('servidor')||u.searchParams.get('sheets')||'').trim();
+  if(q && SRV_RX.test(q)){ localStorage.setItem(SRV_KEY,q); u.searchParams.delete('servidor'); u.searchParams.delete('sheets'); history.replaceState(null,'',u.pathname+(u.search||'')+u.hash); }
+  return localStorage.getItem(SRV_KEY)||''; }catch(e){ return ''; } })();
+function configurarServidor(url){ url=String(url||'').trim(); if(!SRV_RX.test(url)){ toast('Cole a URL completa da implantação (começa com https://script.google.com/macros/s/ e termina em /exec)'); return false; }
+  localStorage.setItem(SRV_KEY,url); SHEETS_URL=url; toast('✅ Servidor configurado'); return true; }
+function linkConfigServidor(){ return SHEETS_URL ? location.origin+location.pathname+'?servidor='+encodeURIComponent(SHEETS_URL) : ''; }
+function salvarServidorLogin(){ const i=document.getElementById('l-srv-url'); if(configurarServidor(i&&i.value)){ document.getElementById('l-srv').style.display='none'; const er=document.getElementById('l-err'); if(er) er.style.display='none'; } }
+function copiarLinkServidor(){ const l=linkConfigServidor(); if(!l){ toast('Servidor não configurado'); return; }
+  const ok=()=>toast('📋 Link copiado — mande para o aparelho que precisa configurar'); try{ navigator.clipboard.writeText(l).then(ok, ()=>prompt('Copie o link:', l)); }catch(e){ prompt('Copie o link:', l); } }
+function trocarServidor(){ const v=prompt('URL da implantação do Apps Script (termina em /exec):', SHEETS_URL||''); if(v!=null && configurarServidor(v)) location.reload(); }
 /* Era a chave fixa da planilha, escrita neste arquivo público: quem abrisse o
    código-fonte tinha acesso total para ler e alterar tudo. Agora guarda a
    SESSÃO que o servidor devolve no login — pessoal, assinada e com validade.
@@ -1608,7 +1630,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v197"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v198"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -1835,6 +1857,7 @@ async function login(){
   const er=document.getElementById('l-err');
   er.style.display='none';
   if(!em||!pw){er.textContent='Preencha nome e senha.';er.style.display='block';return;}
+  if(!SHEETS_URL && navigator.onLine){ const b=document.getElementById('l-srv'); if(b) b.style.display='block'; er.textContent='⚙️ Este aparelho ainda não sabe o endereço do servidor. Abra o link de configuração que o administrador mandou, ou cole a URL abaixo.'; er.style.display='block'; return; }
   er.textContent='⏳ Entrando...'; er.style.display='block';
   // 1) Quem confere a senha é o servidor
   if(navigator.onLine && SHEETS_URL){
@@ -1898,6 +1921,7 @@ function checkSess(){
   }
   document.getElementById('login').classList.remove('h');
   document.getElementById('app').style.display='none';
+  if(!SHEETS_URL){ const b=document.getElementById('l-srv'); if(b) b.style.display='block'; }   // aparelho novo: precisa do servidor
 }
 function nomeBal(b){ return b===1?'Balança 1 — Água Viva':b===2?'Balança 2 — Espora':'Todas as Balanças'; }
 function nomeBalCurto(b){ return b===1?'⚖️ Bal. 1 · Água Viva':b===2?'⚖️ Bal. 2 · Espora':''; }
@@ -6206,6 +6230,7 @@ function addP(o,a){
     ? {...pend[idx], ordem:o, acao:a}
     : {id:o.id, ordem:o, acao:a, ts:Date.now(), tentativas:0, falhou:false};
   item.sessao=TOKEN;   // o SW roda com o app fechado e não enxerga esta variável
+  item.url=SHEETS_URL;   // idem para o endereço do servidor (não fica mais escrito no sw.js)
   if(idx>=0) pend[idx]=item; else pend.push(item);
   saveDB();
   // Salvar no IndexedDB para o Service Worker acessar
@@ -6472,6 +6497,7 @@ async function _checarSessaoServidor(){
 }
 async function testarBackend(){
   const el=document.getElementById('diag-backend');
+  if(!SHEETS_URL){ if(el){ el.style.background='var(--r2)'; el.innerHTML='<b style="color:var(--r1)">⚙️ Servidor não configurado neste aparelho</b><div style="margin-top:6px;font-size:11px">Abra o link de configuração do administrador ou <button onclick="trocarServidor()" style="padding:3px 8px;border-radius:6px;border:1px solid var(--brd);background:#fff;cursor:pointer">colar a URL</button></div>'; } return; }
   if(el) el.innerHTML='🔌 Testando conexão com o servidor...';
   const r=await pingBackend();
   const ses=r.ok?await _checarSessaoServidor():null;
@@ -6490,7 +6516,8 @@ async function testarBackend(){
           : (ses.ok
             ? '<div style="margin-top:6px;font-size:11px;color:var(--g1);font-weight:600">✅ Leitura da planilha liberada para esta sessão</div>'
             : '<div style="margin-top:6px;font-size:11px;color:var(--r1);font-weight:600">❌ O servidor respondeu, mas recusou esta sessão: '+String(ses.erro).replace(/</g,'&lt;')+'<br>Saia e entre de novo no app.</div>'))
-        : '');
+        : '')
+      + '<div style="margin-top:8px;font-size:11px;color:var(--ink3);word-break:break-all">🔗 Servidor: '+SHEETS_URL.replace(/^https:\/\/script\.google\.com\/macros\/s\//,'…/').replace(/</g,'&lt;')+'<br><button onclick="copiarLinkServidor()" style="margin-top:4px;padding:4px 9px;border-radius:6px;border:1px solid var(--brd);background:#fff;cursor:pointer">📋 Copiar link de configuração</button> <button onclick="trocarServidor()" style="margin-top:4px;padding:4px 9px;border-radius:6px;border:1px solid var(--brd);background:#fff;cursor:pointer">Trocar</button></div>';
   }
   addLog((r.ok?'✅ Ping servidor OK':'❌ Ping servidor: '+r.msg)+(r.ms!=null?' ('+r.ms+'ms)':''), r.ok?'ok':'erro');
   registrarPing(r);
@@ -10089,7 +10116,7 @@ async function confirmarEmissaoNFA(){
     return;
   }
   if(extId&&typeof chrome!=='undefined'&&chrome.runtime){
-    chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:dadosNFA},(resp)=>{
+    chrome.runtime.sendMessage(extId,{action:'INICIAR_NFA',dados:Object.assign({gasUrl:SHEETS_URL},dadosNFA)},(resp)=>{   // a extensão guarda a URL do servidor daqui
       if(resp&&resp.ok){toast('🚀 SEFAZ-GO aberto! Preenchendo automaticamente...');iniciarPollingNFA();}
       else{localStorage.setItem('fav_nfa_pendente',JSON.stringify(dadosNFA));abrirNFAManual(dadosNFA);toast('⚠️ Extensão não respondeu — use a emissão manual.');}
     });

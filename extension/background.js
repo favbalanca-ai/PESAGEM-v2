@@ -1,9 +1,12 @@
 // FAV NFA - Background Service Worker v7.19 (XML lido na propria pagina, anexo manual e um registro por vez)
-const GAS_URL = 'https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec';
+/* A URL do Apps Script não fica mais escrita aqui (o repositório é público). O app manda `gasUrl` junto com
+   INICIAR_NFA e ela fica guardada em chrome.storage (cfg_gas_url); também dá para colar no popup da extensão. */
+async function gasUrl(){ const d = await chrome.storage.local.get('cfg_gas_url'); return String(d.cfg_gas_url || '').trim(); }
 
 function tratarMensagem(msg, sendResponse) {
   if (msg.action === 'INICIAR_NFA') {
     const dados = msg.dados;
+    if (dados && dados.gasUrl && /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(dados.gasUrl)) chrome.storage.local.set({ cfg_gas_url: dados.gasUrl });
     chrome.tabs.query({}, (abas) => {
       const antigas = (abas || []).filter(t => t.url && t.url.includes('sefaz.go.gov.br'));
       const idsAntigos = antigas.map(t => t.id);
@@ -630,10 +633,12 @@ async function postGAS(payload, tentativas) {
   tentativas = tentativas || 3;
   const espera = [0, 1500, 4000];
   let ultimo = '';
+  const url = await gasUrl();
+  if (!url) throw new Error('URL do servidor não configurada — abra o app FAV e emita pela tela (ela manda a URL), ou cole a URL do Apps Script no popup da extensão');
   for (let i = 0; i < tentativas; i++) {
     if (espera[i]) await new Promise(r => setTimeout(r, espera[i]));
     try {
-      const resp = await fetch(GAS_URL, {
+      const resp = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },   // simples: sem preflight
         body: JSON.stringify(payload)
@@ -644,7 +649,7 @@ async function postGAS(payload, tentativas) {
       catch (e) { ultimo = 'resposta não é JSON: ' + txt.slice(0, 120); continue; }
     } catch (e) {
       ultimo = e.message || String(e);
-      console.log('[FAV BG] tentativa ' + (i + 1) + '/' + tentativas + ' falhou:', GAS_URL, ultimo);
+      console.log('[FAV BG] tentativa ' + (i + 1) + '/' + tentativas + ' falhou:', url, ultimo);
     }
   }
   throw new Error(ultimo || 'sem resposta do servidor');

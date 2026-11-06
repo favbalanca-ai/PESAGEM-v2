@@ -2,7 +2,8 @@
 
 Código do backend que roda como **Web App** no Google Apps Script, vinculado
 à planilha do sistema. O app (`/index.html`) e a extensão de NFA conversam
-com ele via `POST` na URL de implantação (`SHEETS_URL`).
+com ele via `POST` na URL de implantação — que **não fica no código**: cada aparelho guarda a URL
+(ver o README da raiz, "Segredos").
 
 ## Arquivos
 - `Code.gs` — arquivo principal (rotas, pesagem, recepção, talhões, estoque,
@@ -22,7 +23,7 @@ Preencha-os **somente no editor do Apps Script** (não commite os reais):
 | `PLANILHA_ID` | ID da planilha do sistema |
 | `DRIVE_ID` | ID da pasta raiz no Drive (fotos/backup) |
 | `DRIVE_PASTA_NFA` | ID da pasta onde os PDFs de NFA são salvos |
-| `TOKEN_SECRET` | Token de autenticação — **igual** ao `TOKEN` do `index.html`/`sw.js` |
+| `TOKEN_SECRET` | Legado: só é lido se `PERMITIR_TOKEN_ANTIGO = true` (o app não manda mais chave fixa; sessões assinadas com `SEGREDO_SESSAO`) |
 | `FAV_WA_ESCRITORIO` | WhatsApp do escritório (DDI+DDD+número) |
 | `EMITENTES` | Nome/IE/CPF de cada emitente (dados fiscais) |
 | `ANTHROPIC_KEY` | Vai em **Propriedades do Script**, não no código |
@@ -45,7 +46,8 @@ appsscript.json no editor") para a tela de consentimento pedir tudo de uma vez.
 2. Preencha os segredos.
 3. Menu **FAV v2 → ⚙️ Configurar planilha** (cria/atualiza as abas).
 4. **Implantar → Nova implantação → App da Web** (executar como você; acesso
-   "qualquer pessoa"). Use a URL gerada como `SHEETS_URL` no app.
+   "qualquer pessoa"). A URL gerada é configurada em cada aparelho pelo link `…/?servidor=URL`
+   (Diagnóstico → Copiar link de configuração) — ela não é escrita no código.
 
 ## Fluxo de NFA (autorizar → emitir → imprimir)
 Trechos marcados com `// [NFA-AUTORIZACAO]`:

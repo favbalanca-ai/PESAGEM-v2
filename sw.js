@@ -1,9 +1,9 @@
 // sw.js — FAV Sistema v2
 // Cache separado do v1 (fav-v2-v1) para não conflitar
-const CACHE    = 'fav-v2-v197';
+const CACHE    = 'fav-v2-v198';
 const SYNC_TAG = 'fav-v2-sync';
-const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGmqGib0bJnecr7ItfEFDuvP-eGw2TJzMbhgnngriG9Bjx_uB7/exec";
-const TOKEN      = "fav2026v2";
+/* Sem endereço do servidor nem token escritos aqui (arquivo público). Cada item da fila offline já traz a sessão
+   (p.sessao) e agora também a URL do servidor (p.url) que o app tinha no momento de guardar. */
 
 const SHELL = [
   './',
@@ -103,9 +103,9 @@ async function syncBackground() {
   const enviados = [];
   for (const p of pend) {
     if (p.falhou) continue;
-    if (!p.ordem || !p.ordem.id || !p.sessao) continue;   // sem sessão o servidor recusa; não gasta rede
+    if (!p.ordem || !p.ordem.id || !p.sessao || !p.url) continue;   // sem sessão (ou sem servidor) o envio não tem como ir; o app cuida quando abrir
     try {
-      const r = await fetch(SHEETS_URL, {
+      const r = await fetch(p.url, {
         method: 'POST',
         headers: {'Content-Type': 'text/plain'},
         body: JSON.stringify({acao: p.acao, ordem: p.ordem, token: p.sessao})
