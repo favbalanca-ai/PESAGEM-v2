@@ -628,7 +628,20 @@ function _pedacoNomeNFA(v,tam){
    nas pastas das notas já arquivadas. */
 function _ehArquivoNFA(nome){
   var n=s(nome);
-  return /^NFA/i.test(n) || /^\d{4}\.\d{2}\.\d{2}\..+\.\d{4,}\.pdf$/i.test(n);
+  return /^NFA/i.test(n) || /^\d{4}\.\d{2}\.\d{2}\..+\.\d{4,}\.(pdf|xml)$/i.test(n);
+}
+/* Que documento da nota é este arquivo: "NFA" (PDF), "XML", "TICKET" ou "".
+   Um ticket pode ter DUAS notas (carga acima do limite de uma nota): cada
+   uma com seu PDF e seu XML, todos na mesma pasta. */
+function _tipoDoc(nome){
+  var n=s(nome);
+  if(/^TICKET/i.test(n)) return "TICKET";
+  if(!_ehArquivoNFA(n)) return "";
+  return /\.xml$/i.test(n) ? "XML" : "NFA";
+}
+function _numeroNoNome(nome){
+  var m=/\.(\d{4,})\.(pdf|xml)$/i.exec(s(nome)) || /^NFA-(\d{4,})/i.exec(s(nome));
+  return m ? m[1] : "";
 }
 function _nomeArquivoNFA(dataTransporte,produto,numero){
   var m=/^(\d{2})\/(\d{2})\/(\d{4})/.exec(s(dataTransporte)) ||
@@ -769,12 +782,17 @@ function enviarDocsTicket(p){
     var pasta=pCtr?_pastaMaisAntiga(pCtr,chave):null;
     if(!pasta) return{ok:false,erro:"Pasta da pesagem não encontrada: "+contrato+"/"+chave};
 
-    var anexos=[], links={pasta:pasta.getUrl(),nfa:"",ticket:""};
+    /* nfa/ticket (um só) ficam por compatibilidade; a verdade está em 'lista':
+       um ticket com duas notas tem dois PDFs e dois XMLs, e todos vão. */
+    var anexos=[], links={pasta:pasta.getUrl(),nfa:"",ticket:"",lista:[]};
     var it=pasta.getFiles();
     while(it.hasNext()){
-      var f=it.next(), nm=f.getName();
-      if(_ehArquivoNFA(nm)){ links.nfa=f.getUrl(); anexos.push(f.getBlob()); }
-      else if(/^TICKET/i.test(nm)){ links.ticket=f.getUrl(); anexos.push(f.getBlob()); }
+      var f=it.next(), nm=f.getName(), tipo=_tipoDoc(nm);
+      if(!tipo) continue;
+      if(tipo==="NFA") links.nfa=f.getUrl();
+      if(tipo==="TICKET") links.ticket=f.getUrl();
+      links.lista.push({tipo:tipo,nome:nm,numero:_numeroNoNome(nm),url:f.getUrl()});
+      anexos.push(f.getBlob());
     }
     if(!anexos.length) return{ok:false,erro:"Nenhum NFA/TICKET nesta pasta ainda"};
 
@@ -901,14 +919,15 @@ function baixarDocsTicket(p){
     var arqs=[], it=pasta.getFiles(), bytesTotal=0;
     while(it.hasNext()){
       var f=it.next(), nm=f.getName();
-      if(!_ehArquivoNFA(nm) && !/^TICKET/i.test(nm)) continue;
+      var tipoDoc=_tipoDoc(nm);
+      if(!tipoDoc) continue;                       // NFA (PDF), XML e TICKET — nada mais
       var b=f.getBlob(), by=b.getBytes();
       // Teto de segurança: a resposta do Apps Script é um texto só, e base64
       // engorda ~33%. Passando disso, melhor mandar o link do que estourar.
       if(bytesTotal+by.length > 18*1024*1024) continue;
       bytesTotal+=by.length;
-      arqs.push({nome:_nomeDocEnvio(nm,placa,data),
-        mime:b.getContentType()||"application/pdf",
+      arqs.push({nome:_nomeDocEnvio(nm,placa,data),tipo:tipoDoc,
+        mime:b.getContentType()||(tipoDoc==="XML"?"text/xml":"application/pdf"),
         base64:Utilities.base64Encode(by),
         url:f.getUrl()});
     }
@@ -1547,10 +1566,14 @@ function listarPesagens(){
     for(var k=0;k<nfaRows.length;k++){
       var tk=s(nfaRows[k][1]);
       if(!tk) continue;
-      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",xml:"",sacas:0,kg:0,qtd:0};
+      if(!ticketsComNFA[tk]) ticketsComNFA[tk]={numero:"",drive:"",xml:"",sacas:0,kg:0,qtd:0,lista:[]};
       ticketsComNFA[tk].numero=s(nfaRows[k][0]);
       ticketsComNFA[tk].drive=s(nfaRows[k][7]);
       if(nCn>=11 && s(nfaRows[k][10])) ticketsComNFA[tk].xml=s(nfaRows[k][10]);
+      // cada nota do ticket, com o seu PDF e o seu XML (um ticket pode ter duas)
+      ticketsComNFA[tk].lista.push({numero:s(nfaRows[k][0]),drive:s(nfaRows[k][7]),
+        xml:(nCn>=11?s(nfaRows[k][10]):""),
+        kg:Math.round((nCn>=10&&n(nfaRows[k][9]))||n(nfaRows[k][5])*60)});
       var scLin=n(nfaRows[k][5]);
       var kgLin=nCn>=10?n(nfaRows[k][9]):0;      // kg exato (NFAs novas)
       if(!kgLin) kgLin=scLin*60;                 // NFAs antigas: converte das sacas
@@ -1587,6 +1610,7 @@ function listarPesagens(){
       nfa_numero:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].numero:"",
       nfa_drive_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].drive:"", // [NFA-AUTORIZACAO]
       nfa_xml_url:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].xml:"",     // XML arquivado na pasta da pesagem
+      nfa_lista:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].lista:[],      // todas as notas do ticket
       nfa_sacas:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].sacas:0,      // sacas já emitidas em NFA (soma)
       nfa_kg:ticketsComNFA[idTicket]?Math.round(ticketsComNFA[idTicket].kg):0,// kg já emitidos em NFA (soma)
       nfa_qtd:ticketsComNFA[idTicket]?ticketsComNFA[idTicket].qtd:0,          // quantas NFAs o ticket já tem

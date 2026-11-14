@@ -1608,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v198"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v199"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -5382,24 +5382,49 @@ async function rearquivarNoDrive(){
    para a MESMA pasta da pesagem e com o MESMO nome do PDF, mudando só a
    extensão — os dois ficam lado a lado. O card só aparece depois que a nota
    foi emitida: sem o número, não dá nem para nomear o arquivo. */
+/* As notas de um ticket. Carga acima do limite de uma nota sai em DUAS, e
+   cada uma tem o seu XML: o card mostra uma linha por nota. Ticket antigo,
+   sem a lista do servidor, cai no número único de sempre. */
+function _notasDoTicket(o){
+  var lista=(o&&Array.isArray(o.nfa_lista))?o.nfa_lista.filter(function(x){return x&&x.numero;}):[];
+  if(!lista.length && o&&o.nfa_numero) lista=[{numero:String(o.nfa_numero),xml:o.nfa_xml_url||'',drive:o.nfa_drive_url||''}];
+  return lista;
+}
+var _xmlNumEscolhido='';
+function _escolherXML(numero){
+  _xmlNumEscolhido=String(numero||'');
+  var inp=document.getElementById('tk-xml-inp'); if(inp) inp.click();
+}
 function _renderXMLTicket(o){
   var card=document.getElementById('tk-xml-c');
   if(!card) return;
   var adm=!!(usr && usr.nivel==='admin');
-  var num=(o&&o.nfa_numero)||'';
-  var url=(o&&o.nfa_xml_url)||'';
-  card.style.display=(num&&(adm||url))?'block':'none';
+  var notas=_notasDoTicket(o);
+  var temXml=notas.some(function(x){return !!x.xml;});
+  card.style.display=(notas.length&&(adm||temXml))?'block':'none';
   var info=document.getElementById('tk-xml-info');
-  if(info){
-    info.innerHTML = url
-      ? '✅ Anexado · <a href="'+url+'" target="_blank" rel="noopener" style="color:var(--g1);font-weight:700;text-decoration:underline">abrir</a>'
-      : 'Nenhum anexado — nota '+num+'.';
-  }
   var btn=document.getElementById('tk-xml-btn');
-  if(btn){
-    btn.style.display=adm?'block':'none';
-    btn.textContent=url?'🧾 Trocar o XML anexado':'🧾 Anexar XML da nota';
+  if(!notas.length){ if(info) info.innerHTML=''; if(btn) btn.style.display='none'; return; }
+  if(notas.length===1){
+    var n1=notas[0];
+    if(info) info.innerHTML = n1.xml
+      ? '✅ Anexado · <a href="'+n1.xml+'" target="_blank" rel="noopener" style="color:var(--g1);font-weight:700;text-decoration:underline">abrir</a>'
+      : 'Nenhum anexado — nota '+n1.numero+'.';
+    if(btn){
+      btn.style.display=adm?'block':'none';
+      btn.textContent=n1.xml?'🧾 Trocar o XML anexado':'🧾 Anexar XML da nota';
+      btn.onclick=function(){ _escolherXML(n1.numero); };
+    }
+    return;
   }
+  // duas ou mais notas: uma linha por nota, cada uma com o seu botão
+  if(btn) btn.style.display='none';
+  if(info) info.innerHTML=notas.map(function(x){
+    var esq='<b>Nota '+x.numero+'</b>'+(x.kg?' · '+Number(x.kg).toLocaleString('pt-BR')+' kg':'')+'<br>'+
+      (x.xml?'✅ XML anexado · <a href="'+x.xml+'" target="_blank" rel="noopener" style="color:var(--g1);font-weight:700;text-decoration:underline">abrir</a>':'<span style="color:var(--a1)">sem XML</span>');
+    var dir=adm?'<button class="btn btns bsm" onclick="_escolherXML(\''+String(x.numero).replace(/\D/g,'')+'\')" style="white-space:nowrap">'+(x.xml?'🧾 Trocar':'🧾 Anexar')+'</button>':'';
+    return '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:7px 0;border-top:1px dashed var(--brd)"><div style="font-size:12px;line-height:1.5">'+esq+'</div>'+dir+'</div>';
+  }).join('');
 }
 async function anexarXMLnota(inp){
   var f=inp&&inp.files&&inp.files[0];
@@ -5408,11 +5433,22 @@ async function anexarXMLnota(inp){
   if(!(usr && usr.nivel==='admin')){ toast('🔒 Apenas administradores'); return; }
   if(!SHEETS_URL||!navigator.onLine){ toast('📵 Sem conexão — anexar exige internet'); return; }
   var o=atual; if(!o||!o.id){ toast('⚠️ Abra o ticket primeiro'); return; }
-  if(!o.nfa_numero){ toast('⚠️ A nota precisa estar emitida'); return; }
+  // a nota escolhida na linha (ticket com duas notas) ou a única do ticket
+  var numero=String(_xmlNumEscolhido||o.nfa_numero||'').replace(/\D/g,'');
+  _xmlNumEscolhido='';
+  if(!numero){ toast('⚠️ A nota precisa estar emitida'); return; }
   if(!/\.xml$/i.test(f.name)){ toast('⚠️ Escolha o arquivo .xml da nota'); return; }
+  // Conferência barata que evita o erro mais provável: o XML da outra nota.
+  // O número da nota aparece dentro do XML (<nNF>); se estiver lá e for outro, avisa.
+  try{
+    var txtXml=await f.text();
+    var mNF=/<nNF>\s*(\d+)\s*<\/nNF>/i.exec(txtXml);
+    if(mNF && mNF[1]!==numero && !confirm('Este XML é da nota '+mNF[1]+', mas você escolheu a nota '+numero+'.\n\nAnexar mesmo assim?')) return;
+  }catch(e){}
   var btn=document.getElementById('tk-xml-btn');
   var rot=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='⏳ Enviando...'; }
+  toast('⏳ Enviando o XML da nota '+numero+'...');
   try{
     // XML é texto: vai inteiro, sem passar por comprimirImagem
     var b64=await new Promise(function(res,rej){
@@ -5422,7 +5458,7 @@ async function anexarXMLnota(inp){
       r.readAsDataURL(f);
     });
     if(!b64) throw new Error('arquivo vazio');
-    var dados={ticket_id:o.id, numero_nfa:String(o.nfa_numero),
+    var dados={ticket_id:o.id, numero_nfa:numero,
       contrato:(o.numOrdem||'').replace(/[^a-zA-Z0-9.\-]/g,''),
       data:(o.dataEntrada||'').replace(/\//g,'-'),
       placa:(o.placa||'').replace(/[^a-zA-Z0-9]/g,''), base64:b64};
@@ -5430,10 +5466,16 @@ async function anexarXMLnota(inp){
       body:JSON.stringify({acao:'arquivarXMLnfa',dados:dados,token:TOKEN})});
     var j=JSON.parse(await r1.text());
     if(!j.ok) throw new Error(j.erro||'o servidor recusou');
-    o.nfa_xml_url=j.url;
-    var i=(cloud||[]).findIndex(function(x){return x.id===o.id;}); if(i>=0) cloud[i].nfa_xml_url=j.url;
-    var k=(DB.ordens||[]).findIndex(function(x){return x.id===o.id;}); if(k>=0){ DB.ordens[k].nfa_xml_url=j.url; saveDB(); }
-    try{ addLog('🧾 XML da nota '+o.nfa_numero+' anexado — '+(o.placa||o.id),'ok'); }catch(e){}
+    // reflete na nota certa da lista (e no campo único, para ticket de uma nota)
+    var aplicar=function(t){
+      if(!t) return;
+      if(Array.isArray(t.nfa_lista)) t.nfa_lista.forEach(function(x){ if(x&&String(x.numero)===numero) x.xml=j.url; });
+      if(String(t.nfa_numero||'')===numero || !Array.isArray(t.nfa_lista) || t.nfa_lista.length<=1) t.nfa_xml_url=j.url;
+    };
+    aplicar(o);
+    aplicar((cloud||[]).find(function(x){return x.id===o.id;}));
+    var k=(DB.ordens||[]).findIndex(function(x){return x.id===o.id;}); if(k>=0){ aplicar(DB.ordens[k]); saveDB(); }
+    try{ addLog('🧾 XML da nota '+numero+' anexado — '+(o.placa||o.id),'ok'); }catch(e){}
     // O arquivo subiu mesmo quando a linha da nota ainda não existe na planilha
     toast(j.na_planilha ? '✅ XML anexado!' : '✅ XML no Drive (a nota ainda não está na planilha)');
   }catch(e){
@@ -9467,8 +9509,8 @@ function abrirEnviarDocs(){
       '<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">'+d.placa+' · '+(d.contrato||'sem contrato')+' · '+d.kg.toLocaleString('pt-BR')+' kg</div>'+
       '<div class="f"><label>E-mail do destinatário</label><input id="env-email" value="'+String(d.email).replace(/"/g,'&quot;')+'" placeholder="nome@empresa.com.br"></div>'+
       '<button onclick="enviarDocsEmail()" style="width:100%;margin-top:4px;padding:12px;border:none;border-radius:10px;background:#1a3a6c;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">✉️ Enviar por e-mail (com anexos)</button>'+
-      '<div style="font-size:11px;color:var(--ink3);margin:14px 0 6px">WhatsApp — com os PDFs anexados na conversa</div>'+
-      '<button onclick="enviarDocsAnexo()" style="width:100%;margin-bottom:8px;padding:12px;border:none;border-radius:10px;background:#128c7e;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">📎 Mandar os PDFs anexados</button>'+
+      '<div style="font-size:11px;color:var(--ink3);margin:14px 0 6px">WhatsApp — com os arquivos anexados na conversa (PDF e XML de cada nota, mais o ticket)</div>'+
+      '<button onclick="enviarDocsAnexo()" style="width:100%;margin-bottom:8px;padding:12px;border:none;border-radius:10px;background:#128c7e;color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:\'Inter\',sans-serif">📎 Mandar PDFs e XMLs anexados</button>'+
       '<div style="font-size:11px;color:var(--ink3);margin:10px 0 6px;border-top:1px dashed var(--brd);padding-top:10px">Ou abrir a conversa só com os links</div>'+
       '<div id="env-wa-btns"></div>'+
       '<div id="env-status" style="font-size:11px;color:var(--ink3);margin-top:10px;text-align:center"></div>'+
@@ -9594,13 +9636,25 @@ function enviarDocsWA(i){
   const alvo=_envAlvos[i]||{num:''};
   Promise.resolve(_envLinks||_buscarLinksDocs()).then(function(links){
     links=links||_envLinks||{};
+    // Um ticket pode ter duas notas: vai uma linha por documento (PDF e XML de
+    // cada nota, mais o ticket). Servidor antigo, sem 'lista', cai nos campos únicos.
+    let docs='';
+    if(Array.isArray(links.lista)&&links.lista.length){
+      const ordem={NFA:0,XML:1,TICKET:2};
+      links.lista.slice().sort((a,b)=>(ordem[a.tipo]-ordem[b.tipo])||String(a.numero).localeCompare(String(b.numero)))
+        .forEach(x=>{
+          const rot=x.tipo==='TICKET'?'🎫 Ticket':(x.tipo==='XML'?'🧾 XML':'📄 NFA')+(x.numero?' nº '+x.numero:'');
+          docs+=rot+': '+x.url+'\n';
+        });
+    } else {
+      docs=(links.nfa?('📄 NFA: '+links.nfa+'\n'):'')+(links.ticket?('🎫 Ticket: '+links.ticket+'\n'):'');
+    }
     const txt='📄 *NFA + Ticket — '+d.placa+'*\n'+
       (d.contrato?('Contrato: '+d.contrato+'\n'):'')+
       (d.motorista?('Motorista: '+d.motorista+'\n'):'')+
       'Carga: '+d.kg.toLocaleString('pt-BR')+' kg\n\n'+
-      (links.nfa?('📄 NFA: '+links.nfa+'\n'):'')+
-      (links.ticket?('🎫 Ticket: '+links.ticket+'\n'):'')+
-      (!links.nfa&&!links.ticket&&links.pasta?('📂 Documentos: '+links.pasta+'\n'):'')+
+      docs+
+      (!docs&&links.pasta?('📂 Documentos: '+links.pasta+'\n'):'')+
       '\n_Fazenda Água Viva_';
     const url='https://wa.me/'+(alvo.num||'')+'?text='+encodeURIComponent(txt);
     window.open(url,'_blank');
