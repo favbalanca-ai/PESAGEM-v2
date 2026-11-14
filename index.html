@@ -1608,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v200"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v201"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -9643,14 +9643,35 @@ function enviarDocsAnexo(){
         return;
       }
       if(j.wa_escritorio) _envWaEsc=j.wa_escritorio;
-      const arqs=(j.arquivos||[]).map(function(a){
+      /* Ordem: ticket primeiro, depois cada nota com o PDF seguido do XML.
+         O WhatsApp cola o texto na PRIMEIRA bolha — assim ele cai no ticket,
+         que é a capa do conjunto — e quem recebe vê cada nota com o seu XML
+         logo embaixo, em vez dos PDFs de um lado e os XMLs do outro. */
+      const numDe=function(a){ const m=/(\d{6,})/.exec(a.nome||''); return m?m[1]:''; };
+      const peso=function(a){ const t=a.tipo||(/\.xml$/i.test(a.nome)?'XML':(/TICKET/i.test(a.nome)?'TICKET':'NFA'));
+        return (t==='TICKET'?'0':'1'+numDe(a))+(t==='XML'?'b':'a'); };
+      const lista=(j.arquivos||[]).slice().sort(function(a,b){ return peso(a)<peso(b)?-1:peso(a)>peso(b)?1:0; });
+      const arqs=lista.map(function(a){
         return new File([_bytesDeB64(a.base64)], a.nome, {type:a.mime||'application/pdf'});
       });
       if(!arqs.length){ _statusEnv('⚠️ nenhum PDF na pasta da pesagem'); return; }
-      const texto='📄 *NFA + Ticket — '+d.placa+'*\n'+
+      // o texto diz o que está no conjunto — quem recebe confere se chegou tudo
+      const notas=[]; lista.forEach(function(a){ const n=numDe(a); if(n&&(a.tipo||'')!=='TICKET'&&notas.indexOf(n)<0) notas.push(n); });
+      const temTicket=lista.some(function(a){ return (a.tipo||'')==='TICKET'||/TICKET/i.test(a.nome); });
+      const resumo=[];
+      if(temTicket) resumo.push('🎫 Ticket de pesagem');
+      notas.forEach(function(n){
+        const pdf=lista.some(function(a){ return numDe(a)===n&&!/\.xml$/i.test(a.nome); });
+        const xml=lista.some(function(a){ return numDe(a)===n&&/\.xml$/i.test(a.nome); });
+        resumo.push('📄 NFA '+n+(pdf&&xml?' (PDF + XML)':xml?' (XML)':' (PDF)'));
+      });
+      const texto='🚚 *'+d.placa+'* — '+(d.data||'').replace(/-/g,'/')+'\n'+
         (d.contrato?('Contrato: '+d.contrato+'\n'):'')+
         (d.motorista?('Motorista: '+d.motorista+'\n'):'')+
-        'Carga: '+d.kg.toLocaleString('pt-BR')+' kg\n\n_Fazenda Água Viva_';
+        'Carga: '+d.kg.toLocaleString('pt-BR')+' kg\n\n'+
+        '📎 '+arqs.length+' arquivo(s) desta carga'+(notas.length>1?' ('+notas.length+' notas)':'')+':\n'+
+        resumo.map(function(l){ return '• '+l; }).join('\n')+
+        '\n\n_Fazenda Água Viva_';
       const pode=function(lista){ try{ return !!(navigator.canShare && navigator.canShare({files:lista})); }catch(e){ return false; } };
       const compartilhar=function(lista,rotulo){
         _statusEnv('📎 escolha o WhatsApp e o contato...');
