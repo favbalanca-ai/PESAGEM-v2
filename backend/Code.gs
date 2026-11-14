@@ -938,13 +938,24 @@ function baixarDocsTicket(p){
 /* Na pasta, o ticket se chama só TICKET.pdf — na conversa, todos chegariam com
    o mesmo nome. A nota já vai nomeada (2026.10.23.SOJA.28512778.pdf), e nessa
    não se mexe: ela já diz data, produto e número. */
+/* Nome do arquivo NA CONVERSA: a placa na frente de todos.
+   No WhatsApp cada anexo vira uma bolha, o texto fica só na primeira e a
+   ordem é a que o aparelho quiser. O que amarra os cinco ao mesmo ticket é o
+   nome que aparece em cada bolha — por isso todos começam pela placa:
+     PLF1D04-TICKET-13-11-2026.pdf
+     PLF1D04-NFA-28622570.pdf · PLF1D04-XML-28622570.xml
+     PLF1D04-NFA-28622579.pdf · PLF1D04-XML-28622579.xml
+   Na pasta do Drive os nomes continuam os de sempre; isto é só a cópia enviada. */
 function _nomeDocEnvio(nome,placa,data){
-  if(_ehArquivoNFA(nome) && /\d{4,}/.test(nome)) return nome;
-  var ext=(nome.match(/\.[A-Za-z0-9]+$/)||[".pdf"])[0];
+  var tipo=_tipoDoc(nome), ext=(nome.match(/\.[A-Za-z0-9]+$/)||[".pdf"])[0];
+  var pl=s(placa)||"SEM-PLACA";
+  if(tipo==="TICKET") return (pl+"-TICKET"+(data?"-"+data:"")+ext).replace(/[\/\\:*?"<>|]/g,"-");
+  if(tipo==="NFA"||tipo==="XML"){
+    var num=_numeroNoNome(nome);
+    return pl+"-"+tipo+(num?"-"+num:"")+ext;
+  }
   var base=nome.replace(/\.[A-Za-z0-9]+$/,"");
-  var pedacos=[base,placa];
-  if(data) pedacos.push(data);
-  return pedacos.join("-").replace(/[\/\\:*?"<>|]/g,"-")+ext;
+  return (pl+"-"+base+(data?"-"+data:"")+ext).replace(/[\/\\:*?"<>|]/g,"-");
 }
 
 // numeroInformado: o número já resolvido por quem chamou (lido na tela da
