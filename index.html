@@ -1608,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v202"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v203"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -6485,7 +6485,25 @@ async function pingBackend(){
     if(!j.erro) return {ok:false,ms:ms,
       msg:'O servidor recusou sem dizer o motivo — quase sempre é autorização pendente: abra o Apps Script, execute uma função e aceite as permissões, depois Implantar → Nova versão'};
     return {ok:false,msg:'Servidor recusou: '+j.erro,ms:ms};
-  }catch(e){ return {ok:false,msg:'Sem resposta do servidor: '+e.message,ms:Date.now()-t0}; }
+  }catch(e){
+    /* "Load failed" (iPhone) / "Failed to fetch" (Android) não diz de qual lado
+       está o problema. Uma segunda batida em modo opaco ("no-cors") só falha
+       quando o aparelho NÃO alcança o servidor; se ela passa, o servidor está
+       lá e o que não pôde ser lido foi a resposta — e isso, logo depois de
+       publicar, é a implantação pedindo login ("Quem pode acessar" errado).
+       É a diferença entre mexer no Wi-Fi e mexer no Apps Script. */
+    const ms=Date.now()-t0;
+    if(/load failed|failed to fetch|networkerror|network request failed/i.test(String(e.message||''))){
+      try{
+        await fetch(SHEETS_URL,{mode:'no-cors',cache:'no-store'});
+        return {ok:false,ms:ms,
+          msg:'O servidor está no ar, mas o app não consegue ler a resposta — quase sempre a implantação está pedindo login. No Apps Script: Implantar → Gerenciar implantações → editar → "Quem pode acessar: Qualquer pessoa" → Implantar'};
+      }catch(_){
+        return {ok:false,ms:ms,msg:'O aparelho não alcança o servidor (sem rota até o Google) — confira Wi-Fi/dados e tente de novo'};
+      }
+    }
+    return {ok:false,msg:'Sem resposta do servidor: '+e.message,ms:ms};
+  }
 }
 /* Traduz a página que o Apps Script devolveu no lugar do JSON */
 function _explicarRespostaBackend(txt,status){
