@@ -1608,7 +1608,7 @@ const SHEETS_URL = "https://script.google.com/macros/s/AKfycbwphW8C1gHcsb1YKPAGm
    o que viaja nelas é que deixou de ser um segredo compartilhado. */
 let TOKEN = '';
 const SESS_KEY = 'psess-v2';
-const APP_VER    = "v201"; // versão exibida no Diagnóstico (acompanha o cache do SW)
+const APP_VER    = "v202"; // versão exibida no Diagnóstico (acompanha o cache do SW)
 const SYNC_TAG   = "fav-sync-pendentes";
 
 /* ══ INDEXEDDB — fila compartilhada com o Service Worker ══════ */
@@ -3152,7 +3152,12 @@ ${ctLines}
 /* ══ EXIBIR BOTÃO DASHBOARD PARA ADMIN ════════════════════════ */
 function toggleAdminUI(){
   const isAdm=usr&&usr.nivel==='admin';
-  document.querySelectorAll('.adm-only').forEach(el=>el.style.display=isAdm?'flex':'none');
+  /* 'flex' serve para os botões; num CARD vira linha: o título, cada texto e
+     cada botão viram colunas magras lado a lado — foi o que o Diagnóstico
+     mostrou no celular. Card é bloco. */
+  document.querySelectorAll('.adm-only').forEach(el=>{
+    el.style.display = !isAdm ? 'none' : (el.classList.contains('card') ? 'block' : 'flex');
+  });
 }
 
 /* ── Saldo a carregar por contrato, em kg ──────────────────────────
